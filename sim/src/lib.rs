@@ -25,4 +25,4 @@ pub use ids::{EntityId, HostId, TileId};
 pub use pos::Pos;
 pub use renderer::{DeckView, NetView, RenderView, Renderer, StreetView};
 pub use scheduler::Scheduler;
-pub use world::{Intent, Delta, Event, World};
+pub use world::{Delta, Dir, Event, Intent, Verb, World};

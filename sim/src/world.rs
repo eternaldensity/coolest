@@ -85,6 +85,11 @@ impl World {
         self.beings.get(&id.0).map(|b| (b.food, b.mood, b.money, b.rations))
     }
 
+    /// Next scheduled act tick (server scheduler jumps the clock here).
+    pub fn next_at(&self, id: EntityId) -> u64 {
+        self.beings.get(&id.0).map(|b| b.next_at).unwrap_or(self.tick)
+    }
+
     pub fn apply(&mut self, intent: &Intent) -> Result<(Delta, Vec<Event>), SimError> {
         let b = self.beings.get_mut(&intent.actor.0)
             .ok_or(SimError::new("unknown_actor", "spawned entity", "missing"))?;

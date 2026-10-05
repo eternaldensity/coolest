@@ -524,7 +524,7 @@ mod tests {
         assert!(!h.strike(CellPos(2, 2)).unwrap());
         assert!(!h.strike(CellPos(3, 2)).unwrap());
         assert!(h.strike(CellPos(4, 2)).unwrap());
-        assert!(h.progs.get(&10).is_none());
+        assert!(!h.progs.contains_key(&10));
     }
 
     #[test]
@@ -573,7 +573,7 @@ mod tests {
         h.set_maker(EntityId(61), vec![Res::Loop], 2).unwrap();
         h.produce(EntityId(61), Res::Loop, 1).unwrap(); // stock 2
         assert!(h.card_strike(EntityId(1), CellPos(4, 2), Some((Res::Loop, 2)), None).unwrap());
-        assert!(h.progs.get(&60).is_none()); // headshot kills regardless of dmg
+        assert!(!h.progs.contains_key(&60)); // headshot kills regardless of dmg
         // Unfunded consume rejected.
         h.load(EntityId(62), EntityId(2), CellPos(6, 6), 2, 1).unwrap();
         assert!(h.card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 9)), None).is_err());
