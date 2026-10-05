@@ -1,0 +1,11 @@
+[package]
+name = "client-web"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+sim = { path = "../sim" }
+
+[[bin]]
+name = "demo"
+path = "src/main.rs"

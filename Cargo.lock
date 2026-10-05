@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "client-web"
+version = "0.0.1"
+dependencies = [
+ "sim",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
