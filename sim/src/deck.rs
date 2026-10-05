@@ -4,9 +4,55 @@ use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 
 /// M2a Deck arena: one host's RAM grid + programs.
-/// Position stays grid-based (4-dir); cards/resources/trace land in M2b/c.
+/// M2b adds cards/resources/paired-stats; M2c adds trace/vulns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellPos(pub u8, pub u8);
+
+/// M2b resource types (2024): programming components creatures produce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum Res {
+    Loop,
+    Data,
+    Algo,
+}
+
+/// M2b paired Deck stats (2024). Attacks target the negative pole, next-turn only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckStats {
+    pub dedication: u8,
+    pub focus: u8,
+    pub stability: u8,
+    pub courage: u8,
+    pub clarity: u8,
+}
+
+impl Default for DeckStats {
+    fn default() -> Self {
+        Self { dedication: 10, focus: 10, stability: 10, courage: 10, clarity: 10 }
+    }
+}
+
+impl DeckStats {
+    pub fn lowest(&self) -> &'static str {
+        let mut best = ("dedication", self.dedication);
+        for (n, v) in [("focus", self.focus), ("stability", self.stability),
+                       ("courage", self.courage), ("clarity", self.clarity)] {
+            if v < best.1 {
+                best = (n, v);
+            }
+        }
+        best.0
+    }
+}
+
+/// M2b next-turn-only effects. Full 2024 table lands incrementally; v1 covers
+/// skip (Distract), shield (tank/avoid), DoT (Freakout→Stability poison).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Fx {
+    SkipNext,
+    ShieldNext(u8),
+    DotNext(u8),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Segment {
@@ -42,11 +88,22 @@ pub struct Host {
     pub cpu_total: u32,
     cells: BTreeMap<(u8, u8), Segment>,
     pub progs: BTreeMap<u64, Program>,
+    // M2b: per-program makers (types it can produce + rate), per-owner stocks,
+    // per-program paired stats + pending next-turn effects.
+    makers: BTreeMap<u64, (Vec<Res>, u8)>,
+    stocks: BTreeMap<u64, BTreeMap<Res, u32>>,
+    stats: BTreeMap<u64, DeckStats>,
+    effects: BTreeMap<u64, Vec<Fx>>,
 }
 
 impl Host {
     pub fn new(id: HostId, w: u8, h: u8, cpu_total: u32) -> Self {
-        Self { id, w, h, cpu_total, cells: BTreeMap::new(), progs: BTreeMap::new() }
+        Self {
+            id, w, h, cpu_total,
+            cells: BTreeMap::new(), progs: BTreeMap::new(),
+            makers: BTreeMap::new(), stocks: BTreeMap::new(),
+            stats: BTreeMap::new(), effects: BTreeMap::new(),
+        }
     }
 
     pub fn cpu_load(&self) -> u32 {
@@ -173,6 +230,169 @@ impl Host {
     pub fn owner_of(&self, prog: EntityId) -> Option<EntityId> {
         self.progs.get(&prog.0).map(|p| p.owner)
     }
+
+    // ---- M2b: resources, paired stats, next-turn effects ----
+
+    /// Declare what a program can produce (1-2 types) and at what rate.
+    pub fn set_maker(&mut self, prog: EntityId, makes: Vec<Res>, rate: u8) -> Result<(), SimError> {
+        if !self.progs.contains_key(&prog.0) {
+            return Err(SimError::new("no_prog", "live program", "missing"));
+        }
+        self.makers.insert(prog.0, (makes, rate.max(1)));
+        Ok(())
+    }
+
+    /// Produce `base` units of `res` into the owner's stock.
+    /// Multiplied by rate only if the program's type list includes it.
+    pub fn produce(&mut self, prog: EntityId, res: Res, base: u32) -> Result<u32, SimError> {
+        let p = self.progs.get(&prog.0)
+            .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+        let mult = match self.makers.get(&prog.0) {
+            Some((makes, rate)) if makes.contains(&res) => *rate as u32,
+            _ => 1,
+        };
+        let amount = base * mult;
+        *self.stocks.entry(p.owner.0).or_default().entry(res).or_insert(0) += amount;
+        Ok(amount)
+    }
+
+    pub fn stock(&self, owner: EntityId, res: Res) -> u32 {
+        self.stocks.get(&owner.0).and_then(|m| m.get(&res)).copied().unwrap_or(0)
+    }
+
+    fn spend(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {
+        let e = self.stocks.entry(owner.0).or_default().entry(res).or_insert(0);
+        if *e < n {
+            return Err(SimError::new("no_resource", "stocked units", "short"));
+        }
+        *e -= n;
+        Ok(())
+    }
+
+    /// Card strike: base 1 segment + `bonus` segments, funded by consuming stock.
+    /// `consume` spends N of one type for +N damage; `consume_all` spends the whole
+    /// pile of another type for +pile damage. Shield absorbs first.
+    pub fn card_strike(
+        &mut self,
+        owner: EntityId,
+        target: CellPos,
+        consume: Option<(Res, u32)>,
+        consume_all: Option<Res>,
+    ) -> Result<bool, SimError> {
+        let mut dmg: u32 = 1;
+        if let Some((res, n)) = consume {
+            self.spend(owner, res, n)?;
+            dmg += n;
+        }
+        if let Some(res) = consume_all {
+            let pile = self.stock(owner, res);
+            self.spend(owner, res, pile)?;
+            dmg += pile;
+        }
+        self.deal_damage(target, dmg)
+    }
+
+    fn deal_damage(&mut self, target: CellPos, mut dmg: u32) -> Result<bool, SimError> {
+        let seg = self.cells.get(&(target.0, target.1)).cloned()
+            .ok_or(SimError::new("no_target", "program cell", "empty"))?;
+        let victim = seg.prog;
+        // Shield absorbs segment damage first.
+        if let Some(fx) = self.effects.get_mut(&victim.0) {
+            for f in fx.iter_mut() {
+                if let Fx::ShieldNext(s) = f {
+                    let absorb = (*s as u32).min(dmg);
+                    *s -= absorb as u8;
+                    dmg -= absorb;
+                    break;
+                }
+            }
+        }
+        if seg.is_head {
+            if dmg >= 1 {
+                self.remove_program(victim);
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        if let Some(p) = self.progs.get_mut(&victim.0) {
+            // Remove up to `dmg` tail segments nearest the head.
+            let mut removed = 0;
+            while removed < dmg {
+                if let Some(c) = p.tail.pop_front() {
+                    self.cells.remove(&(c.0, c.1));
+                    removed += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Distract: victim skips its next act. Freakout: DoT ticks on `end_turn`.
+    pub fn apply_fx(&mut self, prog: EntityId, fx: Fx) -> Result<(), SimError> {
+        if !self.progs.contains_key(&prog.0) {
+            return Err(SimError::new("no_prog", "live program", "missing"));
+        }
+        self.effects.entry(prog.0).or_default().push(fx);
+        Ok(())
+    }
+
+    pub fn is_skipped(&self, prog: EntityId) -> bool {
+        self.effects.get(&prog.0).map(|v| v.contains(&Fx::SkipNext)).unwrap_or(false)
+    }
+
+    /// End of a program's turn: DoT eats one tail segment (Stability poison),
+    /// then all next-turn effects expire.
+    pub fn end_turn(&mut self, prog: EntityId) {
+        if let Some(fx) = self.effects.remove(&prog.0) {
+            let dots: u32 = fx.iter().filter_map(|f| match f {
+                Fx::DotNext(n) => Some(*n as u32),
+                _ => None,
+            }).sum();
+            for _ in 0..dots {
+                if let Some(p) = self.progs.get_mut(&prog.0) {
+                    if let Some(c) = p.tail.pop_back() {
+                        self.cells.remove(&(c.0, c.1));
+                    } else {
+                        self.remove_program(prog);
+                        break;
+                    }
+                }
+            }
+            // SkipNext/ShieldNext expire unconsumed: next-turn-only per 2024.
+        }
+    }
+
+    /// Damage a paired stat directly (Sway/Distract/... pole). Floor 0.
+    pub fn damage_stat(&mut self, prog: EntityId, stat: &str, n: u8) -> Result<(), SimError> {
+        let s = self.stats.entry(prog.0).or_default();
+        let v = match stat {
+            "dedication" => &mut s.dedication,
+            "focus" => &mut s.focus,
+            "stability" => &mut s.stability,
+            "courage" => &mut s.courage,
+            "clarity" => &mut s.clarity,
+            _ => return Err(SimError::new("no_stat", "known pole", "bad name")),
+        };
+        *v = v.saturating_sub(n);
+        Ok(())
+    }
+
+    /// Patch card: heal the lowest stat by `n` (cap 100... stats cap at 255 u8; soft cap 20).
+    pub fn heal_lowest(&mut self, prog: EntityId, n: u8) -> Result<&'static str, SimError> {
+        let s = self.stats.entry(prog.0).or_default();
+        let name = s.lowest();
+        let v = match name {
+            "dedication" => &mut s.dedication,
+            "focus" => &mut s.focus,
+            "stability" => &mut s.stability,
+            "courage" => &mut s.courage,
+            _ => &mut s.clarity,
+        };
+        *v = (*v + n).min(20);
+        Ok(name)
+    }
 }
 
 #[cfg(test)]
@@ -220,5 +440,64 @@ mod tests {
         assert_eq!(h.owner_of(EntityId(41)), Some(EntityId(1)));
         // Takeover on tail rejected.
         assert!(h.takeover(EntityId(40), CellPos(0, 0)).is_err());
+    }
+
+    #[test]
+    fn produce_pays_rate_only_on_match() {
+        let mut h = host();
+        h.load(EntityId(50), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.set_maker(EntityId(50), vec![Res::Loop], 3).unwrap();
+        assert_eq!(h.produce(EntityId(50), Res::Loop, 2).unwrap(), 6);
+        assert_eq!(h.produce(EntityId(50), Res::Data, 2).unwrap(), 2); // off-type: x1
+        assert_eq!(h.stock(EntityId(1), Res::Loop), 6);
+    }
+
+    #[test]
+    fn consume_and_consume_all_scale_damage() {
+        let mut h = host();
+        // Victim len-3.
+        h.load(EntityId(60), EntityId(2), CellPos(2, 2), 3, 1).unwrap();
+        h.step(EntityId(60), CellPos(3, 2)).unwrap();
+        h.step(EntityId(60), CellPos(4, 2)).unwrap();
+        // Attacker funds 2 Loop: base 1 + 2 = 3 segs = full clear via tail cell.
+        h.load(EntityId(61), EntityId(1), CellPos(8, 7), 2, 1).unwrap();
+        h.set_maker(EntityId(61), vec![Res::Loop], 2).unwrap();
+        h.produce(EntityId(61), Res::Loop, 1).unwrap(); // stock 2
+        assert!(h.card_strike(EntityId(1), CellPos(4, 2), Some((Res::Loop, 2)), None).unwrap());
+        assert!(h.progs.get(&60).is_none()); // headshot kills regardless of dmg
+        // Unfunded consume rejected.
+        h.load(EntityId(62), EntityId(2), CellPos(6, 6), 2, 1).unwrap();
+        assert!(h.card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 9)), None).is_err());
+        // Funded tail strike scales: len-1 victim + 1 funded dmg clears tail, head survives.
+        h.step(EntityId(62), CellPos(7, 6)).unwrap(); // len 2
+        h.produce(EntityId(61), Res::Loop, 1).unwrap(); // stock 2 again
+        assert!(!h.card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 1)), None).unwrap());
+        assert_eq!(h.progs[&62].len(), 1);
+    }
+
+    #[test]
+    fn skip_shield_dot_expire_next_turn() {
+        let mut h = host();
+        h.load(EntityId(70), EntityId(1), CellPos(0, 0), 3, 1).unwrap();
+        h.step(EntityId(70), CellPos(1, 0)).unwrap();
+        h.step(EntityId(70), CellPos(2, 0)).unwrap(); // len 3
+        h.apply_fx(EntityId(70), Fx::SkipNext).unwrap();
+        assert!(h.is_skipped(EntityId(70)));
+        h.apply_fx(EntityId(70), Fx::DotNext(1)).unwrap();
+        h.end_turn(EntityId(70)); // DoT eats 1 tail, skip expires
+        assert_eq!(h.progs[&70].len(), 2);
+        assert!(!h.is_skipped(EntityId(70)));
+    }
+
+    #[test]
+    fn stats_damage_and_heal_lowest() {
+        let mut h = host();
+        h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.damage_stat(EntityId(80), "focus", 4).unwrap();
+        assert_eq!(h.stats[&80].focus, 6);
+        let name = h.heal_lowest(EntityId(80), 2).unwrap();
+        assert_eq!(name, "focus");
+        assert_eq!(h.stats[&80].focus, 8);
+        assert!(h.damage_stat(EntityId(80), "bogus", 1).is_err());
     }
 }
