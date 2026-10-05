@@ -41,6 +41,7 @@ pub struct NetGraph {
     nodes: BTreeMap<u64, Node>,
     links: Vec<Link>,
     known: BTreeSet<u64>, // fog-of-war: revealed nodes only
+    firewalls: BTreeMap<u64, BTreeSet<u64>>, // host -> blocked source ids
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +51,23 @@ pub struct Route {
     pub toll_cents: u32,
     pub cap_mbps: u32,
     pub gateway_ok: bool,
+}
+
+impl Route {
+    pub fn hops(&self) -> usize {
+        self.path.len().saturating_sub(1)
+    }
+
+    /// Bounce math (2006): every extra hop buys trace time but costs
+    /// latency + tolls + log surface (one entry per transit host).
+    /// Threshold the Deck trace in M2c should use for this chain.
+    pub fn trace_threshold(&self) -> u32 {
+        4 + 2 * self.hops() as u32
+    }
+
+    pub fn log_surface(&self) -> usize {
+        self.path.len().saturating_sub(1) // each transit appends one log
+    }
 }
 
 impl NetGraph {
@@ -90,6 +108,23 @@ impl NetGraph {
         self.nodes.get_mut(&id.0)
             .map(|n| n.up = up)
             .ok_or(SimError::new("no_node", "known host", "missing"))
+    }
+
+    /// Firewall: block listed source ids from transiting this host.
+    /// Takeover (M2a) is the way through — not extra damage.
+    pub fn set_firewall(&mut self, id: HostId, blocked: &[HostId]) -> Result<(), SimError> {
+        if !self.nodes.contains_key(&id.0) {
+            return Err(SimError::new("no_node", "known host", "missing"));
+        }
+        self.firewalls.insert(id.0, blocked.iter().map(|h| h.0).collect());
+        Ok(())
+    }
+
+    fn firewalled(&self, path: &[HostId], source: HostId) -> bool {
+        // Transit hosts only (not endpoints) filter by source.
+        let mid = if path.len() > 2 { &path[1..path.len() - 1] } else { &[] };
+        mid.iter().any(|h|
+            self.firewalls.get(&h.0).map(|b| b.contains(&source.0)).unwrap_or(false))
     }
 
     /// Damage a wired link only. Laser undamageable, wireless out of scope.
@@ -189,6 +224,9 @@ impl NetGraph {
             .map(|h| self.nodes[&h.0].net).collect();
         let gateway_ok = nets.len() < 2
             || path.iter().any(|h| self.nodes[&h.0].gateway);
+        if self.firewalled(&path, from) {
+            return Err(SimError::new("firewalled", "allowed source", "blocked"));
+        }
         Ok(Route { path, latency_ms: dist[&to.0], toll_cents: toll, cap_mbps: cap, gateway_ok })
     }
 }
@@ -252,5 +290,32 @@ mod tests {
         g.reveal(HostId(3));
         assert!(g.is_known(HostId(3)));
         assert!(g.route(HostId(9), HostId(3)).is_err()); // unknown endpoint
+    }
+
+    #[test]
+    fn firewall_blocks_listed_source_in_transit() {
+        let mut g = tri();
+        g.set_firewall(HostId(2), &[HostId(1)]).unwrap();
+        assert!(g.route(HostId(1), HostId(3)).is_err()); // B filters A
+        // Unlisted source passes.
+        let r = g.route(HostId(2), HostId(3)).unwrap();
+        assert_eq!(r.path, vec![HostId(2), HostId(3)]);
+        assert!(g.set_firewall(HostId(9), &[HostId(1)]).is_err());
+    }
+
+    #[test]
+    fn bounce_math_trades_hops_for_trace_time() {
+        let g = tri();
+        let direct = {
+            let mut g2 = tri();
+            g2.damage_wire(HostId(1), HostId(2)).unwrap();
+            g2.route(HostId(1), HostId(3)).unwrap()
+        };
+        let bounced = g.route(HostId(1), HostId(3)).unwrap();
+        assert_eq!(direct.hops(), 1);
+        assert_eq!(bounced.hops(), 2);
+        assert!(bounced.trace_threshold() > direct.trace_threshold());
+        assert_eq!(bounced.log_surface(), 2); // two transit logs to scrub
+        assert_eq!(bounced.trace_threshold(), 8);
     }
 }
