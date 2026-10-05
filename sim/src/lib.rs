@@ -11,7 +11,7 @@ pub mod scheduler;
 pub mod world;
 
 pub use error::SimError;
-pub use crime::{Act, Alignment, Crime, Record, Standing, trace_evidence, WARRANT_AT};
+pub use crime::{Act, Alignment, Clans, Crime, License, Record, Standing, trace_evidence, LICENSE_KILLS, WARRANT_AT};
 pub use deck::{CellPos, Host};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
 pub use net::{LinkKind, NetGraph, NetKind, Route};
