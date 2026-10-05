@@ -103,6 +103,25 @@ impl World {
         }
         h
     }
+
+    pub fn save_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
+    }
+
+    pub fn load_json(s: &str) -> Result<Self, SimError> {
+        let mut w: Self = serde_json::from_str(s)
+            .map_err(|_| SimError::new("load", "valid snapshot", "corrupt"))?;
+        w.rebuild_sched();
+        Ok(w)
+    }
+
+    fn rebuild_sched(&mut self) {
+        let mut s = Scheduler::new();
+        for (raw, b) in &self.beings {
+            s.schedule(EntityId(*raw), b.next_at);
+        }
+        self.sched = s;
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +157,16 @@ mod tests {
         assert_eq!(w1.snapshot_hash(), w2.snapshot_hash());
         assert_eq!(w1.beings[&1].pos.x, 1); // border wall blocks
         let _ = run();
+    }
+
+    #[test]
+    fn save_load_roundtrip_preserves_hash() {
+        let mut w = World::new(7);
+        w.spawn(EntityId(1), pos(8, 8), 2);
+        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        let s = w.save_json();
+        let w2 = World::load_json(&s).expect("load");
+        assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
+        assert!(World::load_json("{bad").is_err());
     }
 }
