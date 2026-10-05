@@ -7,7 +7,6 @@ use crate::ids::EntityId;
 /// ejects with mindpower drain (not permadeath outside hardcore).
 /// Inventory is mind-files: capacity by mindpower, single-use reads,
 /// disk-clone erases source (no duping).
-
 pub const ENTER_COST: u8 = 5;
 pub const DEATH_DRAIN: u8 = 4;
 pub const KICK_DRAIN: u8 = 2;
