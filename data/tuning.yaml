@@ -1,0 +1,8 @@
+seed: 42
+tick_seconds: 1
+section_size: 16
+active_sections: "3x3"
+loaded_sections: "5x5"
+base_walk_ticks: 10
+cpu_budget_mips: 100
+trace_per_hop_s: 30

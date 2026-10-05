@@ -1,0 +1,68 @@
+hacker game design
+
+you start out as a human in a room with the cheapest computer. (and cheapest network connection and firewall)
+you have a bank account with a small amount of money.
+you don't have income.
+over time your food and mood bars go down and the game ends if either empties.
+you have a little food and meds and can order more through online stores.
+you can also pay for shows and find cute videos to raise your mood or reduce its fall rate temporarily.
+there are online jobs you can apply for to earn money, these reduce your mood and take up computer resources to do.
+
+
+
+Stats vs. Attacks
+
+Dedication vs Sway
+Focus vs Distract 
+Stability vs Disturb 
+Courage vs Fear
+Clarity vs Confuse 
+
+
+Effects
+Generally refer to the target's next turn only 
+
+Negative 
+Skip second card if focus not multiple of 2, third if focus not multiple of 3, etc
+Freakout damages stability over time like poison 
+Can't use dice rolls of N
+Next card has random target (stacking)
+Reduce a roll by N, or N rolls by 1
+Add a decoy roll that acts as a zero when used
+Each roll used deals N to Stat
+Downgrade next card
+
+
+Positive
+Heal lowest stat
+Increase a roll by N, or N rolls by 1 
+Add an extra roll
+Tank Stat with Other Stat
+Reflect half damage to Stat (rounded down)
+Deal half Stat damage dealt to Other Stat too
+Cancel an effect
+Avoid an effect
+
+
+Card manipulation:
+Load N next cards
+Load N copies of next card (copies are temporary)
+Skip next card
+Upgrade next card 
+
+
+Resources:
+there will be a handful of "resource types" a cute program creature can produce.
+they'll represent, like, programming components. Might be called things like "optimized loop" or "data management" or "advanced algorithm", stuff like that.
+
+these will serve two purposes: 1: jobs that earn you money you need to survive (sorry) will be programming tasks that require some number of those resources to complete. doing them manually as the player will be pretty slow and means you can't do much else.
+tasking your creatures to produce these is faster and frees you to do other stuff.
+higher level creatures can produce at a higher rate though also need more computing resources to store and run.
+generally they can only make one or sometimes two resource types.
+
+2: in a creature vs. creature confrontation, some action cards will produce a type of resource (only if the creature can make that type, and the number is multiplied by its production rate) while others will consume a number of a resource type in order to activate. this means certain types and combinations of cards will work in certain types and levels of creatures. oh and some attacks will consume all of a resource type and add ormultiply the amount to the attack power so it's better the more you can make.
+
+
+
+Development Process:
+Keep it as simple as possible, add one thing at a time.
