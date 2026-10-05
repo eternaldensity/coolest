@@ -1,4 +1,5 @@
 //! Deterministic sim core. No clock, net, fs, threads. See design/11.
+pub mod deck;
 pub mod error;
 pub mod ids;
 pub mod pos;
@@ -7,6 +8,7 @@ pub mod scheduler;
 pub mod world;
 
 pub use error::SimError;
+pub use deck::{CellPos, Host};
 pub use ids::{EntityId, HostId, TileId};
 pub use pos::Pos;
 pub use renderer::{DeckView, NetView, RenderView, Renderer, StreetView};
