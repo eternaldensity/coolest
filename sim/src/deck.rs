@@ -81,6 +81,26 @@ impl Program {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct VulnState {
+    patched: bool,
+    burned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LogEntry {
+    who: EntityId,
+    when: u64,
+    via: HostId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Trace {
+    target: EntityId,
+    progress: u32,
+    threshold: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Host {
     pub id: HostId,
     pub w: u8,
@@ -94,6 +114,13 @@ pub struct Host {
     stocks: BTreeMap<u64, BTreeMap<Res, u32>>,
     stats: BTreeMap<u64, DeckStats>,
     effects: BTreeMap<u64, Vec<Fx>>,
+    // M2c: vulns, breach flag, transit logs, inbound trace, monitor.
+    vulns: BTreeMap<String, VulnState>,
+    pub breached: bool,
+    logs: Vec<LogEntry>,
+    trace: Option<Trace>,
+    monitor_armed: bool,
+    pub flagged: bool,
 }
 
 impl Host {
@@ -103,6 +130,9 @@ impl Host {
             cells: BTreeMap::new(), progs: BTreeMap::new(),
             makers: BTreeMap::new(), stocks: BTreeMap::new(),
             stats: BTreeMap::new(), effects: BTreeMap::new(),
+            vulns: BTreeMap::new(), breached: false,
+            logs: Vec::new(), trace: None,
+            monitor_armed: false, flagged: false,
         }
     }
 
@@ -229,6 +259,85 @@ impl Host {
 
     pub fn owner_of(&self, prog: EntityId) -> Option<EntityId> {
         self.progs.get(&prog.0).map(|p| p.owner)
+    }
+
+    // ---- M2c: vulns, trace/bounce/logs, monitor ----
+
+    /// Register a vuln on this host (data-driven in vulns.yaml later; 3 for M2).
+    pub fn add_vuln(&mut self, id: &str) {
+        self.vulns.insert(id.to_string(), VulnState { patched: false, burned: false });
+    }
+
+    /// Exploit fires once per vuln: sets breached. Patched or burned → Err.
+    pub fn exploit(&mut self, prog: EntityId, vuln: &str) -> Result<(), SimError> {
+        if !self.progs.contains_key(&prog.0) {
+            return Err(SimError::new("no_prog", "live program", "missing"));
+        }
+        let v = self.vulns.get_mut(vuln)
+            .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
+        if v.patched {
+            return Err(SimError::new("patched", "unpatched vuln", "patched"));
+        }
+        if v.burned {
+            return Err(SimError::new("burned", "fresh exploit", "already used"));
+        }
+        v.burned = true;
+        self.breached = true;
+        if self.monitor_armed {
+            self.flagged = true;
+        }
+        Ok(())
+    }
+
+    pub fn patch(&mut self, vuln: &str) -> Result<(), SimError> {
+        let v = self.vulns.get_mut(vuln)
+            .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
+        v.patched = true;
+        Ok(())
+    }
+
+    /// Append a transit log entry (every hop records you).
+    pub fn log(&mut self, who: EntityId, when: u64, via: HostId) {
+        self.logs.push(LogEntry { who, when, via });
+    }
+
+    /// Scrub your entries. Requires one of your programs present on this host
+    /// (presence = access; Private-cell gating comes with zones in M3).
+    pub fn scrub_log(&mut self, requester: EntityId) -> Result<usize, SimError> {
+        if !self.progs.values().any(|p| p.owner == requester) {
+            return Err(SimError::new("no_access", "program on host", "absent"));
+        }
+        let before = self.logs.len();
+        self.logs.retain(|e| e.who != requester);
+        Ok(before - self.logs.len())
+    }
+
+    /// Start an inbound trace (needs Tracer running on the defender side).
+    pub fn start_trace(&mut self, target: EntityId, threshold: u32) -> Result<(), SimError> {
+        if !self.progs.contains_key(&target.0) {
+            return Err(SimError::new("no_prog", "live target", "missing"));
+        }
+        self.trace = Some(Trace { target, progress: 0, threshold });
+        if self.monitor_armed {
+            self.flagged = true;
+        }
+        Ok(())
+    }
+
+    /// Advance the trace one tick. Scrambler halves the rate (1 vs 2).
+    /// Returns true when the target is fully traced.
+    pub fn tick_trace(&mut self, scrambled: bool) -> bool {
+        match &mut self.trace {
+            None => false,
+            Some(t) => {
+                t.progress += if scrambled { 1 } else { 2 };
+                t.progress >= t.threshold
+            }
+        }
+    }
+
+    pub fn set_monitor(&mut self, armed: bool) {
+        self.monitor_armed = armed;
     }
 
     // ---- M2b: resources, paired stats, next-turn effects ----
@@ -499,5 +608,55 @@ mod tests {
         assert_eq!(name, "focus");
         assert_eq!(h.stats[&80].focus, 8);
         assert!(h.damage_stat(EntityId(80), "bogus", 1).is_err());
+    }
+
+    #[test]
+    fn exploit_once_then_burned_patched_blocks() {
+        let mut h = host();
+        h.add_vuln("cve-2006-0001");
+        h.add_vuln("cve-2006-0002");
+        h.load(EntityId(90), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.set_monitor(true);
+        h.exploit(EntityId(90), "cve-2006-0001").unwrap();
+        assert!(h.breached);
+        assert!(h.flagged); // monitor armed
+        assert!(h.exploit(EntityId(90), "cve-2006-0001").is_err()); // burned
+        assert!(h.exploit(EntityId(90), "cve-2006-nope").is_err()); // unknown
+        h.patch("cve-2006-0002").unwrap();
+        assert!(h.exploit(EntityId(90), "cve-2006-0002").is_err()); // patched
+    }
+
+    #[test]
+    fn trace_runs_slower_scrambled() {
+        let mut plain = host();
+        plain.load(EntityId(91), EntityId(2), CellPos(0, 0), 2, 1).unwrap();
+        plain.start_trace(EntityId(91), 6).unwrap();
+        let mut ticks = 0;
+        while !plain.tick_trace(false) {
+            ticks += 1;
+        }
+        assert_eq!(ticks, 2); // 2+2+2: third tick completes
+
+        let mut slow = host();
+        slow.load(EntityId(92), EntityId(2), CellPos(0, 0), 2, 1).unwrap();
+        slow.start_trace(EntityId(92), 6).unwrap();
+        let mut ticks = 0;
+        while !slow.tick_trace(true) {
+            ticks += 1;
+        }
+        assert_eq!(ticks, 5); // scrambler doubles the window
+        assert!(slow.start_trace(EntityId(99), 6).is_err()); // no such target
+    }
+
+    #[test]
+    fn logs_append_and_scrub_needs_presence() {
+        let mut h = host();
+        h.log(EntityId(1), 100, HostId(9));
+        h.log(EntityId(2), 101, HostId(9));
+        // No program on host yet: scrub refused.
+        assert!(h.scrub_log(EntityId(1)).is_err());
+        h.load(EntityId(93), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        assert_eq!(h.scrub_log(EntityId(1)).unwrap(), 1);
+        assert_eq!(h.logs.len(), 1); // other's entry survives
     }
 }
