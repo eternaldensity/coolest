@@ -2,25 +2,6 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use crate::ids::EntityId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Entry {
-    at: u64,
-    id: EntityId,
-}
-
-impl Ord for Entry {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // reversed for min-heap via BinaryHeap
-        other.at.cmp(&self.at).then_with(|| other.id.0.cmp(&self.id.0))
-    }
-}
-
-impl PartialOrd for Entry {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 /// Energy scheduler: 1 tick = 1s. Entities act at `next_act_at`.
 #[derive(Debug, Default)]
 pub struct Scheduler {

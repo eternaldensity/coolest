@@ -76,7 +76,7 @@ impl World {
                 let nx = pos.x as i16 + dx;
                 let ny = pos.y as i16 + dy;
                 // M0: 16x16 section, border walls at 0 and 15
-                if nx >= 1 && nx <= 14 && ny >= 1 && ny <= 14 {
+                if (1..=14).contains(&nx) && (1..=14).contains(&ny) {
                     pos.x = nx as u8;
                     pos.y = ny as u8;
                 }
