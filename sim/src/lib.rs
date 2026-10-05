@@ -5,6 +5,7 @@ pub mod error;
 pub mod ids;
 pub mod ledger;
 pub mod net;
+pub mod street;
 pub mod pos;
 pub mod renderer;
 pub mod scheduler;
@@ -15,6 +16,7 @@ pub use crime::{Act, Alignment, Clans, Crime, License, Record, Standing, trace_e
 pub use deck::{CellPos, Host};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
 pub use net::{LinkKind, NetGraph, NetKind, Route};
+pub use street::{District, GuaranteeKind, Ports, Rng, Section, gen_section, window, SECTION_SIZE};
 pub use ids::{EntityId, HostId, TileId};
 pub use pos::Pos;
 pub use renderer::{DeckView, NetView, RenderView, Renderer, StreetView};
