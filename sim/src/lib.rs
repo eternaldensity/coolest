@@ -1,4 +1,5 @@
 //! Deterministic sim core. No clock, net, fs, threads. See design/11.
+pub mod civic;
 pub mod crime;
 pub mod deck;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod world;
 
 pub use error::SimError;
 pub use crime::{Act, Alignment, Clans, Crime, License, Record, Standing, trace_evidence, LICENSE_KILLS, WARRANT_AT};
+pub use civic::{Activity, Timetable, cop_duty};
 pub use deck::{CellPos, Host};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
 pub use net::{LinkKind, NetGraph, NetKind, Route};
