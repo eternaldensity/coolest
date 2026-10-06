@@ -108,7 +108,7 @@ impl Section {
     }
 }
 
-fn districts() -> [District; 8] {
+fn all_districts() -> [District; 8] {
     use District::*;
     [Residential, Shop, Park, Industrial, Gov, Rural, Forest, Lake]
 }
@@ -117,9 +117,21 @@ fn districts() -> [District; 8] {
 /// neighbor (road/river continuity); `None` sides are rolled. Retries with
 /// derived subseeds until BFS reachability holds (deterministic).
 pub fn gen_section(seed: u64, sx: i32, sy: i32, want_ports: Ports) -> Section {
+    gen_section_weighted(seed, sx, sy, want_ports, &[])
+}
+
+/// Weighted variant: `districts` is (District, weight, difficulty_base).
+/// Empty slice = uniform pick, base 0 (identical to legacy behavior).
+pub fn gen_section_weighted(
+    seed: u64,
+    sx: i32,
+    sy: i32,
+    want_ports: Ports,
+    districts: &[(District, u32, u8)],
+) -> Section {
     let mut attempt: u64 = 0;
     loop {
-        let s = gen_once(seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)), sx, sy, want_ports);
+        let s = gen_once(seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)), sx, sy, want_ports, districts);
         if s.reachable((8, 8)) || attempt >= 20 {
             return s;
         }
@@ -127,10 +139,25 @@ pub fn gen_section(seed: u64, sx: i32, sy: i32, want_ports: Ports) -> Section {
     }
 }
 
-fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports) -> Section {
+fn pick_district(rng: &mut Rng, districts: &[(District, u32, u8)]) -> (District, u8) {
+    if districts.is_empty() {
+        return (all_districts()[rng.below(8) as usize], rng.below(6) as u8);
+    }
+    let total: u32 = districts.iter().map(|(_, w, _)| w).sum();
+    let mut roll = rng.below(total.max(1));
+    for (d, w, base) in districts {
+        if roll < *w {
+            return (*d, base + rng.below(6) as u8);
+        }
+        roll -= w;
+    }
+    let (d, _, base) = districts[districts.len() - 1];
+    (d, base)
+}
+
+fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports, districts: &[(District, u32, u8)]) -> Section {
     let mut rng = Rng::new(seed ^ ((sx as u64).wrapping_mul(0xBF58476D1CE4E5B9)) ^ ((sy as u64).wrapping_mul(0x94D049BB133111EB)));
-    let district = districts()[rng.below(8) as usize];
-    let difficulty = rng.below(6) as u8;
+    let (district, difficulty) = pick_district(&mut rng, districts);
     // Ports: honor constraints, else 50% a road exits at random row/col.
     let mut ports = want_ports;
     let mut roll = |c: Option<u8>| -> Option<u8> {
@@ -207,9 +234,41 @@ mod tests {
     #[test]
     fn hundred_seeds_all_reachable() {
         for seed in 0..100u64 {
-            let d = districts()[seed as usize % 8];
+            let d = all_districts()[seed as usize % 8];
             let _ = d;
             let s = gen_section(seed, 0, 0, Ports::default());
+            assert!(s.reachable((8, 8)), "seed {seed} unreachable");
+        }
+    }
+
+    #[test]
+    fn weighted_districts_follow_file() {
+        use crate::data::parse_districts;
+        let defs = parse_districts(include_str!("../../data/districts.yaml")).unwrap();
+        let table: Vec<(District, u32, u8)> = defs.iter().map(|d| {
+            let district = match d.id.as_str() {
+                "residential" => District::Residential,
+                "shop" => District::Shop,
+                "park" => District::Park,
+                "industrial" => District::Industrial,
+                "gov" => District::Gov,
+                "rural" => District::Rural,
+                "forest" => District::Forest,
+                _ => District::Lake,
+            };
+            (district, d.weight, d.difficulty_base)
+        }).collect();
+        // Single-district table forces the outcome; base shifts difficulty.
+        let gov = vec![(District::Gov, 1, 2)];
+        for seed in 0..20u64 {
+            let s = gen_section_weighted(seed, 0, 0, Ports::default(), &gov);
+            assert_eq!(s.district, District::Gov);
+            assert!(s.difficulty >= 2);
+            assert!(s.reachable((8, 8)));
+        }
+        // Full file table: all outcomes are known districts.
+        for seed in 0..50u64 {
+            let s = gen_section_weighted(seed, seed as i32, 0, Ports::default(), &table);
             assert!(s.reachable((8, 8)), "seed {seed} unreachable");
         }
     }
