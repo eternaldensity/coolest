@@ -99,6 +99,10 @@ impl World {
         self.beings.get(&id.0).map(|b| (b.food, b.mood, b.money, b.rations))
     }
 
+    pub fn pos_of(&self, id: EntityId) -> Option<Pos> {
+        self.beings.get(&id.0).map(|b| b.pos)
+    }
+
     /// Next scheduled act tick (server scheduler jumps the clock here).
     pub fn next_at(&self, id: EntityId) -> u64 {
         self.beings.get(&id.0).map(|b| b.next_at).unwrap_or(self.tick)
