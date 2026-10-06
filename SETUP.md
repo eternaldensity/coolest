@@ -42,6 +42,16 @@ veil: present after death = false
 demo ok, log lines = 2
 ```
 
+## Web build (trunk 0.22+, wasm32 target installed)
+
+```bash
+cd gui && trunk serve   # serves the eframe shell; Desktop shell: cargo run -p gui
+```
+
+Notes: workspace-root `trunk build` fails on trunk's package discovery —
+always run from `gui/`. Network/tokio code is compiled out on wasm
+(see `server/Cargo.toml` target gating).
+
 ## Layout
 
 ```text

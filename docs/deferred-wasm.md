@@ -19,3 +19,14 @@ Our code is not involved — any crate would hit this.
 The desktop eframe shell is the current proving ground and needs no
 bundler. Do not spend the ~15 min trunk compile until a wasm build is
 on the critical path.
+
+## Resolved (2026-10-06)
+
+- `cargo install trunk --version "=0.22.0-rc.1"` compiles clean on rustc 1.98
+  (the 0.21/lightningcss skew is gone in 0.22).
+- Workspace root builds do NOT work (`could not find the root package of
+  the target crate`): run trunk from the member dir —
+  `cd gui && trunk build` / `trunk serve`. Canonical template is
+  `gui/index.html`; `gui/dist/` is gitignored build output.
+- Verified: 30MB dev bundle (wasm + JS glue + index.html) builds green.
+  Release + wasm-opt shrinking still open.
