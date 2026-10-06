@@ -66,16 +66,17 @@ impl Dialogue {
 }
 
 #[derive(Debug, Clone)]
-pub struct Conversation<'a> {
-    pub dialogue: &'a Dialogue,
+pub struct Conversation {
+    pub dialogue: std::rc::Rc<Dialogue>,
     pub state: String,
     pub done: bool,
     pub last_effect: Option<String>,
 }
 
-impl<'a> Conversation<'a> {
-    pub fn new(dialogue: &'a Dialogue, start_key: Option<&str>) -> Self {
-        Self { dialogue, state: dialogue.start_for(start_key).to_string(), done: false, last_effect: None }
+impl Conversation {
+    pub fn new(dialogue: std::rc::Rc<Dialogue>, start_key: Option<&str>) -> Self {
+        let state = dialogue.start_for(start_key).to_string();
+        Self { dialogue, state, done: false, last_effect: None }
     }
 
     pub fn text(&self) -> &str {
@@ -113,7 +114,7 @@ impl<'a> Conversation<'a> {
 mod tests {
     use super::*;
 
-    fn shopkeeper() -> Dialogue {
+    fn shopkeeper() -> std::rc::Rc<Dialogue> {
         let mut states = BTreeMap::new();
         states.insert("hi".to_string(), Node {
             text: "Welcome in. Shelves are stocked, prices are fair.".to_string(),
@@ -126,14 +127,14 @@ mod tests {
             text: "Mind the door on your way out.".to_string(),
             options: vec![],
         });
-        Dialogue { id: "shop".to_string(), start: "hi".to_string(), starts: BTreeMap::new(), states }
+        std::rc::Rc::new(Dialogue { id: "shop".to_string(), start: "hi".to_string(), starts: BTreeMap::new(), states })
     }
 
     #[test]
     fn walk_to_trade_effect() {
         let d = shopkeeper();
         d.validate().unwrap();
-        let mut c = Conversation::new(&d, None);
+        let mut c = Conversation::new(d.clone(), None);
         assert!(c.text().contains("Welcome"));
         assert_eq!(c.options().len(), 2);
         assert!(!c.choose(1).unwrap()); // "Just looking." -> bye state
@@ -147,7 +148,7 @@ mod tests {
     #[test]
     fn trade_choice_ends_with_effect() {
         let d = shopkeeper();
-        let mut c = Conversation::new(&d, None);
+        let mut c = Conversation::new(d.clone(), None);
         assert!(c.choose(0).unwrap());
         assert!(c.done);
         assert_eq!(c.last_effect.as_deref(), Some("trade"));
@@ -170,9 +171,10 @@ mod tests {
 
     #[test]
     fn alt_starts_branch() {
-        let mut d = shopkeeper();
-        d.starts.insert("wanted".to_string(), "bye".to_string());
-        assert_eq!(Conversation::new(&d, Some("wanted")).text(), "Mind the door on your way out.");
-        assert_eq!(Conversation::new(&d, None).text(), "Welcome in. Shelves are stocked, prices are fair.");
+        let mut inner = shopkeeper();
+        std::rc::Rc::get_mut(&mut inner).unwrap().starts.insert("wanted".to_string(), "bye".to_string());
+        let d = inner;
+        assert_eq!(Conversation::new(d.clone(), Some("wanted")).text(), "Mind the door on your way out.");
+        assert_eq!(Conversation::new(d.clone(), None).text(), "Welcome in. Shelves are stocked, prices are fair.");
     }
 }

@@ -212,6 +212,14 @@ impl World {
         self.npcs.iter().map(|(id, n)| (*id, n.pos.x, n.pos.y)).collect()
     }
 
+    pub fn npc_role(&self, id: u64) -> Option<Role> {
+        self.npcs.get(&id).map(|n| n.role)
+    }
+
+    pub fn npc_full(&self) -> Vec<(u64, Pos, Role)> {
+        self.npcs.iter().map(|(id, n)| (*id, n.pos, n.role)).collect()
+    }
+
     /// Advance NPCs whose turn is due. hour drives timetables; wanted maps
     /// being-id -> standing for cop pursuit (nearest Wanted target).
     /// NPC moves are free within the tick (M1 LOD, noted in design/05).

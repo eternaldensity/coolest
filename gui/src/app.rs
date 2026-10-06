@@ -6,6 +6,8 @@
 use client_web::status_line;
 use eframe::egui;
 use server::Server;
+use std::collections::BTreeMap;
+use std::rc::Rc;
 use sim::{
     CellPos, Dir, EntityId, HostId, Intent, LinkKind, NetKind, Pos,
     Role, Standing, Timetable, Verb, cop_duty,
@@ -31,6 +33,8 @@ pub struct Shell {
     log: Vec<String>,
     sel: Option<(u8, u8)>,
     mp: u8,
+    talks: BTreeMap<String, Rc<sim::Dialogue>>,
+    talking: Option<sim::Conversation>,
     frames_left: Option<u32>,
 }
 
@@ -46,6 +50,10 @@ impl Shell {
         server.world.net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
         server.world.net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
         server.world.ensure_host(HostId(1));
+        let mut talks = BTreeMap::new();
+        for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default() {
+            talks.insert(d.id.clone(), Rc::new(d));
+        }
         // Demo veil complex: lobby - ops - roof(exit).
         server.world.veil.add_area(1, "lobby", vec![2], false);
         server.world.veil.add_area(2, "ops", vec![1, 3], false);
@@ -70,6 +78,8 @@ impl Shell {
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
             sel: None,
             mp: 8,
+            talks,
+            talking: None,
             frames_left: frames,
         };
         shell.say_status();
@@ -105,11 +115,54 @@ impl Shell {
             "help" => self.say("move: arrows/hjkl | eat | work 0 | work 1 | watch".to_string()),
             "eat" => self.do_verb(Verb::Eat),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
+            "talk" => self.start_talk(),
             "watch" => self.do_verb(Verb::Watch),
             "work 0" => self.do_verb(Verb::Work(0)),
             "work 1" => self.do_verb(Verb::Work(1)),
             "" => {}
             _ => self.say(format!("unknown: {cmd}")),
+        }
+    }
+
+    /// NPCs on the actor's tile or adjacent (same section).
+    fn nearby_npcs(&self) -> Vec<(u64, sim::Role)> {
+        let here = match self.server.world.pos_of(self.actor) {
+            Some(p) => p,
+            None => return vec![],
+        };
+        self.server.world.npc_full().into_iter()
+            .filter(|(_, p, _)| {
+                p.sx == here.sx && p.sy == here.sy
+                    && (p.x as i16 - here.x as i16).abs() <= 1
+                    && (p.y as i16 - here.y as i16).abs() <= 1
+            })
+            .map(|(id, _, role)| (id, role))
+            .collect()
+    }
+
+    fn dialogue_for(&self, role: sim::Role) -> Option<Rc<sim::Dialogue>> {
+        let id = match role {
+            sim::Role::Shopkeeper => "shopkeeper",
+            sim::Role::Cop => "cop",
+            sim::Role::Office => "civilian",
+        };
+        self.talks.get(id).cloned()
+    }
+
+    fn start_talk(&mut self) {
+        if self.talking.is_some() {
+            return;
+        }
+        match self.nearby_npcs().into_iter().next() {
+            Some((_, role)) => match self.dialogue_for(role) {
+                Some(dlg) => {
+                    let t = sim::Conversation::new(dlg, None);
+                    self.say(t.text().to_string());
+                    self.talking = Some(t);
+                }
+                None => self.say("they have nothing to say".to_string()),
+            },
+            None => self.say("no one in earshot".to_string()),
         }
     }
 
@@ -207,6 +260,71 @@ impl eframe::App for Shell {
                     .unwrap_or_default();
                 let npcs = self.server.world.npc_positions();
                 ui.heading(format!("Street — section ({}, {})", here.sx, here.sy));
+                // Talk panel.
+                if self.talking.is_none() {
+                    let mut started = false;
+                    ui.horizontal(|ui| {
+                        for (id, role) in self.nearby_npcs() {
+                            if ui.button(format!("Talk {role:?}")).clicked() {
+                                if let Some(dlg) = self.dialogue_for(role) {
+                                    let t = sim::Conversation::new(dlg, None);
+                                    self.say(format!("[{id}] {}", t.text()));
+                                    self.talking = Some(t);
+                                    started = true;
+                                }
+                            }
+                            let _ = started;
+                        }
+                    });
+                } else {
+                    // Pick first, then act: the option borrow must end before say().
+                    enum Pick { Leave, Choice(usize), None }
+                    let pick = {
+                        let t = self.talking.as_ref().unwrap();
+                        ui.label(t.text());
+                        let mut picked = Pick::None;
+                        for (i, opt) in t.options().iter().enumerate() {
+                            if ui.button(&opt.label).clicked() {
+                                picked = Pick::Choice(i);
+                            }
+                        }
+                        if ui.button("Leave").clicked() {
+                            picked = Pick::Leave;
+                        }
+                        picked
+                    };
+                    match pick {
+                        Pick::Leave => self.talking = None,
+                        Pick::None => {}
+                        Pick::Choice(i) => {
+                            let outcome = {
+                                let t = self.talking.as_mut().unwrap();
+                                match t.choose(i) {
+                                    Ok(finished) => {
+                                        let fx = t.last_effect.clone();
+                                        let end = finished || t.options().is_empty();
+                                        let text = if end { String::new() } else { t.text().to_string() };
+                                        Ok((fx, end, text))
+                                    }
+                                    Err(e) => Err(format!("huh: {e}")),
+                                }
+                            };
+                            match outcome {
+                                Ok((fx, end, text)) => {
+                                    if let Some(fx) = fx {
+                                        self.say(format!("* {fx} *"));
+                                    }
+                                    if end {
+                                        self.talking = None;
+                                    } else {
+                                        self.say(text);
+                                    }
+                                }
+                                Err(msg) => self.say(msg),
+                            }
+                        }
+                    }
+                }
                 // Trade panel: counter sale when standing on a shop tile.
                 if !counter.is_empty() {
                     ui.separator();
