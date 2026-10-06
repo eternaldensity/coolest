@@ -292,6 +292,32 @@ impl World {
         self.beings.get(&id.0).map(|b| b.pos)
     }
 
+    /// Next-step hint for new players. Pure function of needs state —
+    /// the shell shows it as the objective line; tests pin the priority.
+    pub fn advise(&self, id: EntityId) -> String {
+        let Some(b) = self.beings.get(&id.0) else {
+            return "spawn in".to_string();
+        };
+        if b.food == 0 || b.mood == 0 {
+            return "Locked out of work: Eat (ration) and Watch (mood) to recover".to_string();
+        }
+        if b.food < 30 {
+            return if b.rations > 0 {
+                "Food low: Eat a ration".to_string()
+            } else {
+                "Food low, pack empty: buy a ration at a gold counter (walk on, Buy)".to_string()
+            };
+        }
+        if b.mood < 30 {
+            return "Mood low: Watch a show (-$0.30)".to_string();
+        }
+        let pay0 = self.jobs.first().map(|j| j.0).unwrap_or(0);
+        if b.money < pay0.max(100) {
+            return "Cash low: Work a job (Work 0/1)".to_string();
+        }
+        "Settled: explore (arrows/hjkl), Talk to n, hack via Deck tab".to_string()
+    }
+
     /// Next scheduled act tick (server scheduler jumps the clock here).
     pub fn next_at(&self, id: EntityId) -> u64 {
         self.beings.get(&id.0).map(|b| b.next_at).unwrap_or(self.tick)
@@ -637,6 +663,30 @@ mod tests {
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
         assert!(w2.host(crate::ids::HostId(1)).is_some());
         assert!(w2.host(crate::ids::HostId(9)).is_none());
+    }
+
+    #[test]
+    fn advise_prioritizes_lockout_then_food_mood_cash() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Settled starter.
+        assert!(w.advise(EntityId(1)).starts_with("Settled"));
+        // Cash low beats settled.
+        w.set_needs(EntityId(1), 80, 70, 10, 3);
+        assert!(w.advise(EntityId(1)).contains("Work"));
+        // Mood low beats cash.
+        w.set_needs(EntityId(1), 80, 10, 10, 3);
+        assert!(w.advise(EntityId(1)).contains("Mood"));
+        // Food low beats mood; pack vs counter branches.
+        w.set_needs(EntityId(1), 10, 10, 10, 2);
+        assert!(w.advise(EntityId(1)).contains("Eat a ration"));
+        w.set_needs(EntityId(1), 10, 10, 10, 0);
+        assert!(w.advise(EntityId(1)).contains("gold counter"));
+        // Lockout beats everything.
+        w.set_needs(EntityId(1), 10, 0, 10, 0);
+        assert!(w.advise(EntityId(1)).contains("Locked out"));
+        // Unknown actor.
+        assert_eq!(w.advise(EntityId(99)), "spawn in");
     }
 
     #[test]
