@@ -8,6 +8,7 @@ use crate::ledger::Ledger;
 use crate::pos::Pos;
 use crate::scheduler::Scheduler;
 use crate::shop::Shop;
+use crate::street::{Ports, Section, gen_section};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir { N, S, E, W }
@@ -39,6 +40,13 @@ pub struct Event {
     pub tick: u64,
     pub actor: EntityId,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PlacedShop {
+    x: u8,
+    y: u8,
+    shop: Shop,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,7 +91,9 @@ pub struct World {
     #[serde(default)]
     npcs: BTreeMap<u64, Npc>,
     #[serde(default)]
-    shops: BTreeMap<(u8, u8), Shop>,
+    sections: Vec<Section>,
+    #[serde(default)]
+    shops: Vec<PlacedShop>,
     #[serde(skip)]
     sched: Scheduler,
 }
@@ -94,7 +104,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: BTreeMap::new(), npcs: BTreeMap::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
@@ -104,7 +114,41 @@ impl World {
         }
     }
 
+    /// Generate (or fetch) a section, constraining shared-side ports from
+    /// existing neighbors so roads/rivers continue across the seam.
+    pub fn ensure_section(&mut self, sx: i32, sy: i32) {
+        if self.sections.iter().any(|s| s.sx == sx && s.sy == sy) {
+            return;
+        }
+        let port = |x: i32, y: i32, f: fn(&Section) -> Option<u8>| {
+            self.sections.iter().find(|s| s.sx == x && s.sy == y).and_then(f)
+        };
+        let mut want = Ports::default();
+        if let Some(w) = port(sx - 1, sy, |s| s.ports.e) {
+            want.w = Some(w);
+        }
+        if let Some(w) = port(sx + 1, sy, |s| s.ports.w) {
+            want.e = Some(w);
+        }
+        if let Some(w) = port(sx, sy - 1, |s| s.ports.s) {
+            want.n = Some(w);
+        }
+        if let Some(w) = port(sx, sy + 1, |s| s.ports.n) {
+            want.s = Some(w);
+        }
+        self.sections.push(gen_section(self.seed, sx, sy, want));
+    }
+
+    pub fn section_at(&self, sx: i32, sy: i32) -> Option<&Section> {
+        self.sections.iter().find(|s| s.sx == sx && s.sy == sy)
+    }
+
+    pub fn section_count(&self) -> usize {
+        self.sections.len()
+    }
+
     pub fn spawn(&mut self, id: EntityId, pos: Pos, speed: u64) {
+        self.ensure_section(pos.sx, pos.sy);
         self.beings.insert(id.0, Being {
             pos, next_at: 0, speed,
             food: 80, mood: 70, money: 200, rations: 3,
@@ -124,11 +168,15 @@ impl World {
 
     /// Place a shop on a local tile (counter sale; design/05-06).
     pub fn place_shop(&mut self, x: u8, y: u8, shop: Shop) {
-        self.shops.insert((x, y), shop);
+        if let Some(slot) = self.shops.iter_mut().find(|s| s.x == x && s.y == y) {
+            slot.shop = shop;
+        } else {
+            self.shops.push(PlacedShop { x, y, shop });
+        }
     }
 
     pub fn shop_at(&self, x: u8, y: u8) -> Option<&Shop> {
-        self.shops.get(&(x, y))
+        self.shops.iter().find(|s| s.x == x && s.y == y).map(|s| &s.shop)
     }
 
     /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
@@ -238,10 +286,32 @@ impl World {
                 };
                 let nx = pos.x as i16 + dx;
                 let ny = pos.y as i16 + dy;
-                // M0: 16x16 section, border walls at 0 and 15
                 if (1..=14).contains(&nx) && (1..=14).contains(&ny) {
                     pos.x = nx as u8;
                     pos.y = ny as u8;
+                } else {
+                    // Section crossing: wrap to the neighbor, generating it
+                    // with the crossing row/col as its entry port.
+                    let (nsx, nsy, wx, wy, side) = match d {
+                        Dir::W => (pos.sx - 1, pos.sy, 14u8, pos.y, ("e", pos.y)),
+                        Dir::E => (pos.sx + 1, pos.sy, 1u8, pos.y, ("w", pos.y)),
+                        Dir::N => (pos.sx, pos.sy - 1, pos.x, 14u8, ("s", pos.x)),
+                        Dir::S => (pos.sx, pos.sy + 1, pos.x, 1u8, ("n", pos.x)),
+                    };
+                    let mut want = Ports::default();
+                    match side.0 {
+                        "e" => want.e = Some(side.1),
+                        "w" => want.w = Some(side.1),
+                        "s" => want.s = Some(side.1),
+                        _ => want.n = Some(side.1),
+                    }
+                    if !self.sections.iter().any(|s| s.sx == nsx && s.sy == nsy) {
+                        self.sections.push(gen_section(self.seed, nsx, nsy, want));
+                    }
+                    pos.sx = nsx;
+                    pos.sy = nsy;
+                    pos.x = wx;
+                    pos.y = wy;
                 }
             }
             Verb::Eat => {
@@ -272,8 +342,9 @@ impl World {
                 kind = "watched";
             }
             Verb::Buy(ref item) => {
-                let shop = self.shops.get_mut(&(pos.x, pos.y))
+                let shop = self.shops.iter_mut().find(|s| s.x == pos.x && s.y == pos.y)
                     .ok_or(SimError::new("no_shop", "shop counter", "none here"))?;
+                let shop = &mut shop.shop;
                 let acct = self.accts.get(&intent.actor.0).copied()
                     .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
                 shop.buy(&mut self.ledger, acct, item)?;
@@ -359,7 +430,9 @@ mod tests {
             let _ = w2.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) });
         }
         assert_eq!(w1.snapshot_hash(), w2.snapshot_hash());
-        assert_eq!(w1.beings[&1].pos.x, 1); // border wall blocks
+        // Borders now cross sections instead of blocking: three steps west
+        // from (1,1) lands two tiles into the western neighbor.
+        assert_eq!((w1.beings[&1].pos.sx, w1.beings[&1].pos.x), (-1, 12));
         let _ = run();
     }
 
@@ -485,6 +558,40 @@ mod tests {
         }
         let p = w.npc_positions()[0];
         assert_eq!((p.1, p.2), (8, 8));
+    }
+
+    #[test]
+    fn section_crossing_generates_matching_neighbors() {
+        let mut w = World::new(11);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        assert_eq!(w.section_count(), 1);
+        // Walk east across the seam: 7 steps from x=8 (9..14, cross, 1).
+        for _ in 0..7 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) }).unwrap();
+        }
+        let b = &w.beings[&1];
+        assert_eq!((b.pos.sx, b.pos.x), (1, 1));
+        assert_eq!(w.section_count(), 2);
+        // Entry port on the shared side matches the crossing row (y=8).
+        assert_eq!(w.section_at(1, 0).unwrap().ports.w, Some(8));
+        // Walk back west: no new section, same sim both ways.
+        for _ in 0..7 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) }).unwrap();
+        }
+        let b = &w.beings[&1];
+        // One step crosses (lands x=14), six more walk to x=8.
+        assert_eq!((b.pos.sx, b.pos.x), (0, 8));
+        assert_eq!(w.section_count(), 2);
+        // Deterministic twin replays the whole trip and agrees.
+        let mut v = World::new(11);
+        v.spawn(EntityId(1), pos(8, 8), 1);
+        for d in [Dir::E; 7].into_iter().chain([Dir::W; 7]) {
+            v.tick = v.next_at(EntityId(1));
+            v.apply(&Intent { actor: EntityId(1), verb: Verb::Move(d) }).unwrap();
+        }
+        assert_eq!(w.snapshot_hash(), v.snapshot_hash());
     }
 
     #[test]
