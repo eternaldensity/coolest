@@ -18,7 +18,7 @@ pub mod world;
 
 pub use error::SimError;
 pub use crime::{Act, Alignment, Clans, Crime, License, Record, Standing, trace_evidence, LICENSE_KILLS, WARRANT_AT};
-pub use civic::{Activity, Timetable, cop_duty};
+pub use civic::{Activity, Role, Timetable, cop_duty, role_table};
 pub use data::{parse_cards, parse_districts, parse_jobs, parse_vulns, CardDef, CardTable, DistrictDef, JobDef, VulnDef};
 pub use deck::{CellPos, Host};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use crate::civic::{Role, cop_duty, role_table};
+use crate::crime::Standing;
 use crate::ledger::Ledger;
 use crate::pos::Pos;
 use crate::scheduler::Scheduler;
@@ -40,6 +42,17 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct Npc {
+    pos: Pos,
+    next_at: u64,
+    speed: u64,
+    role: Role,
+    home: (u8, u8),
+    work: (u8, u8),
+    leisure: (u8, u8),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Being {
     pos: Pos,
     next_at: u64,
@@ -68,6 +81,8 @@ pub struct World {
     #[serde(default)]
     accts: BTreeMap<u64, u64>,
     #[serde(default)]
+    npcs: BTreeMap<u64, Npc>,
+    #[serde(default)]
     shops: BTreeMap<(u8, u8), Shop>,
     #[serde(skip)]
     sched: Scheduler,
@@ -79,7 +94,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: BTreeMap::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: BTreeMap::new(), npcs: BTreeMap::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
@@ -114,6 +129,72 @@ impl World {
 
     pub fn shop_at(&self, x: u8, y: u8) -> Option<&Shop> {
         self.shops.get(&(x, y))
+    }
+
+    /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
+    /// home/work/leisure are local tiles; timetable comes from role.
+    pub fn spawn_npc(&mut self, id: EntityId, role: Role, home: (u8, u8), work: (u8, u8), leisure: (u8, u8), speed: u64) {
+        self.npcs.insert(id.0, Npc { pos: Pos { city: 1, sx: 0, sy: 0, z: 0, x: home.0, y: home.1 }, next_at: 0, speed, role, home, work, leisure });
+    }
+
+    pub fn npc_positions(&self) -> Vec<(u64, u8, u8)> {
+        self.npcs.iter().map(|(id, n)| (*id, n.pos.x, n.pos.y)).collect()
+    }
+
+    /// Advance NPCs whose turn is due. hour drives timetables; wanted maps
+    /// being-id -> standing for cop pursuit (nearest Wanted target).
+    /// NPC moves are free within the tick (M1 LOD, noted in design/05).
+    pub fn step_npcs(&mut self, hour: u8, wanted: &BTreeMap<u64, Standing>) {
+        let ids: Vec<u64> = self.npcs.keys().copied().collect();
+        for id in ids {
+            let due = self.npcs[&id].next_at;
+            if due > self.tick {
+                continue;
+            }
+            let table = role_table(self.npcs[&id].role);
+            let target = self.npc_target(id, &table, hour, wanted);
+            let n = self.npcs.get_mut(&id).unwrap();
+            let (dx, dy) = (target.0 as i16 - n.pos.x as i16, target.1 as i16 - n.pos.y as i16);
+            // Step along the farther axis (4-dir, border-clamped like PCs).
+            let (nx, ny) = if dx.abs() >= dy.abs() {
+                (n.pos.x as i16 + dx.signum(), n.pos.y as i16)
+            } else {
+                (n.pos.x as i16, n.pos.y as i16 + dy.signum())
+            };
+            if (1..=14).contains(&nx) && (1..=14).contains(&ny) {
+                n.pos.x = nx as u8;
+                n.pos.y = ny as u8;
+            }
+            n.next_at = self.tick + n.speed.max(1);
+        }
+    }
+
+    fn npc_target(&self, id: u64, table: &crate::civic::Timetable, hour: u8, wanted: &BTreeMap<u64, Standing>) -> (u8, u8) {
+        let n = &self.npcs[&id];
+        if n.role == Role::Cop {
+            // Nearest Wanted being, if any — pursuit overrides the timetable.
+            let mut best: Option<((u8, u8), i32)> = None;
+            for (bid, b) in &self.beings {
+                if wanted.get(bid).copied().unwrap_or(Standing::Clean) != Standing::Wanted {
+                    continue;
+                }
+                let d = (b.pos.x as i32 - n.pos.x as i32).abs() + (b.pos.y as i32 - n.pos.y as i32).abs();
+                if best.map(|(_, bd)| d < bd).unwrap_or(true) {
+                    best = Some(((b.pos.x, b.pos.y), d));
+                }
+            }
+            if let Some((t, _)) = best {
+                // Pursuit overrides the timetable (cops stay cops off shift).
+                let _duty = cop_duty(table, hour, Standing::Wanted);
+                debug_assert_eq!(_duty, crate::civic::Activity::Pursue);
+                return t;
+            }
+        }
+        match table.at(hour) {
+            crate::civic::Activity::Work | crate::civic::Activity::Patrol => n.work,
+            crate::civic::Activity::Leisure => n.leisure,
+            _ => n.home,
+        }
     }
 
     /// Test helper: set needs directly.
@@ -361,6 +442,49 @@ mod tests {
         w.spawn(EntityId(2), pos(8, 8), 1);
         w.tick = w.next_at(EntityId(2));
         assert!(w.apply(&Intent { actor: EntityId(2), verb: Verb::Buy("ration".into()) }).is_err());
+    }
+
+    #[test]
+    fn npcs_walk_timetables() {
+        use std::collections::BTreeMap;
+        let mut w = World::new(1);
+        w.spawn_npc(EntityId(10), Role::Shopkeeper, (2, 2), (12, 12), (8, 2), 1);
+        // Morning: head to work.
+        for _ in 0..30 {
+            w.step_npcs(10, &BTreeMap::new());
+            w.tick += 1;
+        }
+        let p = w.npc_positions();
+        assert_eq!(p.len(), 1);
+        assert_eq!((p[0].1, p[0].2), (12, 12));
+        // Night: back home.
+        for _ in 0..30 {
+            w.step_npcs(23, &BTreeMap::new());
+            w.tick += 1;
+        }
+        let p = w.npc_positions();
+        assert_eq!((p[0].1, p[0].2), (2, 2));
+    }
+
+    #[test]
+    fn cop_pursues_wanted_ignores_clean() {
+        use std::collections::BTreeMap;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(20), Role::Cop, (2, 2), (12, 12), (8, 2), 1);
+        // Clean citizen: cop works its beat (off to work at 10).
+        w.step_npcs(10, &BTreeMap::new());
+        let home = w.npc_positions()[0];
+        assert_ne!((home.1, home.2), (8, 8));
+        // Wanted: cop converges on the player.
+        let mut wanted = BTreeMap::new();
+        wanted.insert(1u64, Standing::Wanted);
+        for _ in 0..20 {
+            w.step_npcs(16, &wanted.clone());
+            w.tick += 1;
+        }
+        let p = w.npc_positions()[0];
+        assert_eq!((p.1, p.2), (8, 8));
     }
 
     #[test]

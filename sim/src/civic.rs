@@ -5,6 +5,22 @@ use crate::crime::Standing;
 /// ambient-only NPCs (no hunger checks), cops pursue Wanted on sight —
 /// including off duty.
 
+/// NPC job. Timetables are data (design/05); roles pick presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Role {
+    Shopkeeper,
+    Office,
+    Cop,
+}
+
+pub fn role_table(role: Role) -> Timetable {
+    match role {
+        Role::Shopkeeper => Timetable::shopkeeper(),
+        Role::Office => Timetable::office(),
+        Role::Cop => Timetable::cop_day(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Activity {
     Home,
