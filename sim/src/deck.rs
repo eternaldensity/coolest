@@ -261,6 +261,37 @@ impl Host {
         self.progs.get(&prog.0).map(|p| p.owner)
     }
 
+    /// Clone a segment to a free cell (the `copy` card). The child starts at
+    /// len 1 with the same owner, build, and maker — never shares cells.
+    pub fn clone_to(&mut self, prog: EntityId, new_id: EntityId, at: CellPos) -> Result<(), SimError> {
+        let p = self.progs.get(&prog.0).cloned()
+            .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+        if !self.free(at) {
+            return Err(SimError::new("cell_busy", "free cell", "occupied/out of bounds"));
+        }
+        if self.progs.contains_key(&new_id.0) {
+            return Err(SimError::new("dup_prog", "fresh id", "exists"));
+        }
+        if self.cpu_load() + 1 + p.cpu_per_seg as u32 > self.cpu_total {
+            return Err(SimError::new("cpu_overload", "headroom", "over budget"));
+        }
+        self.cells.insert((at.0, at.1), Segment { prog: new_id, is_head: true });
+        self.progs.insert(new_id.0, Program {
+            id: new_id, owner: p.owner, head: at,
+            tail: VecDeque::new(), max_len: p.max_len, cpu_per_seg: p.cpu_per_seg,
+        });
+        if let Some(maker) = self.makers.get(&prog.0).cloned() {
+            self.makers.insert(new_id.0, maker);
+        }
+        Ok(())
+    }
+
+    /// Card ids in data/cards.yaml that this build implements. The yaml
+    /// cross-check test fails on drift in either direction.
+    pub fn implemented_cards() -> Vec<&'static str> {
+        vec!["distract", "freakout", "tank", "patch", "spike", "overload", "farm", "copy"]
+    }
+
     // ---- M2c: vulns, trace/bounce/logs, monitor ----
 
     /// Register a vuln on this host (data-driven in vulns.yaml later; 3 for M2).
@@ -549,6 +580,33 @@ mod tests {
         assert_eq!(h.owner_of(EntityId(41)), Some(EntityId(1)));
         // Takeover on tail rejected.
         assert!(h.takeover(EntityId(40), CellPos(0, 0)).is_err());
+    }
+
+    #[test]
+    fn clone_inherits_owner_build_and_maker() {
+        let mut h = host();
+        h.load(EntityId(40), EntityId(1), CellPos(0, 0), 4, 2).unwrap();
+        h.set_maker(EntityId(40), vec![Res::Algo], 2).unwrap();
+        h.clone_to(EntityId(40), EntityId(44), CellPos(5, 5)).unwrap();
+        assert_eq!(h.owner_of(EntityId(44)), Some(EntityId(1)));
+        assert_eq!(h.progs[&44].max_len, 4);
+        assert_eq!(h.produce(EntityId(44), Res::Algo, 1).unwrap(), 2); // maker copied
+        assert!(h.clone_to(EntityId(40), EntityId(44), CellPos(6, 6)).is_err()); // dup id
+        assert!(h.clone_to(EntityId(99), EntityId(45), CellPos(6, 6)).is_err()); // missing
+        assert!(h.clone_to(EntityId(40), EntityId(45), CellPos(5, 5)).is_err()); // busy
+    }
+
+    #[test]
+    fn yaml_cards_all_implemented() {
+        use crate::data::parse_cards;
+        let t = parse_cards(include_str!("../../data/cards.yaml")).unwrap();
+        let have: std::collections::BTreeSet<&str> =
+            Host::implemented_cards().into_iter().collect();
+        let mut want = std::collections::BTreeSet::new();
+        for c in t.negative.iter().chain(&t.positive).chain(&t.manipulation) {
+            want.insert(c.id.as_str());
+        }
+        assert_eq!(have, want);
     }
 
     #[test]
