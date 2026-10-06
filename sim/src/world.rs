@@ -156,9 +156,9 @@ impl World {
         self.sched.schedule(id, 0);
     }
 
-    /// Open a bank account for a being (branch host). Purchases need one.
+    /// Open a bank account for a being or NPC (branch host). Purchases need one.
     pub fn open_account(&mut self, id: EntityId, branch: HostId) -> Result<u64, SimError> {
-        if !self.beings.contains_key(&id.0) {
+        if !self.beings.contains_key(&id.0) && !self.npcs.contains_key(&id.0) {
             return Err(SimError::new("unknown_actor", "spawned entity", "missing"));
         }
         let acct = self.ledger.open(id, branch);
@@ -592,6 +592,16 @@ mod tests {
             v.apply(&Intent { actor: EntityId(1), verb: Verb::Move(d) }).unwrap();
         }
         assert_eq!(w.snapshot_hash(), v.snapshot_hash());
+    }
+
+    #[test]
+    fn accounts_open_for_beings_and_npcs() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 2), 1);
+        assert!(w.open_account(EntityId(1), crate::ids::HostId(1)).is_ok());
+        assert!(w.open_account(EntityId(10), crate::ids::HostId(1)).is_ok());
+        assert!(w.open_account(EntityId(99), crate::ids::HostId(1)).is_err());
     }
 
     #[test]

@@ -49,6 +49,15 @@ impl Shell {
 
         server.world.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
         server.world.spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
+        // Demo economy: player bank account with starter funds + a food
+        // shop by the spawn. Till belongs to the shopkeeper (EntityId 10).
+        let buyer = server.world.open_account(actor, HostId(1)).unwrap();
+        server.world.ledger.mint(buyer, 500).unwrap();
+        let till = server.world.open_account(EntityId(10), HostId(1)).unwrap();
+        let mut shop = sim::Shop::new(till);
+        shop.add_line("ration", 100, 5, 2, 5, 200);
+        shop.add_line("meds", 400, 2, 1, 3, 900);
+        server.world.place_shop(10, 8, shop);
         let mut shell = Self {
             server,
             actor,
@@ -92,6 +101,7 @@ impl Shell {
         match cmd.as_str() {
             "help" => self.say("move: arrows/hjkl | eat | work 0 | work 1 | watch".to_string()),
             "eat" => self.do_verb(Verb::Eat),
+            _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             "watch" => self.do_verb(Verb::Watch),
             "work 0" => self.do_verb(Verb::Work(0)),
             "work 1" => self.do_verb(Verb::Work(1)),
@@ -171,9 +181,28 @@ impl eframe::App for Shell {
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Street => {
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
-                let terrain = self.server.world.section_at(here.sx, here.sy);
-                ui.heading(format!("Street — section ({}, {})", here.sx, here.sy));
+                // Snapshot world reads up front: UI callbacks below need &mut self.
+                let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
+                let counter: Vec<(String, i64, u32)> = self.server.world
+                    .shop_at(here.x, here.y)
+                    .map(|shop| shop.stock.iter().map(|(k, l)| (k.clone(), l.price_cents, l.qty)).collect())
+                    .unwrap_or_default();
                 let npcs = self.server.world.npc_positions();
+                ui.heading(format!("Street — section ({}, {})", here.sx, here.sy));
+                // Trade panel: counter sale when standing on a shop tile.
+                if !counter.is_empty() {
+                    ui.separator();
+                    ui.label("Counter — type buy <item> or click:");
+                    for (item, price, qty) in counter {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{} — {}c ({} left)", item, price, qty));
+                            if ui.button("Buy").clicked() {
+                                self.do_verb(Verb::Buy(item.clone()));
+                            }
+                        });
+                    }
+                    ui.separator();
+                }
                 let (ax, ay) = (here.x, here.y);
                 egui::Grid::new("street").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..16u8 {
@@ -182,7 +211,7 @@ impl eframe::App for Shell {
                                 "@"
                             } else if npcs.iter().any(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
                                 "n"
-                            } else if terrain.map(|s| s.walkable(x, y)).unwrap_or(true) {
+                            } else if terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true) {
                                 "."
                             } else {
                                 "#"
