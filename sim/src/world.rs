@@ -12,6 +12,7 @@ use crate::scheduler::Scheduler;
 use crate::deck::Host;
 use crate::shop::Shop;
 use crate::street::{Ports, Section, gen_section};
+use crate::veil::Veil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir { N, S, E, W }
@@ -100,6 +101,8 @@ pub struct World {
     #[serde(default)]
     hosts: BTreeMap<u64, Host>,
     #[serde(default)]
+    pub veil: Veil,
+    #[serde(default)]
     pub net: NetGraph,
     #[serde(default)]
     pub power: PowerGrid,
@@ -115,7 +118,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), veil: Veil::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
