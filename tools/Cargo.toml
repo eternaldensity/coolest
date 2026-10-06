@@ -1,0 +1,12 @@
+[package]
+name = "tools"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+sim = { path = "../sim" }
+server = { path = "../server" }
+
+[[bin]]
+name = "fidom-tools"
+path = "src/main.rs"
