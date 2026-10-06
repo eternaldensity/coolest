@@ -1,0 +1,8 @@
+[package]
+name = "gui"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+sim = { path = "../sim" }
+tiny-skia = "0.11"
