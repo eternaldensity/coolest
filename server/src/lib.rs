@@ -6,6 +6,7 @@
 
 pub mod atproto;
 pub mod net;
+pub mod runtime;
 
 use std::collections::VecDeque;
 use sim::{Delta, Event, Intent, World};
