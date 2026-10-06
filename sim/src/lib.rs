@@ -7,6 +7,7 @@ pub mod error;
 pub mod ids;
 pub mod ledger;
 pub mod net;
+pub mod power;
 pub mod shop;
 pub mod street;
 pub mod veil;
@@ -22,6 +23,7 @@ pub use data::{parse_cards, parse_districts, parse_jobs, parse_vulns, CardDef, C
 pub use deck::{CellPos, Host};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
 pub use net::{LinkKind, NetGraph, NetKind, Route};
+pub use power::PowerGrid;
 pub use shop::{Shop, Stock};
 pub use street::{District, GuaranteeKind, Ports, Rng, Section, gen_section, window, SECTION_SIZE};
 pub use veil::{Veil, ENTER_COST, DEATH_DRAIN, KICK_DRAIN};

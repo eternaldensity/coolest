@@ -164,8 +164,17 @@ impl NetGraph {
 
     /// Dijkstra on latency over up nodes + passable links. Undirected.
     pub fn route(&self, from: HostId, to: HostId) -> Result<Route, SimError> {
+        self.route_avoiding(from, to, &BTreeSet::new())
+    }
+
+    /// route() plus a blackout set (section power kills, design/02):
+    /// blacked-out transit is skipped, blacked-out endpoints fail.
+    pub fn route_avoiding(&self, from: HostId, to: HostId, down: &BTreeSet<u64>) -> Result<Route, SimError> {
         if !self.nodes.contains_key(&from.0) || !self.nodes.contains_key(&to.0) {
             return Err(SimError::new("no_node", "known hosts", "missing"));
+        }
+        if down.contains(&from.0) || down.contains(&to.0) {
+            return Err(SimError::new("blackout", "powered endpoint", "dark"));
         }
         let mut dist: BTreeMap<u64, u32> = BTreeMap::new();
         let mut prev: BTreeMap<u64, u64> = BTreeMap::new();
@@ -180,7 +189,7 @@ impl NetGraph {
                 continue;
             }
             // Down transit nodes are skipped (endpoints must be up too).
-            if !self.nodes[&u].up {
+            if !self.nodes[&u].up || down.contains(&u) {
                 continue;
             }
             for l in &self.links {
@@ -188,6 +197,9 @@ impl NetGraph {
                     continue;
                 }
                 let v = if l.from.0 == u { l.to.0 } else if l.to.0 == u { l.from.0 } else { continue };
+                if down.contains(&v) {
+                    continue;
+                }
                 if !self.nodes.get(&v).map(|n| n.up).unwrap_or(false) {
                     continue;
                 }
