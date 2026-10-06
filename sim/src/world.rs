@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use crate::error::SimError;
-use crate::ids::EntityId;
+use crate::ids::{EntityId, HostId};
+use crate::ledger::Ledger;
 use crate::pos::Pos;
 use crate::scheduler::Scheduler;
+use crate::shop::Shop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir { N, S, E, W }
@@ -21,6 +23,8 @@ pub enum Verb {
     Eat,
     Work(u8),
     Watch,
+    /// Buy an item from the shop at the actor's tile (ledgered).
+    Buy(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +63,12 @@ pub struct World {
     beings: BTreeMap<u64, Being>,
     #[serde(default = "default_jobs")]
     jobs: Vec<(i64, u8, u8)>,
+    #[serde(default)]
+    pub ledger: Ledger,
+    #[serde(default)]
+    accts: BTreeMap<u64, u64>,
+    #[serde(default)]
+    shops: BTreeMap<(u8, u8), Shop>,
     #[serde(skip)]
     sched: Scheduler,
 }
@@ -69,7 +79,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: BTreeMap::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
@@ -85,6 +95,25 @@ impl World {
             food: 80, mood: 70, money: 200, rations: 3,
         });
         self.sched.schedule(id, 0);
+    }
+
+    /// Open a bank account for a being (branch host). Purchases need one.
+    pub fn open_account(&mut self, id: EntityId, branch: HostId) -> Result<u64, SimError> {
+        if !self.beings.contains_key(&id.0) {
+            return Err(SimError::new("unknown_actor", "spawned entity", "missing"));
+        }
+        let acct = self.ledger.open(id, branch);
+        self.accts.insert(id.0, acct);
+        Ok(acct)
+    }
+
+    /// Place a shop on a local tile (counter sale; design/05-06).
+    pub fn place_shop(&mut self, x: u8, y: u8, shop: Shop) {
+        self.shops.insert((x, y), shop);
+    }
+
+    pub fn shop_at(&self, x: u8, y: u8) -> Option<&Shop> {
+        self.shops.get(&(x, y))
     }
 
     /// Test helper: set needs directly.
@@ -160,6 +189,18 @@ impl World {
                 b.money -= WATCH_COST;
                 b.mood = (b.mood + 15).min(100);
                 kind = "watched";
+            }
+            Verb::Buy(ref item) => {
+                let shop = self.shops.get_mut(&(pos.x, pos.y))
+                    .ok_or(SimError::new("no_shop", "shop counter", "none here"))?;
+                let acct = self.accts.get(&intent.actor.0).copied()
+                    .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
+                shop.buy(&mut self.ledger, acct, item)?;
+                // M1 food shops sell rations that go straight to the pack.
+                if item == "ration" {
+                    b.rations = b.rations.saturating_add(1);
+                }
+                kind = "bought";
             }
         }
         b.pos = pos;
@@ -288,6 +329,38 @@ mod tests {
         let t0 = w.tick;
         let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait });
         assert_eq!(w.beings[&1].next_at, t0 + 2); // speed 1 x2 while starving
+    }
+
+    #[test]
+    fn shop_counter_buy_then_eat() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 500).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("ration", 100, 2, 1, 5, 50);
+        w.place_shop(8, 8, shop);
+        // Walk away: no counter here.
+        w.tick = w.next_at(EntityId(1));
+        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        w.tick = w.next_at(EntityId(1));
+        assert!(w.apply(&Intent { actor: EntityId(1), verb: Verb::Buy("ration".into()) }).is_err());
+        // Back on the tile: buy, pack gains a ration, then eat it.
+        w.tick = w.next_at(EntityId(1));
+        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) });
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Buy("ration".into()) }).unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().3, 4); // spawn 3 + 1 bought
+        w.tick = w.next_at(EntityId(1));
+        let (f0, _, _, _) = w.needs(EntityId(1)).unwrap();
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Eat }).unwrap();
+        assert!(w.needs(EntityId(1)).unwrap().0 > f0);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+        // Unbanked stranger cannot buy.
+        w.spawn(EntityId(2), pos(8, 8), 1);
+        w.tick = w.next_at(EntityId(2));
+        assert!(w.apply(&Intent { actor: EntityId(2), verb: Verb::Buy("ration".into()) }).is_err());
     }
 
     #[test]
