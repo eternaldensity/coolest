@@ -5,8 +5,11 @@ use crate::ids::{EntityId, HostId};
 use crate::civic::{Role, cop_duty, role_table};
 use crate::crime::Standing;
 use crate::ledger::Ledger;
+use crate::net::NetGraph;
 use crate::pos::Pos;
+use crate::power::PowerGrid;
 use crate::scheduler::Scheduler;
+use crate::deck::Host;
 use crate::shop::Shop;
 use crate::street::{Ports, Section, gen_section};
 
@@ -92,6 +95,14 @@ pub struct World {
     npcs: BTreeMap<u64, Npc>,
     #[serde(default)]
     sections: Vec<Section>,
+    /// World-hosted cyberspace: Deck arenas keyed by host id, one Net graph,
+    /// one power grid. Clients render these; the sim owns them (design/08).
+    #[serde(default)]
+    hosts: BTreeMap<u64, Host>,
+    #[serde(default)]
+    pub net: NetGraph,
+    #[serde(default)]
+    pub power: PowerGrid,
     #[serde(default)]
     shops: Vec<PlacedShop>,
     #[serde(skip)]
@@ -104,7 +115,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
@@ -145,6 +156,15 @@ impl World {
 
     pub fn section_count(&self) -> usize {
         self.sections.len()
+    }
+
+    /// Fetch or create a Deck arena for a host (12x8, 100 CPU default).
+    pub fn ensure_host(&mut self, id: HostId) -> &mut Host {
+        self.hosts.entry(id.0).or_insert_with(|| Host::new(id, 12, 8, 100))
+    }
+
+    pub fn host(&self, id: HostId) -> Option<&Host> {
+        self.hosts.get(&id.0)
     }
 
     pub fn spawn(&mut self, id: EntityId, pos: Pos, speed: u64) {
@@ -592,6 +612,20 @@ mod tests {
             v.apply(&Intent { actor: EntityId(1), verb: Verb::Move(d) }).unwrap();
         }
         assert_eq!(w.snapshot_hash(), v.snapshot_hash());
+    }
+
+    #[test]
+    fn hosted_deck_persists_through_save() {
+        use crate::deck::CellPos;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(crate::ids::HostId(1));
+        w.hosts.get_mut(&1).unwrap().load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1).unwrap();
+        let s = w.save_json();
+        let w2 = World::load_json(&s).unwrap();
+        assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
+        assert!(w2.host(crate::ids::HostId(1)).is_some());
+        assert!(w2.host(crate::ids::HostId(9)).is_none());
     }
 
     #[test]

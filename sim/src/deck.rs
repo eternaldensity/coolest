@@ -60,6 +60,15 @@ struct Segment {
     is_head: bool,
 }
 
+/// JSON-safe cell slot (tuple map keys do not survive serde).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CellSlot {
+    x: u8,
+    y: u8,
+    prog: EntityId,
+    is_head: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Program {
     pub id: EntityId,
@@ -106,7 +115,7 @@ pub struct Host {
     pub w: u8,
     pub h: u8,
     pub cpu_total: u32,
-    cells: BTreeMap<(u8, u8), Segment>,
+    cells: Vec<CellSlot>,
     pub progs: BTreeMap<u64, Program>,
     // M2b: per-program makers (types it can produce + rate), per-owner stocks,
     // per-program paired stats + pending next-turn effects.
@@ -127,7 +136,7 @@ impl Host {
     pub fn new(id: HostId, w: u8, h: u8, cpu_total: u32) -> Self {
         Self {
             id, w, h, cpu_total,
-            cells: BTreeMap::new(), progs: BTreeMap::new(),
+            cells: Vec::new(), progs: BTreeMap::new(),
             makers: BTreeMap::new(), stocks: BTreeMap::new(),
             stats: BTreeMap::new(), effects: BTreeMap::new(),
             vulns: BTreeMap::new(), breached: false,
@@ -145,7 +154,25 @@ impl Host {
     }
 
     fn free(&self, at: CellPos) -> bool {
-        at.0 < self.w && at.1 < self.h && !self.cells.contains_key(&(at.0, at.1))
+        at.0 < self.w && at.1 < self.h && !self.cells.iter().any(|c| c.x == at.0 && c.y == at.1)
+    }
+
+    fn cell_get(&self, x: u8, y: u8) -> Option<Segment> {
+        self.cells.iter().find(|c| c.x == x && c.y == y)
+            .map(|c| Segment { prog: c.prog, is_head: c.is_head })
+    }
+
+    fn cell_put(&mut self, x: u8, y: u8, prog: EntityId, is_head: bool) {
+        if let Some(c) = self.cells.iter_mut().find(|c| c.x == x && c.y == y) {
+            c.prog = prog;
+            c.is_head = is_head;
+        } else {
+            self.cells.push(CellSlot { x, y, prog, is_head });
+        }
+    }
+
+    fn cell_drop(&mut self, x: u8, y: u8) {
+        self.cells.retain(|c| !(c.x == x && c.y == y));
     }
 
     /// Load a fresh len-1 program onto a free Public cell.
@@ -168,7 +195,7 @@ impl Host {
         if self.cpu_load() + add > self.cpu_total {
             return Err(SimError::new("cpu_overload", "headroom", "over budget"));
         }
-        self.cells.insert((at.0, at.1), Segment { prog, is_head: true });
+        self.cell_put(at.0, at.1, prog, true);
         self.progs.insert(prog.0, Program {
             id: prog, owner, head: at,
             tail: VecDeque::new(), max_len: max_len.max(1), cpu_per_seg,
@@ -192,17 +219,24 @@ impl Host {
         if self.overloaded() {
             return Err(SimError::new("cpu_overload", "headroom", "growth blocked"));
         }
-        let p = self.progs.get_mut(&prog.0).unwrap();
+        let old_head = self.progs.get(&prog.0).unwrap().head;
         // Old head becomes tail segment.
-        self.cells.insert((p.head.0, p.head.1), Segment { prog, is_head: false });
-        p.tail.push_front(p.head);
-        p.head = to;
-        self.cells.insert((to.0, to.1), Segment { prog, is_head: true });
-        // Slide when over max length.
-        while p.tail.len() + 1 > p.max_len as usize {
-            if let Some(last) = p.tail.pop_back() {
-                self.cells.remove(&(last.0, last.1));
+        self.cell_put(old_head.0, old_head.1, prog, false);
+        self.cell_put(to.0, to.1, prog, true);
+        let dropped: Vec<CellPos> = {
+            let p = self.progs.get_mut(&prog.0).unwrap();
+            p.tail.push_front(old_head);
+            p.head = to;
+            let mut dropped = Vec::new();
+            while p.tail.len() + 1 > p.max_len as usize {
+                if let Some(last) = p.tail.pop_back() {
+                    dropped.push(last);
+                }
             }
+            dropped
+        };
+        for last in dropped {
+            self.cell_drop(last.0, last.1);
         }
         Ok(())
     }
@@ -210,7 +244,7 @@ impl Host {
     /// Strike a cell: deletes one tail segment, or kills on headshot.
     /// Returns true if a program died.
     pub fn strike(&mut self, target: CellPos) -> Result<bool, SimError> {
-        let seg = self.cells.get(&(target.0, target.1)).cloned()
+        let seg = self.cell_get(target.0, target.1)
             .ok_or(SimError::new("no_target", "program cell", "empty"))?;
         let victim = seg.prog;
         if seg.is_head {
@@ -221,7 +255,7 @@ impl Host {
             if let Some(p) = self.progs.get_mut(&victim.0) {
                 p.tail.retain(|c| *c != target);
             }
-            self.cells.remove(&(target.0, target.1));
+            self.cell_drop(target.0, target.1);
             Ok(false)
         }
     }
@@ -229,7 +263,7 @@ impl Host {
     /// Takeover: attacker's head must be 4-adjacent to victim's head.
     /// Ownership flips; costs the caller 2 acts (enforced by scheduler side).
     pub fn takeover(&mut self, attacker: EntityId, victim_head: CellPos) -> Result<(), SimError> {
-        let seg = self.cells.get(&(victim_head.0, victim_head.1)).cloned()
+        let seg = self.cell_get(victim_head.0, victim_head.1)
             .ok_or(SimError::new("no_target", "program head", "empty"))?;
         if !seg.is_head {
             return Err(SimError::new("not_head", "head cell", "tail"));
@@ -250,9 +284,9 @@ impl Host {
 
     fn remove_program(&mut self, prog: EntityId) {
         if let Some(p) = self.progs.remove(&prog.0) {
-            self.cells.remove(&(p.head.0, p.head.1));
+            self.cell_drop(p.head.0, p.head.1);
             for c in p.tail {
-                self.cells.remove(&(c.0, c.1));
+                self.cell_drop(c.0, c.1);
             }
         }
     }
@@ -275,7 +309,7 @@ impl Host {
         if self.cpu_load() + 1 + p.cpu_per_seg as u32 > self.cpu_total {
             return Err(SimError::new("cpu_overload", "headroom", "over budget"));
         }
-        self.cells.insert((at.0, at.1), Segment { prog: new_id, is_head: true });
+        self.cell_put(at.0, at.1, new_id, true);
         self.progs.insert(new_id.0, Program {
             id: new_id, owner: p.owner, head: at,
             tail: VecDeque::new(), max_len: p.max_len, cpu_per_seg: p.cpu_per_seg,
@@ -433,7 +467,7 @@ impl Host {
     }
 
     fn deal_damage(&mut self, target: CellPos, mut dmg: u32) -> Result<bool, SimError> {
-        let seg = self.cells.get(&(target.0, target.1)).cloned()
+        let seg = self.cell_get(target.0, target.1)
             .ok_or(SimError::new("no_target", "program cell", "empty"))?;
         let victim = seg.prog;
         // Shield absorbs segment damage first.
@@ -454,17 +488,21 @@ impl Host {
             }
             return Ok(false);
         }
+        // Remove up to `dmg` tail segments nearest the head.
+        let mut gone = Vec::new();
         if let Some(p) = self.progs.get_mut(&victim.0) {
-            // Remove up to `dmg` tail segments nearest the head.
             let mut removed = 0;
             while removed < dmg {
                 if let Some(c) = p.tail.pop_front() {
-                    self.cells.remove(&(c.0, c.1));
+                    gone.push(c);
                     removed += 1;
                 } else {
                     break;
                 }
             }
+        }
+        for c in gone {
+            self.cell_drop(c.0, c.1);
         }
         Ok(false)
     }
@@ -493,7 +531,7 @@ impl Host {
             for _ in 0..dots {
                 if let Some(p) = self.progs.get_mut(&prog.0) {
                     if let Some(c) = p.tail.pop_back() {
-                        self.cells.remove(&(c.0, c.1));
+                        self.cell_drop(c.0, c.1);
                     } else {
                         self.remove_program(prog);
                         break;
