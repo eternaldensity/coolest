@@ -17,8 +17,13 @@ fn pos(x: u8, y: u8) -> Pos {
 fn main() {
     let mut ui = WebClient::new();
 
+    // Data files drive runtime (design/11): jobs tune payouts, vulns seed hosts.
+    let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
+    let vulns = sim::parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
+
     // M0.5 survival.
     let mut w = World::new(42);
+    w.set_jobs(&jobs);
     w.spawn(EntityId(1), pos(8, 8), 10);
     let act = |w: &mut World, v: Verb| {
         // Jump the clock like the server scheduler would.
@@ -39,6 +44,10 @@ fn main() {
 
     // M2 deck fight.
     let mut h = Host::new(HostId(1), 12, 8, 100);
+    for v in &vulns {
+        h.add_vuln(&v.id);
+    }
+    println!("vulns registered: {}", vulns.len());
     h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1).unwrap();
     h.step(EntityId(10), CellPos(3, 2)).unwrap();
     h.step(EntityId(10), CellPos(4, 2)).unwrap();
