@@ -16,6 +16,7 @@ enum Tab {
     Street,
     Deck,
     Net,
+    Veil,
 }
 
 fn pos(x: u8, y: u8) -> Pos {
@@ -29,6 +30,7 @@ pub struct Shell {
     input: String,
     log: Vec<String>,
     sel: Option<(u8, u8)>,
+    mp: u8,
     frames_left: Option<u32>,
 }
 
@@ -44,6 +46,10 @@ impl Shell {
         server.world.net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
         server.world.net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
         server.world.ensure_host(HostId(1));
+        // Demo veil complex: lobby - ops - roof(exit).
+        server.world.veil.add_area(1, "lobby", vec![2], false);
+        server.world.veil.add_area(2, "ops", vec![1, 3], false);
+        server.world.veil.add_area(3, "roof", vec![2], true);
 
         server.world.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
         server.world.spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
@@ -63,6 +69,7 @@ impl Shell {
             input: String::new(),
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
             sel: None,
+            mp: 8,
             frames_left: frames,
         };
         shell.say_status();
@@ -147,6 +154,7 @@ impl eframe::App for Shell {
                 ui.selectable_value(&mut self.tab, Tab::Street, "Street");
                 ui.selectable_value(&mut self.tab, Tab::Deck, "Deck");
                 ui.selectable_value(&mut self.tab, Tab::Net, "Net");
+                ui.selectable_value(&mut self.tab, Tab::Veil, "Veil");
             });
         });
 
@@ -315,6 +323,60 @@ impl eframe::App for Shell {
                         Ok(()) => self.say("wire 1-2 damaged".to_string()),
                         Err(e) => self.say(format!("damage failed: {e}")),
                     }
+                }
+            }
+            Tab::Veil => {
+                ui.heading("Veil — helmet space");
+                if !self.server.world.veil.present(self.actor) {
+                    ui.horizontal(|ui| {
+                        ui.label("mindpower");
+                        ui.add(egui::DragValue::new(&mut self.mp).range(0..=20));
+                        if ui.button("Jack in @lobby").clicked() {
+                            let mp = self.mp;
+                            let msg = match self.server.world.veil.enter_at(self.actor, mp, 1) {
+                                Ok(()) => format!("jacked in (mp {mp})"),
+                                Err(e) => format!("entry refused: {e}"),
+                            };
+                            self.say(msg);
+                        }
+                    });
+                    ui.label("Needs 5+ mindpower. Death ejects with drain.");
+                } else {
+                    let area = self.server.world.veil.area_of(self.actor).unwrap_or(0);
+                    let name = self.server.world.veil.area_info(area).map(|(n, _, _)| n).unwrap_or_else(|| "lobby".to_string());
+                    ui.label(format!("area: {name} (mp {})", self.server.world.veil.mindpower(self.actor).unwrap_or(0)));
+                    if let Some(host) = self.server.world.veil.controlled(self.actor) {
+                        ui.label(format!("controlling {host:?}"));
+                    }
+                    let exits: Vec<u64> = self.server.world.veil.area_info(area).map(|(_, e, _)| e).unwrap_or_default();
+                    ui.horizontal(|ui| {
+                        for a in exits {
+                            let label = self.server.world.veil.area_info(a).map(|(n, _, x)| format!("{n}{}", if x { " [exit]" } else { "" })).unwrap_or_else(|| format!("area {a}"));
+                            if ui.button(format!("→ {label}")).clicked() {
+                                let msg = match self.server.world.veil.move_to(self.actor, a) {
+                                    Ok(()) => format!("moved to {label}"),
+                                    Err(e) => format!("blocked: {e}"),
+                                };
+                                self.say(msg);
+                            }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Seize demo host (mp 3)").clicked() {
+                            let msg = match self.server.world.veil.transfer(self.actor, EntityId(70), 3, true) {
+                                Ok(()) => "host 70 seized".to_string(),
+                                Err(e) => format!("seize failed: {e}"),
+                            };
+                            self.say(msg);
+                        }
+                        if ui.button("Eject").clicked() {
+                            let msg = match self.server.world.veil.eject(self.actor) {
+                                Ok(drain) => format!("ejected (drain {drain})"),
+                                Err(e) => format!("eject failed: {e}"),
+                            };
+                            self.say(msg);
+                        }
+                    });
                 }
             }
         });

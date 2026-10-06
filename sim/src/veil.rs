@@ -72,6 +72,16 @@ impl Veil {
         Ok(())
     }
 
+    pub fn area_ids(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self.areas.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    pub fn area_info(&self, id: u64) -> Option<(String, Vec<u64>, bool)> {
+        self.areas.get(&id).map(|a| (a.name.clone(), a.exits.clone(), a.is_exit))
+    }
+
     pub fn area_of(&self, owner: EntityId) -> Option<u64> {
         self.tokens.get(&owner.0).map(|t| t.area)
     }
