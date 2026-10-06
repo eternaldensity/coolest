@@ -4,6 +4,7 @@
 //!
 //! Socket I/O lives in `net`; this module never touches the network.
 
+pub mod atproto;
 pub mod net;
 
 use std::collections::VecDeque;

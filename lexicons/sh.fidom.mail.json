@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "sh.fidom.mail",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["to", "body", "createdAt"],
+        "properties": {
+          "to": { "type": "string", "format": "handle" },
+          "body": { "type": "string", "maxLength": 2000 },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

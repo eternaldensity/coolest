@@ -1,0 +1,20 @@
+{
+  "lexicon": 1,
+  "id": "sh.fidom.board",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["city", "title", "body", "createdAt"],
+        "properties": {
+          "city": { "type": "string", "maxLength": 64 },
+          "title": { "type": "string", "maxLength": 120 },
+          "body": { "type": "string", "maxLength": 5000 },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}
