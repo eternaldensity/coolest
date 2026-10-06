@@ -7,7 +7,7 @@ use client_web::status_line;
 use eframe::egui;
 use server::Server;
 use sim::{
-    CellPos, Dir, EntityId, Host, HostId, Intent, LinkKind, NetGraph, NetKind, Pos,
+    CellPos, Dir, EntityId, HostId, Intent, LinkKind, NetKind, Pos,
     Role, Standing, Timetable, Verb, cop_duty,
 };
 
@@ -28,8 +28,6 @@ pub struct Shell {
     tab: Tab,
     input: String,
     log: Vec<String>,
-    deck: Host,
-    net: NetGraph,
     sel: Option<(u8, u8)>,
     frames_left: Option<u32>,
 }
@@ -40,12 +38,12 @@ impl Shell {
         let actor = EntityId(1);
         server.world.spawn(actor, pos(8, 8), 10);
 
-        let mut net = NetGraph::new();
-        net.add_node(HostId(1), NetKind::Oldnet, 10, false);
-        net.add_node(HostId(2), NetKind::Oldnet, 100, true);
-        net.add_node(HostId(3), NetKind::Betanet, 50, false);
-        net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
-        net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
+        server.world.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+        server.world.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+        server.world.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+        server.world.net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
+        server.world.net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
+        server.world.ensure_host(HostId(1));
 
         server.world.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
         server.world.spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
@@ -64,8 +62,6 @@ impl Shell {
             tab: Tab::Street,
             input: String::new(),
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
-            deck: Host::new(HostId(1), 12, 8, 100),
-            net,
             sel: None,
             frames_left: frames,
         };
@@ -162,6 +158,20 @@ impl eframe::App for Shell {
             }
             let cop = Timetable::cop_day();
             ui.label(format!("cop 10:00 -> {:?}", cop_duty(&cop, 10, Standing::Clean)));
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    match self.server.save_snapshot("/tmp/opencode/fidom-save.json") {
+                        Ok(()) => self.say("saved".to_string()),
+                        Err(e) => self.say(format!("save failed: {e}")),
+                    }
+                }
+                if ui.button("Load").clicked() {
+                    match self.server.load_snapshot("/tmp/opencode/fidom-save.json") {
+                        Ok(()) => self.say("loaded".to_string()),
+                        Err(e) => self.say(format!("load failed: {e}")),
+                    }
+                }
+            });
         });
 
         egui::Panel::bottom("console").show(ui, |ui| {
@@ -223,47 +233,75 @@ impl eframe::App for Shell {
                 });
             }
             Tab::Deck => {
-                ui.heading("Deck — demo host");
+                ui.heading("Deck — world host 1 (H head, o tail)");
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
-                        match self.sel {
+                        let msg = match self.sel {
                             Some((x, y)) => {
-                                let id = EntityId(100 + self.deck.progs.len() as u64);
-                                match self.deck.load(id, EntityId(1), CellPos(x, y), 3, 1) {
-                                    Ok(()) => self.say(format!("loaded killer {id:?}")),
-                                    Err(e) => self.say(format!("load failed: {e}")),
+                                let host = self.server.world.ensure_host(HostId(1));
+                                let id = EntityId(100 + host.progs.len() as u64);
+                                match host.load(id, EntityId(1), CellPos(x, y), 3, 1) {
+                                    Ok(()) => format!("loaded killer {id:?}"),
+                                    Err(e) => format!("load failed: {e}"),
                                 }
                             }
-                            None => self.say("click a cell first".to_string()),
-                        }
+                            None => "click a cell first".to_string(),
+                        };
+                        self.say(msg);
                     }
                     if ui.button("Strike selected").clicked() {
-                        match self.sel {
-                            Some((x, y)) => match self.deck.strike(CellPos(x, y)) {
-                                Ok(killed) => self.say(format!("strike: killed={killed}")),
-                                Err(e) => self.say(format!("strike failed: {e}")),
-                            },
-                            None => self.say("click a cell first".to_string()),
-                        }
+                        let msg = match self.sel {
+                            Some((x, y)) => {
+                                match self.server.world.ensure_host(HostId(1)).strike(CellPos(x, y)) {
+                                    Ok(killed) => format!("strike: killed={killed}"),
+                                    Err(e) => format!("strike failed: {e}"),
+                                }
+                            }
+                            None => "click a cell first".to_string(),
+                        };
+                        self.say(msg);
                     }
                 });
+                // Snapshot arena state up front: buttons below need &mut self.
+                let (heads, tails, cpu, total) = match self.server.world.host(HostId(1)) {
+                    Some(h) => {
+                        let mut heads = std::collections::BTreeSet::new();
+                        let mut tails = std::collections::BTreeSet::new();
+                        for p in h.progs.values() {
+                            heads.insert((p.head.0, p.head.1));
+                            for t in &p.tail {
+                                tails.insert((t.0, t.1));
+                            }
+                        }
+                        (heads, tails, h.cpu_load(), h.cpu_total)
+                    }
+                    None => (std::collections::BTreeSet::new(), std::collections::BTreeSet::new(), 0, 0),
+                };
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
-                            let label = if Some((x, y)) == self.sel { "[X]" } else { "[ ]" };
-                            if ui.button(label).clicked() {
+                            let glyph = if heads.contains(&(x, y)) {
+                                "H"
+                            } else if tails.contains(&(x, y)) {
+                                "o"
+                            } else if Some((x, y)) == self.sel {
+                                "X"
+                            } else {
+                                "."
+                            };
+                            if ui.button(glyph).clicked() {
                                 self.sel = Some((x, y));
                             }
                         }
                         ui.end_row();
                     }
                 });
-                ui.label(format!("CPU {}/{}", self.deck.cpu_load(), self.deck.cpu_total));
+                ui.label(format!("CPU {cpu}/{total}"));
             }
             Tab::Net => {
-                ui.heading("Net — Oldnet/Betanet demo");
+                ui.heading("Net — world graph (Oldnet/Betanet)");
                 if ui.button("Route 1→3").clicked() {
-                    match self.net.route(HostId(1), HostId(3)) {
+                    match self.server.world.net.route(HostId(1), HostId(3)) {
                         Ok(r) => self.say(format!(
                             "route {:?} {}ms toll {} cap {} gw={} thr={}",
                             r.path, r.latency_ms, r.toll_cents, r.cap_mbps, r.gateway_ok,
@@ -273,7 +311,7 @@ impl eframe::App for Shell {
                     }
                 }
                 if ui.button("Damage wire 1-2").clicked() {
-                    match self.net.damage_wire(HostId(1), HostId(2)) {
+                    match self.server.world.net.damage_wire(HostId(1), HostId(2)) {
                         Ok(()) => self.say("wire 1-2 damaged".to_string()),
                         Err(e) => self.say(format!("damage failed: {e}")),
                     }
