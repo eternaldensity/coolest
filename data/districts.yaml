@@ -1,0 +1,26 @@
+# M1a districts (see sim/src/street.rs District).
+# weight: share of generated sections. difficulty_base: added to rolled 0-5.
+- id: residential
+  weight: 20
+  difficulty_base: 0
+- id: shop
+  weight: 12
+  difficulty_base: 0
+- id: park
+  weight: 10
+  difficulty_base: 0
+- id: industrial
+  weight: 14
+  difficulty_base: 1
+- id: gov
+  weight: 8
+  difficulty_base: 2
+- id: rural
+  weight: 14
+  difficulty_base: 0
+- id: forest
+  weight: 12
+  difficulty_base: 1
+- id: lake
+  weight: 10
+  difficulty_base: 1

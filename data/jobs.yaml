@@ -1,0 +1,11 @@
+# M2 programming jobs (see sim/src/world.rs JOBS).
+# payout_cents: ledger credit on completion.
+# mood_cost / food_cost: pressure-loop costs (design/10 2024 survival).
+- id: debug-script
+  payout_cents: 60
+  mood_cost: 5
+  food_cost: 2
+- id: driver-patch
+  payout_cents: 120
+  mood_cost: 9
+  food_cost: 4

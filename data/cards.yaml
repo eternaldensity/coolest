@@ -1,0 +1,22 @@
+# M2b card/effect table v1 (see sim/src/deck.rs Fx + card_strike).
+# next-turn-only unless noted. Full 2024 table lands incrementally.
+negative:
+  - id: distract
+    effect: SkipNext
+  - id: freakout
+    effect: DotNext(1)
+    targets: stability
+positive:
+  - id: tank
+    effect: ShieldNext(1)
+  - id: patch
+    effect: heal-lowest
+  - id: spike
+    effect: consume-to-damage
+  - id: overload
+    effect: consume-all-to-damage
+manipulation:
+  - id: farm
+    effect: produce
+  - id: copy
+    effect: clone-segment

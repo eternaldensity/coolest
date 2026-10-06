@@ -1,0 +1,11 @@
+# M2 starter vulns (see sim/src/deck.rs exploit/patch).
+# effect: breach flag only in M2; per-vuln payloads land with zones (M3+).
+- id: cve-2006-0001
+  target: office-ws
+  effect: breach
+- id: cve-2006-0002
+  target: home-pc
+  effect: breach
+- id: cve-2006-0003
+  target: router
+  effect: breach
