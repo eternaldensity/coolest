@@ -1,6 +1,10 @@
 //! Authoritative server shell (design/08 + 11): single incoming queue,
-//! tick loop, snapshots, intent log for replay. Async runtime and sockets
-//! land later; the ordering and determinism rules live here from day one.
+//! tick loop, snapshots, intent log for replay. Sync sockets now;
+//! async runtime later. Ordering and determinism rules live here.
+//!
+//! Socket I/O lives in `net`; this module never touches the network.
+
+pub mod net;
 
 use std::collections::VecDeque;
 use sim::{Delta, Event, Intent, World};
