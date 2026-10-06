@@ -112,7 +112,7 @@ impl Shell {
         let cmd = std::mem::take(&mut self.input);
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
-            "help" => self.say("move: arrows/hjkl | eat | work 0 | work 1 | watch".to_string()),
+            "help" => self.say("move arrows/hjkl · eat · work 0/1 · watch · buy <item> · talk".to_string()),
             "eat" => self.do_verb(Verb::Eat),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             "talk" => self.start_talk(),
@@ -216,7 +216,11 @@ impl eframe::App for Shell {
             if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
                 ui.label(status_line(food, mood, money));
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
+                if food < 30 || mood < 30 {
+                    ui.label(egui::RichText::new("! needs low — Eat / Watch soon").color(egui::Color32::RED));
+                }
             }
+            ui.label(egui::RichText::new(format!("Objective: {}", self.server.world.advise(self.actor))).strong());
             let cop = Timetable::cop_day();
             ui.label(format!("cop 10:00 -> {:?}", cop_duty(&cop, 10, Standing::Clean)));
             ui.horizontal(|ui| {
@@ -251,6 +255,21 @@ impl eframe::App for Shell {
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Street => {
+                ui.horizontal(|ui| {
+                    if ui.button("Eat").clicked() {
+                        self.do_verb(Verb::Eat);
+                    }
+                    if ui.button("Work 0").clicked() {
+                        self.do_verb(Verb::Work(0));
+                    }
+                    if ui.button("Work 1").clicked() {
+                        self.do_verb(Verb::Work(1));
+                    }
+                    if ui.button("Watch").clicked() {
+                        self.do_verb(Verb::Watch);
+                    }
+                });
+                ui.label("@ you · n folk · . floor · # blocked · gold = shop counter (stand on it, Buy)");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 // Snapshot world reads up front: UI callbacks below need &mut self.
                 let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
@@ -359,7 +378,8 @@ impl eframe::App for Shell {
                 });
             }
             Tab::Deck => {
-                ui.heading("Deck — world host 1 (H head, o tail)");
+                ui.heading("Deck — world host 1");
+                ui.label("H program head (kill it) · o tail (hit points) · click a cell, then Load/Strike");
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
                         let msg = match self.sel {
@@ -426,6 +446,7 @@ impl eframe::App for Shell {
             }
             Tab::Net => {
                 ui.heading("Net — world graph (Oldnet/Betanet)");
+                ui.label("More hops = safer trace, higher tolls. Laser is fast but tolled.");
                 if ui.button("Route 1→3").clicked() {
                     match self.server.world.net.route(HostId(1), HostId(3)) {
                         Ok(r) => self.say(format!(
