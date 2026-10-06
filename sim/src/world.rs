@@ -46,8 +46,9 @@ struct Being {
     rations: u8,
 }
 
-/// M0.5 jobs: (payout_cents, mood_cost, food_cost).
-const JOBS: [(i64, u8, u8); 2] = [(60, 5, 2), (120, 9, 4)];
+/// M0.5 jobs: (payout_cents, mood_cost, food_cost). Defaults match
+/// data/jobs.yaml; `set_jobs` overrides from file at runtime.
+const DEFAULT_JOBS: [(i64, u8, u8); 2] = [(60, 5, 2), (120, 9, 4)];
 const WATCH_COST: i64 = 30;
 
 /// Minimal M0 world: 1 section 16x16, walls on border, one floor.
@@ -56,13 +57,26 @@ pub struct World {
     pub tick: u64,
     pub seed: u64,
     beings: BTreeMap<u64, Being>,
+    #[serde(default = "default_jobs")]
+    jobs: Vec<(i64, u8, u8)>,
     #[serde(skip)]
     sched: Scheduler,
 }
 
+fn default_jobs() -> Vec<(i64, u8, u8)> {
+    DEFAULT_JOBS.to_vec()
+}
+
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), sched: Scheduler::new() }
+    }
+
+    /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
+    pub fn set_jobs(&mut self, defs: &[crate::data::JobDef]) {
+        if !defs.is_empty() {
+            self.jobs = defs.iter().map(|d| (d.payout_cents, d.mood_cost, d.food_cost)).collect();
+        }
     }
 
     pub fn spawn(&mut self, id: EntityId, pos: Pos, speed: u64) {
@@ -125,8 +139,8 @@ impl World {
                 kind = "ate";
             }
             Verb::Work(j) => {
-                let (pay, mood_c, food_c) = *JOBS.get(j as usize)
-                    .ok_or(SimError::new("no_job", "job 0-1", "bad id"))?;
+                let (pay, mood_c, food_c) = *self.jobs.get(j as usize)
+                    .ok_or(SimError::new("no_job", "known job", "bad id"))?;
                 if b.food == 0 || b.mood == 0 {
                     return Err(SimError::new("job_lockout", "food>0,mood>0", "depleted"));
                 }
@@ -270,5 +284,24 @@ mod tests {
         let t0 = w.tick;
         let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait });
         assert_eq!(w.beings[&1].next_at, t0 + 2); // speed 1 x2 while starving
+    }
+
+    #[test]
+    fn jobs_override_from_data_file() {
+        use crate::data::parse_jobs;
+        let defs = parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
+        let mut w = World::new(1);
+        w.set_jobs(&defs);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let (_, _, m0, _) = w.needs(EntityId(1)).unwrap();
+        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Work(1) });
+        let (_, _, m1, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!(m1, m0 + 120); // file value, not code constant
+        // Old snapshots without a jobs table still load (serde default).
+        let mut w2 = World::load_json(r#"{"tick":0,"seed":1,"beings":{}}"#).unwrap();
+        w2.spawn(EntityId(9), pos(8, 8), 1);
+        let (_, _, n0, _) = w2.needs(EntityId(9)).unwrap();
+        let _ = w2.apply(&Intent { actor: EntityId(9), verb: Verb::Work(0) });
+        assert_eq!(w2.needs(EntityId(9)).unwrap().2, n0 + 60);
     }
 }
