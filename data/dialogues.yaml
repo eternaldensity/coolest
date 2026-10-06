@@ -1,0 +1,70 @@
+# Talk trees (see sim/src/talk.rs). Effects are caller-executed tags.
+- id: shopkeeper
+  start: hi
+  starts: {}
+  states:
+    hi:
+      text: "Welcome in. Shelves are stocked, prices are fair."
+      options:
+        - label: "Trade."
+          effect: trade
+        - label: "Any work around here?"
+          next: work
+        - label: "Just looking."
+          next: bye
+    work:
+      text: "Check the job board. And mind the cameras on the way out."
+      options:
+        - label: "Trade."
+          effect: trade
+        - label: "Leave."
+          next: bye
+    bye:
+      text: "Mind the door on your way out."
+      options: []
+- id: cop
+  start: hi
+  starts:
+    wanted: hands
+  states:
+    hi:
+      text: "Evening, citizen. Papers in order? Move along."
+      options:
+        - label: "Yes, officer."
+          next: bye
+        - label: "What's the news?"
+          next: news
+    news:
+      text: "Oldnet raids nightly. Curfew talk again. Keep clean."
+      options:
+        - label: "Will do."
+          next: bye
+    hands:
+      text: "YOU. Hands where I can see them. This area is closed to you."
+      options:
+        - label: "Run."
+          effect: flee
+        - label: "Come quietly."
+          next: bye
+    bye:
+      text: "Stay out of trouble."
+      options: []
+- id: civilian
+  start: hi
+  starts: {}
+  states:
+    hi:
+      text: "Heard the Betanet tolls went up again. Oldnet forever."
+      options:
+        - label: "Where's the shop?"
+          next: dir
+        - label: "Bye."
+          next: bye
+    dir:
+      text: "Two blocks east, look for the gold counter. Tell them I sent you. No discount."
+      options:
+        - label: "Thanks."
+          next: bye
+    bye:
+      text: "Later."
+      options: []

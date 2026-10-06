@@ -91,6 +91,18 @@ pub fn parse_districts(s: &str) -> Result<Vec<DistrictDef>, SimError> {
     Ok(ds)
 }
 
+pub fn parse_dialogues(s: &str) -> Result<Vec<crate::talk::Dialogue>, SimError> {
+    let ds: Vec<crate::talk::Dialogue> = serde_yaml::from_str(s)
+        .map_err(|_| SimError::new("data", "dialogues.yaml list", "unparseable"))?;
+    if ds.is_empty() {
+        return Err(SimError::new("data", ">= 1 dialogue", "empty"));
+    }
+    for d in &ds {
+        d.validate()?;
+    }
+    Ok(ds)
+}
+
 pub fn parse_cards(s: &str) -> Result<CardTable, SimError> {
     let t: CardTable = serde_yaml::from_str(s)
         .map_err(|_| SimError::new("data", "cards.yaml table", "unparseable"))?;
@@ -121,6 +133,16 @@ mod tests {
         let cards = parse_cards(include_str!("../../data/cards.yaml")).unwrap();
         assert!(cards.negative.iter().any(|c| c.id == "freakout"));
         assert!(cards.positive.iter().any(|c| c.id == "overload"));
+    }
+
+    #[test]
+    fn dialogues_file_validates() {
+        let ds = parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap();
+        assert_eq!(ds.len(), 3);
+        let shop = ds.iter().find(|d| d.id == "shopkeeper").unwrap();
+        assert!(shop.states["hi"].options.iter().any(|c| c.effect.as_deref() == Some("trade")));
+        let cop = ds.iter().find(|d| d.id == "cop").unwrap();
+        assert!(cop.starts.contains_key("wanted"));
     }
 
     #[test]
