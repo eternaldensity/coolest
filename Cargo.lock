@@ -854,9 +854,13 @@ version = "0.0.1"
 dependencies = [
  "client-web",
  "eframe",
+ "log",
  "server",
  "sim",
  "tiny-skia",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

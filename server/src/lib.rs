@@ -6,6 +6,7 @@
 
 pub mod atproto;
 pub mod net;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
 
 use std::collections::VecDeque;

@@ -7,6 +7,10 @@ edition = "2021"
 client-web = { path = "../client-web" }
 # X11+glow only: no Wayland system libs needed (CI/Xvfb friendly).
 eframe = { version = "0.36.2", default-features = false, features = ["x11", "glow", "default_fonts"] }
+log = "0.4.34"
 server = { path = "../server" }
 sim = { path = "../sim" }
 tiny-skia = "0.11"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = { version = "0.3.106", features = ["Document", "Window", "HtmlCanvasElement", "Element", "Node"] }
