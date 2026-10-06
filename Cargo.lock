@@ -124,6 +124,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "server"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "sim",
+]
+
+[[package]]
 name = "sim"
 version = "0.0.1"
 dependencies = [
