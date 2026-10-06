@@ -8,7 +8,7 @@ use eframe::egui;
 use server::Server;
 use sim::{
     CellPos, Dir, EntityId, Host, HostId, Intent, LinkKind, NetGraph, NetKind, Pos,
-    Section, Standing, Timetable, Verb, cop_duty, gen_section, Ports,
+    Role, Standing, Timetable, Verb, cop_duty,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -25,7 +25,6 @@ fn pos(x: u8, y: u8) -> Pos {
 pub struct Shell {
     server: Server,
     actor: EntityId,
-    section: Section,
     tab: Tab,
     input: String,
     log: Vec<String>,
@@ -40,7 +39,6 @@ impl Shell {
         let mut server = Server::new(42);
         let actor = EntityId(1);
         server.world.spawn(actor, pos(8, 8), 10);
-        let section = gen_section(7, 0, 0, Ports::default());
 
         let mut net = NetGraph::new();
         net.add_node(HostId(1), NetKind::Oldnet, 10, false);
@@ -49,10 +47,11 @@ impl Shell {
         net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
         net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
 
+        server.world.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
+        server.world.spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
         let mut shell = Self {
             server,
             actor,
-            section,
             tab: Tab::Street,
             input: String::new(),
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
@@ -118,10 +117,6 @@ impl Shell {
         }
     }
 
-    fn street_pos(&self) -> (u8, u8) {
-        // Actor position is world truth (server); section is the visible chunk.
-        self.server.world.pos_of(self.actor).map(|p| (p.x, p.y)).unwrap_or((8, 8))
-    }
 }
 
 impl eframe::App for Shell {
@@ -136,6 +131,9 @@ impl eframe::App for Shell {
         if self.tab == Tab::Street {
             let ctx = ui.ctx().clone();
             self.move_key(&ctx);
+            // Ambient tick: NPC timetables advance on game time (clean record demo).
+            let hour = ((self.server.world.tick / 60) % 24) as u8;
+            self.server.world.step_npcs(hour, &std::collections::BTreeMap::new());
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -172,14 +170,19 @@ impl eframe::App for Shell {
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Street => {
-                ui.heading("Street — M0.5 slice");
-                let (ax, ay) = self.street_pos();
+                let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
+                let terrain = self.server.world.section_at(here.sx, here.sy);
+                ui.heading(format!("Street — section ({}, {})", here.sx, here.sy));
+                let npcs = self.server.world.npc_positions();
+                let (ax, ay) = (here.x, here.y);
                 egui::Grid::new("street").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..16u8 {
                         for x in 0..16u8 {
                             let ch = if (x, y) == (ax, ay) {
                                 "@"
-                            } else if self.section.walkable(x, y) {
+                            } else if npcs.iter().any(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
+                                "n"
+                            } else if terrain.map(|s| s.walkable(x, y)).unwrap_or(true) {
                                 "."
                             } else {
                                 "#"
