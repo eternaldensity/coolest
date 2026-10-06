@@ -22,11 +22,21 @@ struct MindToken {
     mindpower: u8,
     files: Vec<MindFile>,
     controls: Option<EntityId>, // mental-transfer host
+    area: u64,
+}
+
+/// One hosted domain, labeled by its host (design/08: 5-10 areas per host).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Area {
+    pub name: String,
+    pub exits: Vec<u64>,
+    pub is_exit: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Veil {
     tokens: BTreeMap<u64, MindToken>,
+    areas: BTreeMap<u64, Area>,
 }
 
 impl Veil {
@@ -42,8 +52,83 @@ impl Veil {
         if self.tokens.contains_key(&owner.0) {
             return Err(SimError::new("already_in", "single token", "duplicate"));
         }
-        self.tokens.insert(owner.0, MindToken { hp: 10, mindpower, files: Vec::new(), controls: None });
+        self.tokens.insert(owner.0, MindToken { hp: 10, mindpower, files: Vec::new(), controls: None, area: 0 });
         Ok(())
+    }
+
+    /// Register a hosted area. Area 0 always exists as the default lobby.
+    pub fn add_area(&mut self, id: u64, name: &str, exits: Vec<u64>, is_exit: bool) {
+        self.areas.insert(id, Area { name: name.to_string(), exits, is_exit });
+    }
+
+    /// Helmet entry directly into a named area.
+    pub fn enter_at(&mut self, owner: EntityId, mindpower: u8, area: u64) -> Result<(), SimError> {
+        self.enter(owner, mindpower)?;
+        if area != 0 && !self.areas.contains_key(&area) {
+            self.tokens.remove(&owner.0);
+            return Err(SimError::new("no_area", "hosted area", "missing"));
+        }
+        self.tokens.get_mut(&owner.0).unwrap().area = area;
+        Ok(())
+    }
+
+    pub fn area_of(&self, owner: EntityId) -> Option<u64> {
+        self.tokens.get(&owner.0).map(|t| t.area)
+    }
+
+    /// Undirected neighbors: explicit exit links, plus the 0-lobby hub
+    /// which touches every area (jack in/out point, never itself an exit).
+    fn neighbors(&self, area: u64) -> Vec<u64> {
+        let mut out = Vec::new();
+        if area == 0 {
+            out.extend(self.areas.keys().copied());
+            return out;
+        }
+        if let Some(a) = self.areas.get(&area) {
+            out.extend(a.exits.iter().copied());
+        }
+        for (id, a) in &self.areas {
+            if a.exits.contains(&area) && !out.contains(id) {
+                out.push(*id);
+            }
+        }
+        out.push(0);
+        out
+    }
+
+    /// Move along an exit link (undirected) or via the 0-lobby hub.
+    pub fn move_to(&mut self, owner: EntityId, area: u64) -> Result<(), SimError> {
+        if area != 0 && !self.areas.contains_key(&area) {
+            return Err(SimError::new("no_area", "hosted area", "missing"));
+        }
+        let cur = self.area_of(owner)
+            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        if cur != area && !self.neighbors(cur).contains(&area) {
+            return Err(SimError::new("no_exit", "linked area", "unlinked"));
+        }
+        self.tokens.get_mut(&owner.0).unwrap().area = area;
+        Ok(())
+    }
+
+    /// Nearest flagged exit by BFS. None = no graceful exit (hard eject —
+    /// death still removes the token regardless).
+    pub fn nearest_exit(&self, owner: EntityId) -> Option<u64> {
+        let start = self.area_of(owner)?;
+        use std::collections::{BTreeSet, VecDeque};
+        let mut seen = BTreeSet::new();
+        let mut q = VecDeque::from([start]);
+        seen.insert(start);
+        while let Some(a) = q.pop_front() {
+            if a != 0 && self.areas.get(&a).map(|x| x.is_exit).unwrap_or(false) {
+                return Some(a);
+            }
+            for n in self.neighbors(a) {
+                if seen.insert(n) {
+                    q.push_back(n);
+                }
+            }
+        }
+        None
     }
 
     pub fn present(&self, owner: EntityId) -> bool {
@@ -179,5 +264,26 @@ mod tests {
         let out = v.blackout();
         assert_eq!(out.len(), 2);
         assert!(!v.present(EntityId(1)));
+    }
+
+    #[test]
+    fn areas_move_along_links_and_find_exits() {
+        let mut v = Veil::new();
+        // 1 - 2 - 3(exit); 4 isolated plot (hub-reachable only).
+        v.add_area(1, "host-a:lobby", vec![2], false);
+        v.add_area(2, "host-a:ops", vec![1, 3], false);
+        v.add_area(3, "host-a:roof", vec![2], true);
+        v.add_area(4, "host-b:vault", vec![], false);
+        v.enter_at(EntityId(1), 8, 1).unwrap();
+        assert_eq!(v.area_of(EntityId(1)), Some(1));
+        assert!(v.move_to(EntityId(1), 3).is_err()); // no direct link
+        v.move_to(EntityId(1), 2).unwrap();
+        assert_eq!(v.nearest_exit(EntityId(1)), Some(3));
+        v.move_to(EntityId(1), 3).unwrap();
+        assert!(v.move_to(EntityId(1), 9).is_err()); // unknown area
+        assert!(v.enter_at(EntityId(2), 8, 9).is_err()); // unknown entry
+        // Unlinked 4 still reaches an exit via the 0-lobby hub (two hops).
+        v.enter_at(EntityId(3), 8, 4).unwrap();
+        assert_eq!(v.nearest_exit(EntityId(3)), Some(3));
     }
 }
