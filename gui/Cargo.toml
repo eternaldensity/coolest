@@ -4,5 +4,9 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+client-web = { path = "../client-web" }
+# X11+glow only: no Wayland system libs needed (CI/Xvfb friendly).
+eframe = { version = "0.36.2", default-features = false, features = ["x11", "glow", "default_fonts"] }
+server = { path = "../server" }
 sim = { path = "../sim" }
 tiny-skia = "0.11"

@@ -4,4 +4,8 @@
 pub mod layout;
 pub mod render;
 
+// eframe shell (binary target); kept out of docs builds without a display.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod app;
+
 pub use layout::{layout, Panes, Rect};
