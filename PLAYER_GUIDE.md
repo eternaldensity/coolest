@@ -1,8 +1,8 @@
 # New Player Guide — FIDOM: Future Internet Domains of Mayhem
 
-> Status: sim + headless client are playable via `cargo run -p client-web`.
-> The graphical (egui) shell is not built yet — this guide describes the game
-> as implemented, so you can follow the demo and know what each line means.
+> Status: sim + headless client playable via `cargo run -p client-web`;
+> desktop shell via `cargo run -p gui`; web shell via `cd gui && trunk serve`
+> (Street/Deck/Net views browser-verified 2026-10-06).
 
 ## The pitch
 
