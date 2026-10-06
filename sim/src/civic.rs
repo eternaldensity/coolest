@@ -4,7 +4,6 @@ use crate::crime::Standing;
 /// M1b civic sim (design/05 + 2006 scope cut): data-driven day timetables,
 /// ambient-only NPCs (no hunger checks), cops pursue Wanted on sight —
 /// including off duty.
-
 /// NPC job. Timetables are data (design/05); roles pick presets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
