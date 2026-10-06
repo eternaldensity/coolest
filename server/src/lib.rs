@@ -56,6 +56,58 @@ impl Server {
         self.queue.clear();
         Ok(())
     }
+
+    /// Disk persistence ( evacuate/stop/restart + file backup dump, design/08).
+    pub fn save_snapshot(&self, path: &str) -> std::io::Result<()> {
+        std::fs::write(path, self.snapshot())
+    }
+
+    pub fn load_snapshot(&mut self, path: &str) -> std::io::Result<()> {
+        let s = std::fs::read_to_string(path)?;
+        self.world = World::load_json(&s)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.queue.clear();
+        Ok(())
+    }
+
+    pub fn save_log(&self, path: &str) -> std::io::Result<()> {
+        let lines: Vec<String> = self.log.iter()
+            .map(|i| serde_json::to_string(i).unwrap_or_default())
+            .collect();
+        std::fs::write(path, lines.join("\n"))
+    }
+
+    pub fn load_log(path: &str) -> std::io::Result<Vec<Intent>> {
+        let s = std::fs::read_to_string(path)?;
+        let mut out = Vec::new();
+        for line in s.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let i: Intent = serde_json::from_str(line)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            out.push(i);
+        }
+        Ok(out)
+    }
+}
+
+/// File replay (design/12): fresh world + spawns, feed logged intents.
+/// Returns the resulting world for hash comparison.
+pub fn replay(
+    seed: u64,
+    spawns: &[(sim::EntityId, sim::Pos, u64)],
+    intents: Vec<Intent>,
+) -> World {
+    let mut s = Server::new(seed);
+    for (id, pos, speed) in spawns {
+        s.world.spawn(*id, *pos, *speed);
+    }
+    for i in intents {
+        s.submit(i);
+    }
+    s.step();
+    s.world
 }
 
 #[cfg(test)]
@@ -120,5 +172,33 @@ mod tests {
         }
         s3.step();
         assert_eq!(s3.world.snapshot_hash(), hash);
+    }
+
+    #[test]
+    fn disk_snapshot_and_log_replay() {
+        let dir = "/tmp/opencode/fidom-test";
+        let _ = std::fs::create_dir_all(dir);
+        let snap_path = format!("{dir}/snap.json");
+        let log_path = format!("{dir}/log.jsonl");
+
+        let mut s = Server::new(9);
+        s.world.spawn(EntityId(1), pos(8, 8), 1);
+        s.submit(mover(Dir::E));
+        s.submit(mover(Dir::S));
+        s.step();
+        let hash = s.world.snapshot_hash();
+        s.save_snapshot(&snap_path).unwrap();
+        s.save_log(&log_path).unwrap();
+
+        let mut s2 = Server::new(1);
+        s2.load_snapshot(&snap_path).unwrap();
+        assert_eq!(s2.world.snapshot_hash(), hash);
+
+        let intents = Server::load_log(&log_path).unwrap();
+        assert_eq!(intents.len(), 2);
+        let w = super::replay(9, &[(EntityId(1), pos(8, 8), 1)], intents);
+        assert_eq!(w.snapshot_hash(), hash);
+
+        assert!(Server::load_log(&format!("{dir}/missing.jsonl")).is_err());
     }
 }
