@@ -1,0 +1,3507 @@
+{
+  "count": 100,
+  "reachable": 100,
+  "sections": [
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 0
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 1
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          5
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 2
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          5
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 3
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 2,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 4
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 2,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 5
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 14,
+        "s": null,
+        "w": 8
+      },
+      "reachable": true,
+      "seed": 6
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 14,
+        "s": null,
+        "w": 8
+      },
+      "reachable": true,
+      "seed": 7
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 8
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 9
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": null,
+        "s": 6,
+        "w": 0
+      },
+      "reachable": true,
+      "seed": 10
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": null,
+        "s": 6,
+        "w": 0
+      },
+      "reachable": true,
+      "seed": 11
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 9,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 12
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 9,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 13
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          2
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": null,
+        "s": 8,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 14
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          2
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": null,
+        "s": 8,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 15
+    },
+    {
+      "blocked": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 6,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 16
+    },
+    {
+      "blocked": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 6,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 17
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 18
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 19
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 6,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 20
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 6,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 21
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          7,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 14,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 22
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          7,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 14,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 23
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 24
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 25
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 14,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 26
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 14,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 27
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          7,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 9,
+        "s": null,
+        "w": 12
+      },
+      "reachable": true,
+      "seed": 28
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          7,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 9,
+        "s": null,
+        "w": 12
+      },
+      "reachable": true,
+      "seed": 29
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 0,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 30
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 0,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 31
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "difficulty": 3,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 15,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 32
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "difficulty": 3,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 15,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 33
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 34
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 35
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 15,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 36
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 15,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 37
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          2
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 14,
+        "s": null,
+        "w": 0
+      },
+      "reachable": true,
+      "seed": 38
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          2
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 14,
+        "s": null,
+        "w": 0
+      },
+      "reachable": true,
+      "seed": 39
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 40
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 41
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": null,
+        "s": 6,
+        "w": 8
+      },
+      "reachable": true,
+      "seed": 42
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": null,
+        "s": 6,
+        "w": 8
+      },
+      "reachable": true,
+      "seed": 43
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 9,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 44
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 9,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 45
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": null,
+        "s": 8,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 46
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": null,
+        "s": 8,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 47
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 8,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 48
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 8,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 49
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 50
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 10,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 51
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 8,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 52
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 8,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 53
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 14,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 54
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 14,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 55
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 56
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 5,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 57
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 14,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 58
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          12,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 14,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 59
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 9,
+        "s": null,
+        "w": 4
+      },
+      "reachable": true,
+      "seed": 60
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 9,
+        "s": null,
+        "w": 4
+      },
+      "reachable": true,
+      "seed": 61
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 5,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 0,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 62
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 5,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 0,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 63
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 64
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          4
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 65
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 10,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 66
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          8,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 10,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 67
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 1,
+        "s": null,
+        "w": 3
+      },
+      "reachable": true,
+      "seed": 68
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 3,
+        "n": 1,
+        "s": null,
+        "w": 3
+      },
+      "reachable": true,
+      "seed": 69
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 4,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 70
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 4,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          5,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 4,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 71
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 10,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 72
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 3,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          3
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 10,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 73
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 2,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 74
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          12
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 2,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 75
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          13,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 10,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 76
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Forest",
+      "guarantees": [
+        [
+          "Computer",
+          13,
+          7
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 10,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 77
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 4,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 6,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 78
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        true
+      ],
+      "difficulty": 4,
+      "district": "Gov",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 6,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 79
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          5
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 80
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          2,
+          5
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 81
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          13,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": 2,
+        "w": 7
+      },
+      "reachable": true,
+      "seed": 82
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          13,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": null,
+        "s": 2,
+        "w": 7
+      },
+      "reachable": true,
+      "seed": 83
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 1,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 84
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          3,
+          13
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": 1,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 85
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": null,
+        "s": 12,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 86
+    },
+    {
+      "blocked": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": null,
+        "s": 12,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 87
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 13,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 88
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 2,
+      "district": "Industrial",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          6
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 13,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 89
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 2,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 90
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 0,
+      "district": "Shop",
+      "guarantees": [
+        [
+          "Computer",
+          6,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 9,
+        "n": 2,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 91
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 13,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 92
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Park",
+      "guarantees": [
+        [
+          "Computer",
+          4,
+          10
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 13,
+        "n": null,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 93
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 6,
+        "s": null,
+        "w": 15
+      },
+      "reachable": true,
+      "seed": 94
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Residential",
+      "guarantees": [
+        [
+          "Computer",
+          11,
+          9
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 1,
+        "n": 6,
+        "s": null,
+        "w": 15
+      },
+      "reachable": true,
+      "seed": 95
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 96
+    },
+    {
+      "blocked": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "difficulty": 5,
+      "district": "Rural",
+      "guarantees": [
+        [
+          "Computer",
+          10,
+          11
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": 11,
+        "n": 13,
+        "s": null,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 97
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 10,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 98
+    },
+    {
+      "blocked": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "difficulty": 1,
+      "district": "Lake",
+      "guarantees": [
+        [
+          "Computer",
+          9,
+          8
+        ],
+        [
+          "Door",
+          8,
+          13
+        ],
+        [
+          "Egress",
+          13,
+          8
+        ]
+      ],
+      "ports": {
+        "e": null,
+        "n": null,
+        "s": 10,
+        "w": null
+      },
+      "reachable": true,
+      "seed": 99
+    }
+  ],
+  "seed0": 0
+}

@@ -66,6 +66,38 @@ pub fn trace_csv() -> String {
     s
 }
 
+/// Generation report: per-seed district/difficulty/reachability/
+/// guarantees/ports over `count` seeds. Committed golden in
+/// data/golden/gen_100.json; tests fail on drift (design/12 worldgen gate).
+pub fn gen_report(count: u64, seed0: u64) -> String {
+    use serde_json::json;
+    let mut sections = Vec::new();
+    let mut reachable = 0u64;
+    for i in 0..count {
+        let seed = seed0 + i;
+        let s = gen_section(seed, 0, 0, Ports::default());
+        let ok = s.reachable((8, 8));
+        if ok {
+            reachable += 1;
+        }
+        sections.push(json!({
+            "seed": seed,
+            "district": format!("{:?}", s.district),
+            "difficulty": s.difficulty,
+            "reachable": ok,
+            "guarantees": s.guarantees.iter()
+                .map(|(k, x, y)| json!([format!("{k:?}"), x, y]))
+                .collect::<Vec<_>>(),
+            "ports": {"n": s.ports.n, "s": s.ports.s, "e": s.ports.e, "w": s.ports.w},
+            "blocked": s.blocked,
+        }));
+    }
+    let doc = json!({"seed0": seed0, "count": count, "reachable": reachable, "sections": sections});
+    let mut out = serde_json::to_string_pretty(&doc).unwrap();
+    out.push('\n');
+    out
+}
+
 /// Generation stats: reachable sections over seeds, plus port-agreement
 /// spot checks (east exit of A == west entry demanded of B).
 pub fn gen_stats(count: u64, seed0: u64) -> (u64, u64) {
@@ -118,6 +150,12 @@ mod tests {
     #[test]
     fn gen_100_all_reachable() {
         assert_eq!(gen_stats(100, 0), (100, 100));
+    }
+
+    #[test]
+    fn gen_report_matches_golden() {
+        let golden = include_str!("../../data/golden/gen_100.json");
+        assert_eq!(gen_report(100, 0), golden);
     }
 
     #[test]

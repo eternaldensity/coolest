@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 sim = { path = "../sim" }
 server = { path = "../server" }
+serde_json = "1"
 
 [[bin]]
 name = "fidom-tools"
