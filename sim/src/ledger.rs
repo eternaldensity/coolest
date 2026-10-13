@@ -240,4 +240,38 @@ mod tests {
         }
         assert!(m.send(EntityId(1), EntityId(2), "one too many").is_err());
     }
+
+    #[test]
+    fn random_ops_keep_ledger_closed() {
+        // Seeded fuzz over the real Ledger: every op applied or rejected,
+        // the closed-book invariant must hold after each step.
+        let mut rng = crate::street::Rng::new(1234);
+        let mut l = Ledger::new();
+        let accts: Vec<u64> = (0..4u64).map(|i| l.open(EntityId(i), HostId(i % 2 + 1))).collect();
+        let amts = [0i64, 1, 7, 100, 999, 100_000];
+        let (mut oks, mut errs) = (0u32, 0u32);
+        for _ in 0..3000 {
+            let a = accts[rng.below(4) as usize];
+            let b = accts[rng.below(4) as usize];
+            let amt = amts[rng.below(6) as usize];
+            let r = match rng.below(6) {
+                0 => l.mint(a, amt),
+                1 => l.transfer(a, b, amt),
+                2 => l.burn(a, amt),
+                3 => l.withdraw_atm(a, amt, true, 50_000),
+                4 => l.withdraw_atm(a, amt, false, 50_000),
+                _ => l.credit_spam(a, HostId(1 + rng.below(3) as u64), rng.below(4) as u64, amt).map(|_| ()),
+            };
+            match r {
+                Ok(()) => oks += 1,
+                Err(_) => errs += 1,
+            }
+            let iou: i64 = l.ious().iter().map(|(_, x)| x).sum();
+            assert_eq!(l.live_sum(), l.audit_sum() - iou);
+            for c in &accts {
+                assert!(l.balance(*c).unwrap() >= 0);
+            }
+        }
+        assert!(oks > 500 && errs > 500, "oks={oks} errs={errs}");
+    }
 }
