@@ -25,6 +25,56 @@ fn pos(x: u8, y: u8) -> Pos {
     Pos { city: 1, sx: 0, sy: 0, z: 0, x, y }
 }
 
+/// Save slot: a real file on desktop, a browser-local key on web (where
+/// the sandbox has no filesystem).
+#[cfg(not(target_arch = "wasm32"))]
+const SAVE_SLOT: &str = "/tmp/opencode/fidom-save.json";
+#[cfg(target_arch = "wasm32")]
+const SAVE_SLOT: &str = "fidom-save";
+
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_save(server: &Server) -> String {
+    match server.save_snapshot(SAVE_SLOT) {
+        Ok(()) => "saved".to_string(),
+        Err(e) => format!("save failed: {e}"),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn persist_load(server: &mut Server) -> String {
+    match server.load_snapshot(SAVE_SLOT) {
+        Ok(()) => "loaded".to_string(),
+        Err(e) => format!("load failed: {e}"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn web_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_save(server: &Server) -> String {
+    match web_storage() {
+        Some(store) => match store.set_item(SAVE_SLOT, &server.snapshot()) {
+            Ok(()) => "saved".to_string(),
+            Err(_) => "save failed: browser storage refused the snapshot".to_string(),
+        },
+        None => "save failed: no browser storage".to_string(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn persist_load(server: &mut Server) -> String {
+    match web_storage().and_then(|store| store.get_item(SAVE_SLOT).ok()?) {
+        Some(json) => match server.restore(&json) {
+            Ok(()) => "loaded".to_string(),
+            Err(e) => format!("load failed: {e}"),
+        },
+        None => "load failed: empty save slot".to_string(),
+    }
+}
+
 pub struct Shell {
     server: Server,
     actor: EntityId,
@@ -225,16 +275,12 @@ impl eframe::App for Shell {
             ui.label(format!("cop 10:00 -> {:?}", cop_duty(&cop, 10, Standing::Clean)));
             ui.horizontal(|ui| {
                 if ui.button("Save").clicked() {
-                    match self.server.save_snapshot("/tmp/opencode/fidom-save.json") {
-                        Ok(()) => self.say("saved".to_string()),
-                        Err(e) => self.say(format!("save failed: {e}")),
-                    }
+                    let msg = persist_save(&self.server);
+                    self.say(msg);
                 }
                 if ui.button("Load").clicked() {
-                    match self.server.load_snapshot("/tmp/opencode/fidom-save.json") {
-                        Ok(()) => self.say("loaded".to_string()),
-                        Err(e) => self.say(format!("load failed: {e}")),
-                    }
+                    let msg = persist_load(&mut self.server);
+                    self.say(msg);
                 }
             });
         });
