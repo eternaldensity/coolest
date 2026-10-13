@@ -51,6 +51,33 @@ pub struct Event {
     pub kind: String,
 }
 
+/// Play-session funnel (design/12 section 3): first-tick timestamps for
+/// started → first job → first hack → first trace → survived. Hack/trace
+/// are client-reported via `mark_hack`/`mark_traced` (a Deck program kill,
+/// takeover, or exploit success; an inbound trace on the player's programs).
+/// Survived = still present 100 ticks after the first trace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Funnel {
+    pub protagonist: Option<EntityId>,
+    pub started: Option<u64>,
+    pub job: Option<u64>,
+    pub hack: Option<u64>,
+    pub traced: Option<u64>,
+    pub survived: Option<u64>,
+}
+
+impl Funnel {
+    fn claim(&mut self, actor: EntityId) {
+        if self.protagonist.is_none() {
+            self.protagonist = Some(actor);
+        }
+    }
+
+    fn for_protagonist(&self, actor: EntityId) -> bool {
+        self.protagonist.is_none_or(|p| p == actor)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PlacedShop {
     x: u8,
@@ -125,6 +152,9 @@ pub struct World {
     shops: Vec<PlacedShop>,
     #[serde(skip)]
     sched: Scheduler,
+    /// Play-session funnel milestones. Default (all empty) for old saves.
+    #[serde(default)]
+    funnel: Funnel,
 }
 
 fn default_jobs() -> Vec<(i64, u8, u8)> {
@@ -149,6 +179,7 @@ impl World {
             power: PowerGrid::new(),
             veil: Veil::new(),
             sched: Scheduler::new(),
+            funnel: Funnel::default(),
         }
     }
 
@@ -435,6 +466,37 @@ impl World {
             .unwrap_or(self.tick)
     }
 
+    /// Report a successful offensive hack (Deck kill/takeover/exploit) for
+    /// funnel tracking. The first reporter claims protagonism.
+    pub fn mark_hack(&mut self, actor: EntityId) {
+        self.funnel.claim(actor);
+        if self.funnel.for_protagonist(actor) && self.funnel.hack.is_none() {
+            self.funnel.hack = Some(self.tick);
+        }
+    }
+
+    /// Report an inbound trace on the protagonist's programs.
+    pub fn mark_traced(&mut self, actor: EntityId) {
+        self.funnel.claim(actor);
+        if self.funnel.for_protagonist(actor) && self.funnel.traced.is_none() {
+            self.funnel.traced = Some(self.tick);
+        }
+    }
+
+    /// One-line funnel report for demos and CLIs. `-` = milestone unreached.
+    pub fn funnel_line(&self) -> String {
+        let f = &self.funnel;
+        let show = |v: Option<u64>| v.map(|t| t.to_string()).unwrap_or_else(|| "-".to_string());
+        format!(
+            "funnel started={} job={} hack={} traced={} survived={}",
+            show(f.started),
+            show(f.job),
+            show(f.hack),
+            show(f.traced),
+            show(f.survived)
+        )
+    }
+
     pub fn apply(&mut self, intent: &Intent) -> Result<(Delta, Vec<Event>), SimError> {
         let b = self.beings.get_mut(&intent.actor.0).ok_or(SimError::new(
             "unknown_actor",
@@ -528,6 +590,15 @@ impl World {
                 kind = "watched";
             }
             Verb::Buy(ref item) => {
+                // Firewall installs on world host 1 (the starter rig's arena);
+                // check before charging so a duplicate costs nothing.
+                if item == "firewall" && self.hosts.get(&1).is_some_and(|h| h.firewall()) {
+                    return Err(SimError::new(
+                        "already_installed",
+                        "no firewall",
+                        "installed",
+                    ));
+                }
                 let shop = self
                     .shops
                     .iter_mut()
@@ -544,6 +615,15 @@ impl World {
                 if item == "ration" {
                     b.rations = b.rations.saturating_add(1);
                 }
+                // Packet filter for the starter rig's arena (design/04).
+                // Same defaults as ensure_host; field access keeps the
+                // beings borrow alive where a method call would not.
+                if item == "firewall" {
+                    self.hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100))
+                        .set_firewall(true);
+                }
                 kind = "bought";
             }
         }
@@ -556,6 +636,22 @@ impl World {
         };
         b.next_at = self.tick + eff;
         self.sched.schedule(intent.actor, b.next_at);
+        // Funnel: protagonist claimed on first applied act; job on first Work.
+        self.funnel.claim(intent.actor);
+        if self.funnel.started.is_none() {
+            self.funnel.started = Some(self.tick);
+        }
+        if kind == "worked" && self.funnel.job.is_none() {
+            self.funnel.job = Some(self.tick);
+        }
+        // Survived: protagonist still present 100 ticks after first trace.
+        if self.funnel.traced.is_some() && self.funnel.survived.is_none() {
+            if let Some(t0) = self.funnel.traced {
+                if self.tick >= t0 + 100 && self.pos_of(intent.actor).is_some() {
+                    self.funnel.survived = Some(self.tick);
+                }
+            }
+        }
         self.tick += 1;
         Ok((
             Delta {
@@ -793,6 +889,79 @@ mod tests {
         .unwrap();
         let (f3, m3, _, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!((f3, m3), (0, 0));
+    }
+
+    #[test]
+    fn firewall_purchase_arms_world_host() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 5000).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("firewall", 1500, 1, 1, 1, 1200);
+        w.place_shop(8, 8, shop);
+        // No arena yet: purchase creates and arms world host 1.
+        assert!(w.host(crate::ids::HostId(1)).is_none());
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("firewall".into()),
+        })
+        .unwrap();
+        assert!(w.host(crate::ids::HostId(1)).unwrap().firewall());
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+        // Duplicate install is refused before charging.
+        let before = w.ledger.live_sum();
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("firewall".into()),
+            })
+            .is_err());
+        assert_eq!(w.ledger.live_sum(), before);
+    }
+
+    #[test]
+    fn funnel_tracks_started_job_hack_trace_survived() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 10);
+        assert!(w.funnel_line().contains("started=-"));
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Work(0),
+        })
+        .unwrap();
+        // First applied act claims started + job.
+        let line = w.funnel_line();
+        assert!(line.contains("started=0"), "{line}");
+        assert!(line.contains("job=0"), "{line}");
+        assert!(line.contains("hack=-"), "{line}");
+        // Another actor's milestones don't move the protagonist's funnel.
+        w.spawn(EntityId(2), pos(8, 8), 10);
+        w.mark_hack(EntityId(2));
+        assert!(w.funnel_line().contains("hack=-"));
+        w.mark_hack(EntityId(1));
+        w.mark_traced(EntityId(1));
+        let line = w.funnel_line();
+        assert!(!line.contains("hack=-"), "{line}");
+        assert!(!line.contains("traced=-"), "{line}");
+        assert!(line.contains("survived=-"), "{line}");
+        // Still present 100 ticks after the trace: survived.
+        w.tick += 200;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert!(
+            !w.funnel_line().contains("survived=-"),
+            "{}",
+            w.funnel_line()
+        );
     }
 
     #[test]

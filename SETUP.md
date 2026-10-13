@@ -45,6 +45,7 @@ mail: inbox=1
 crime: align=Untrusted standing=Fined
 license eligible (dirty record) = false
 veil: present after death = false
+funnel: funnel started=0 job=0 hack=21 traced=- survived=-
 demo ok, log lines = 2
 ```
 

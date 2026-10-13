@@ -154,6 +154,7 @@ impl Shell {
         let mut shop = sim::Shop::new(till);
         shop.add_line("ration", 100, 5, 2, 5, 200);
         shop.add_line("meds", 400, 2, 1, 3, 900);
+        shop.add_line("firewall", 1500, 1, 1, 1, 1200);
         server.world.place_shop(10, 8, shop);
         let mut shell = Self {
             server,
@@ -513,8 +514,18 @@ impl eframe::App for Shell {
                     if ui.button("Strike selected").clicked() {
                         let msg = match self.sel {
                             Some((x, y)) => {
-                                match self.server.world.ensure_host(HostId(1)).strike(CellPos(x, y)) {
-                                    Ok(killed) => format!("strike: killed={killed}"),
+                                let result = self
+                                    .server
+                                    .world
+                                    .ensure_host(HostId(1))
+                                    .strike(CellPos(x, y));
+                                match result {
+                                    Ok(killed) => {
+                                        if killed {
+                                            self.server.world.mark_hack(self.actor);
+                                        }
+                                        format!("strike: killed={killed}")
+                                    }
                                     Err(e) => format!("strike failed: {e}"),
                                 }
                             }

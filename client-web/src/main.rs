@@ -76,6 +76,9 @@ fn main() {
         "deck: {} killed={killed}",
         deck_bar(h.cpu_load(), h.cpu_total)
     );
+    if killed {
+        w.mark_hack(EntityId(1));
+    }
     ui.render(&RenderView::Deck(DeckView {
         host: HostId(1),
         ram_used: h.cpu_load(),
@@ -147,5 +150,6 @@ fn main() {
     println!("veil: present after death = {}", v.present(EntityId(1)));
     let _ = Dir::N;
 
+    println!("funnel: {}", w.funnel_line());
     println!("demo ok, log lines = {}", ui.log.len());
 }

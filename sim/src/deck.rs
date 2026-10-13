@@ -140,6 +140,9 @@ pub struct Host {
     trace: Option<Trace>,
     monitor_armed: bool,
     pub flagged: bool,
+    // Installed packet filter (design/04): inbound traces crawl at +1/tick.
+    #[serde(default)]
+    firewall: bool,
 }
 
 impl Host {
@@ -161,6 +164,7 @@ impl Host {
             trace: None,
             monitor_armed: false,
             flagged: false,
+            firewall: false,
         }
     }
 
@@ -480,16 +484,26 @@ impl Host {
         Ok(())
     }
 
-    /// Advance the trace one tick. Scrambler halves the rate (1 vs 2).
+    /// Advance the trace one tick. Scrambler halves the rate (1 vs 2),
+    /// unless an installed firewall filters: then +1/tick regardless.
     /// Returns true when the target is fully traced.
     pub fn tick_trace(&mut self, scrambled: bool) -> bool {
         match &mut self.trace {
             None => false,
             Some(t) => {
-                t.progress += if scrambled { 1 } else { 2 };
+                t.progress += if self.firewall || scrambled { 1 } else { 2 };
                 t.progress >= t.threshold
             }
         }
+    }
+
+    /// Install (or remove) the packet filter. Idempotent.
+    pub fn set_firewall(&mut self, on: bool) {
+        self.firewall = on;
+    }
+
+    pub fn firewall(&self) -> bool {
+        self.firewall
     }
 
     pub fn set_monitor(&mut self, armed: bool) {
@@ -917,6 +931,25 @@ mod tests {
         }
         assert_eq!(ticks, 5); // scrambler doubles the window
         assert!(slow.start_trace(EntityId(99), 6).is_err()); // no such target
+    }
+
+    #[test]
+    fn installed_firewall_slows_traces() {
+        let mut h = host();
+        h.load(EntityId(91), EntityId(2), CellPos(0, 0), 2, 1)
+            .unwrap();
+        assert!(!h.firewall());
+        h.set_firewall(true);
+        assert!(h.firewall());
+        h.start_trace(EntityId(91), 6).unwrap();
+        // Filtered: +1/tick even unscrambled, like a scrambler.
+        let mut ticks = 0;
+        while !h.tick_trace(false) {
+            ticks += 1;
+        }
+        assert_eq!(ticks, 5);
+        h.set_firewall(false);
+        assert!(!h.firewall());
     }
 
     #[test]
