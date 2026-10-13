@@ -80,11 +80,21 @@ struct Being {
 const DEFAULT_JOBS: [(i64, u8, u8); 2] = [(60, 5, 2), (120, 9, 4)];
 const WATCH_COST: i64 = 30;
 
+/// Save format version. v1 = legacy version-less saves (identical schema);
+/// v2 = stamped. Loaders migrate v1 forward and refuse anything newer.
+pub const SAVE_VERSION: u32 = 2;
+
+fn save_v1() -> u32 {
+    1
+}
+
 /// Minimal M0 world: 1 section 16x16, walls on border, one floor.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct World {
     pub tick: u64,
     pub seed: u64,
+    #[serde(default = "save_v1")]
+    version: u32,
     beings: BTreeMap<u64, Being>,
     #[serde(default = "default_jobs")]
     jobs: Vec<(i64, u8, u8)>,
@@ -118,7 +128,7 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), veil: Veil::new(), sched: Scheduler::new() }
+        Self { tick: 0, seed, version: SAVE_VERSION, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), veil: Veil::new(), sched: Scheduler::new() }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
@@ -466,6 +476,11 @@ impl World {
     pub fn load_json(s: &str) -> Result<Self, SimError> {
         let mut w: Self = serde_json::from_str(s)
             .map_err(|_| SimError::new("load", "valid snapshot", "corrupt"))?;
+        match w.version {
+            1 => w.version = SAVE_VERSION, // v1 schema is identical; stamp forward
+            SAVE_VERSION => {}
+            _ => return Err(SimError::new("load", "snapshot v1-v2", "newer version")),
+        }
         w.rebuild_sched();
         Ok(w)
     }
@@ -524,6 +539,27 @@ mod tests {
         let s = w.save_json();
         let w2 = World::load_json(&s).expect("load");
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
+        assert!(World::load_json("{bad").is_err());
+    }
+
+    #[test]
+    fn save_version_stamps_and_migrates_v1() {
+        let mut w = World::new(7);
+        w.spawn(EntityId(1), pos(8, 8), 2);
+        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        let s = w.save_json();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["version"], serde_json::json!(SAVE_VERSION));
+        // Legacy v1 save (no version key) migrates on load, hash intact.
+        let mut legacy = v.clone();
+        legacy.as_object_mut().unwrap().remove("version");
+        let w2 = World::load_json(&serde_json::to_string(&legacy).unwrap()).unwrap();
+        assert_eq!(w2.snapshot_hash(), w.snapshot_hash());
+        // Future versions refuse with a clear error, not silent corruption.
+        let mut future = v;
+        future.as_object_mut().unwrap().insert("version".into(), 99.into());
+        let err = World::load_json(&serde_json::to_string(&future).unwrap()).unwrap_err();
+        assert_eq!(err.kind, "load");
         assert!(World::load_json("{bad").is_err());
     }
 
