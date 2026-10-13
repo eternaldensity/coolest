@@ -24,6 +24,9 @@ cargo test --workspace
 # Lint gate (CI blocks on warnings)
 cargo clippy --workspace --all-targets -- -D warnings
 
+# Whole merge gate in one shot (fmt, clippy, tests, lexicons, hygiene)
+./gate.sh
+
 # Headless smoke demo: survival → deck → net → ledger → crime → veil
 cargo run -p client-web
 ```
