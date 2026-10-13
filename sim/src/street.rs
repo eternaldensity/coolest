@@ -117,21 +117,25 @@ fn all_districts() -> [District; 8] {
 /// neighbor (road/river continuity); `None` sides are rolled. Retries with
 /// derived subseeds until BFS reachability holds (deterministic).
 pub fn gen_section(seed: u64, sx: i32, sy: i32, want_ports: Ports) -> Section {
-    gen_section_weighted(seed, sx, sy, want_ports, &[])
+    gen_section_weighted(seed, sx, sy, want_ports, &[], [false; 4])
 }
 
 /// Weighted variant: `districts` is (District, weight, difficulty_base).
 /// Empty slice = uniform pick, base 0 (identical to legacy behavior).
+/// `shut` forces sides absent (N,S,E,W): a neighbor already there has no
+/// facing port, so no road opens onto its wall. Explicit `want_ports`
+/// entries always win over `shut`.
 pub fn gen_section_weighted(
     seed: u64,
     sx: i32,
     sy: i32,
     want_ports: Ports,
     districts: &[(District, u32, u8)],
+    shut: [bool; 4],
 ) -> Section {
     let mut attempt: u64 = 0;
     loop {
-        let s = gen_once(seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)), sx, sy, want_ports, districts);
+        let s = gen_once(seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)), sx, sy, want_ports, districts, shut);
         if s.reachable((8, 8)) || attempt >= 20 {
             return s;
         }
@@ -155,23 +159,24 @@ fn pick_district(rng: &mut Rng, districts: &[(District, u32, u8)]) -> (District,
     (d, base)
 }
 
-fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports, districts: &[(District, u32, u8)]) -> Section {
+fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports, districts: &[(District, u32, u8)], shut: [bool; 4]) -> Section {
     let mut rng = Rng::new(seed ^ ((sx as u64).wrapping_mul(0xBF58476D1CE4E5B9)) ^ ((sy as u64).wrapping_mul(0x94D049BB133111EB)));
     let (district, difficulty) = pick_district(&mut rng, districts);
-    // Ports: honor constraints, else 50% a road exits at random row/col.
+    // Ports: honor constraints, shut stays absent, else 50% a road exits at random row/col.
     let mut ports = want_ports;
-    let mut roll = |c: Option<u8>| -> Option<u8> {
+    let mut roll = |c: Option<u8>, closed: bool| -> Option<u8> {
         match c {
             Some(v) => Some(v),
+            None if closed => None,
             None if rng.below(2) == 0 => Some(rng.below(16) as u8),
             None => None,
         }
     };
     // N/S ports are x-coords, E/W ports are y-coords.
-    ports.n = roll(ports.n);
-    ports.s = roll(ports.s);
-    ports.e = roll(ports.e);
-    ports.w = roll(ports.w);
+    ports.n = roll(ports.n, shut[0]);
+    ports.s = roll(ports.s, shut[1]);
+    ports.e = roll(ports.e, shut[2]);
+    ports.w = roll(ports.w, shut[3]);
     // Blocked edges: blocked unless a port exits there (ports force open).
     let blocked = [
         ports.n.is_none() && rng.below(4) == 0,
@@ -261,14 +266,14 @@ mod tests {
         // Single-district table forces the outcome; base shifts difficulty.
         let gov = vec![(District::Gov, 1, 2)];
         for seed in 0..20u64 {
-            let s = gen_section_weighted(seed, 0, 0, Ports::default(), &gov);
+            let s = gen_section_weighted(seed, 0, 0, Ports::default(), &gov, [false; 4]);
             assert_eq!(s.district, District::Gov);
             assert!(s.difficulty >= 2);
             assert!(s.reachable((8, 8)));
         }
         // Full file table: all outcomes are known districts.
         for seed in 0..50u64 {
-            let s = gen_section_weighted(seed, seed as i32, 0, Ports::default(), &table);
+            let s = gen_section_weighted(seed, seed as i32, 0, Ports::default(), &table, [false; 4]);
             assert!(s.reachable((8, 8)), "seed {seed} unreachable");
         }
     }

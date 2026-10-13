@@ -3,7 +3,12 @@
 //!        fidom-tools replay <seed> <spawns.json> <log.jsonl> | mapgen-check [n] [seed0] | ledger-audit <world-save.json>
 
 use std::time::Instant;
-use tools::{gen_report, gen_stats, soak, trace_csv, ttk_csv};
+use tools::{audit_world_ledger, gen_report, gen_stats, mapgen_report, replay_from_files, soak, trace_csv, ttk_csv};
+
+fn fail(msg: String) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1);
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -26,6 +31,45 @@ fn main() {
             let t = Instant::now();
             let hash = soak(seed, actors, ticks);
             println!("soak actors={actors} ticks={ticks} hash={hash:016x} elapsed_ms={}", t.elapsed().as_millis());
+        }
+        Some("replay") => {
+            let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let (spec_path, log_path) = match (args.get(3), args.get(4)) {
+                (Some(a), Some(b)) => (a, b),
+                _ => fail("usage: fidom-tools replay <seed> <spawns.json> <log.jsonl>".to_string()),
+            };
+            let spec = std::fs::read_to_string(spec_path)
+                .unwrap_or_else(|e| fail(format!("replay failed: {e}")));
+            match replay_from_files(seed, &spec, log_path) {
+                Ok(hash) => println!("replay seed={seed} hash={hash:016x}"),
+                Err(e) => fail(format!("replay failed: {e}")),
+            }
+        }
+        Some("mapgen-check") => {
+            let n: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(50);
+            let seed0: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let (report, fails) = mapgen_report(n, seed0);
+            print!("{report}");
+            if fails > 0 {
+                std::process::exit(1);
+            }
+        }
+        Some("ledger-audit") => {
+            let path = match args.get(2) {
+                Some(p) => p,
+                None => fail("usage: fidom-tools ledger-audit <world-save.json>".to_string()),
+            };
+            let json = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| fail(format!("ledger-audit failed: {e}")));
+            match audit_world_ledger(&json) {
+                Ok((ok, live, audit, iou)) => {
+                    println!("audit_ok={ok} live={live} audit={audit} ious={iou}");
+                    if !ok {
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => fail(format!("ledger-audit failed: {e}")),
+            }
         }
         _ => {
             print!("{}", ttk_csv());

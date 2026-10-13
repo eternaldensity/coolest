@@ -3,6 +3,7 @@
 //! `fidom-tools` binary reprints them; tests fail on drift.
 
 use sim::{CellPos, EntityId, Host, HostId, Ports, Rng, World, Dir, Intent, Verb, Pos, gen_section};
+use server::{replay, Server};
 
 /// Killer-vs-killer TTK: grow one len-N program, strike tail cells in order,
 /// then the head. Returns (len, acts to clear).
@@ -131,6 +132,117 @@ pub fn soak(seed: u64, actors: usize, ticks: u64) -> u64 {
     w.snapshot_hash()
 }
 
+/// Spawn spec for `replay`: tile coords default to city 1, section (0,0), z 0.
+#[derive(serde::Deserialize)]
+struct SpawnSpec {
+    id: u64,
+    x: u8,
+    y: u8,
+    speed: u64,
+    #[serde(default = "default_city")]
+    city: u32,
+    #[serde(default)]
+    sx: i32,
+    #[serde(default)]
+    sy: i32,
+    #[serde(default)]
+    z: i8,
+}
+
+fn default_city() -> u32 {
+    1
+}
+
+/// Replay (design/12): fresh world + spawns from JSON, intents from a
+/// server-saved JSONL log → snapshot hash. Drives real `server::replay`.
+pub fn replay_from_files(seed: u64, spawns_json: &str, log_path: &str) -> Result<u64, String> {
+    let specs: Vec<SpawnSpec> = serde_json::from_str(spawns_json).map_err(|e| e.to_string())?;
+    let spawns: Vec<(EntityId, Pos, u64)> = specs
+        .into_iter()
+        .map(|s| {
+            (
+                EntityId(s.id),
+                Pos { city: s.city, sx: s.sx, sy: s.sy, z: s.z, x: s.x, y: s.y },
+                s.speed,
+            )
+        })
+        .collect();
+    let intents = Server::load_log(log_path).map_err(|e| e.to_string())?;
+    Ok(replay(seed, &spawns, intents).snapshot_hash())
+}
+
+/// Mapgen check (design/12): chain a 3x3 of sections through the real
+/// `World::ensure_section` seam logic, then verify BFS reachability and
+/// shared-edge port agreement. Returns failure lines; empty = clean.
+pub fn mapgen_failures(seed: u64) -> Vec<String> {
+    let mut w = World::new(seed);
+    for sy in 0..3i32 {
+        for sx in 0..3i32 {
+            w.ensure_section(sx, sy);
+        }
+    }
+    let mut out = Vec::new();
+    for sy in 0..3i32 {
+        for sx in 0..3i32 {
+            let s = w.section_at(sx, sy).unwrap();
+            if !s.reachable((8, 8)) {
+                out.push(format!("seed {seed} section ({sx},{sy}) unreachable"));
+            }
+            if let Some(e) = w.section_at(sx + 1, sy) {
+                if e.ports.w != s.ports.e {
+                    out.push(format!(
+                        "seed {seed} edge ({sx},{sy})E mismatch: {:?} vs {:?}",
+                        s.ports.e, e.ports.w
+                    ));
+                }
+            }
+            if let Some(south) = w.section_at(sx, sy + 1) {
+                if south.ports.n != s.ports.s {
+                    out.push(format!(
+                        "seed {seed} edge ({sx},{sy})S mismatch: {:?} vs {:?}",
+                        s.ports.s, south.ports.n
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Human report over `seeds` starting at `seed0`, including each seed's
+/// center-section ports. Returns (text, failure count).
+pub fn mapgen_report(seeds: u64, seed0: u64) -> (String, u64) {
+    let mut fails = 0u64;
+    let mut out = format!("mapgen seeds={seeds} seed0={seed0}\n");
+    for i in 0..seeds {
+        let seed = seed0 + i;
+        let mut w = World::new(seed);
+        w.ensure_section(0, 0);
+        let ports = format!("{:?}", w.section_at(0, 0).unwrap().ports);
+        let fs = mapgen_failures(seed);
+        if fs.is_empty() {
+            out.push_str(&format!("seed {seed} ports {ports} ok\n"));
+        } else {
+            fails += fs.len() as u64;
+            for f in fs {
+                out.push_str(&format!("FAIL {f}\n"));
+            }
+        }
+    }
+    out.push_str(&format!("failures {fails}\n"));
+    (out, fails)
+}
+
+/// Ledger audit (design/12): recompute from the log. Loads a world save and
+/// checks live == audit − outstanding IOUs. Returns (ok, live, audit, ious).
+pub fn audit_world_ledger(world_json: &str) -> Result<(bool, i64, i64, i64), String> {
+    let w = World::load_json(world_json).map_err(|e| e.to_string())?;
+    let live = w.ledger.live_sum();
+    let audit = w.ledger.audit_sum();
+    let iou: i64 = w.ledger.ious().iter().map(|(_, a)| a).sum();
+    Ok((live == audit - iou, live, audit, iou))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +280,65 @@ mod tests {
     fn soak_gate_budget_deterministic() {
         // design/12 gate budget: 100 bots x 10k ticks completes + replays equal.
         assert_eq!(soak(7, 100, 10000), soak(7, 100, 10000));
+    }
+
+    fn unique_tmp(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("fidom-tools-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn replay_cli_path_reproduces_server_hash() {
+        use sim::{Dir, Verb};
+        let mut s = Server::new(9);
+        s.world.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
+        s.submit(Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        s.submit(Intent { actor: EntityId(1), verb: Verb::Move(Dir::S) });
+        s.step();
+        let expect = s.world.snapshot_hash();
+        let dir = unique_tmp("replay");
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("log.jsonl");
+        s.save_log(log.to_str().unwrap()).unwrap();
+        let spec = r#"[{"id":1,"x":8,"y":8,"speed":1}]"#;
+        let got = replay_from_files(9, spec, log.to_str().unwrap()).unwrap();
+        assert_eq!(got, expect);
+        assert!(replay_from_files(9, "not json", log.to_str().unwrap()).is_err());
+        assert!(replay_from_files(9, spec, dir.join("missing.jsonl").to_str().unwrap()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mapgen_50_seeds_clean() {
+        for i in 0..50u64 {
+            assert!(mapgen_failures(i).is_empty(), "seed {i}");
+        }
+        let (report, fails) = mapgen_report(50, 0);
+        assert_eq!(fails, 0);
+        assert!(report.contains("failures 0"));
+    }
+
+    #[test]
+    fn ledger_audit_accepts_funded_and_iou_worlds() {
+        use sim::HostId;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
+        w.spawn(EntityId(2), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 9, y: 8 }, 1);
+        let a = w.open_account(EntityId(1), HostId(1)).unwrap();
+        let b = w.open_account(EntityId(2), HostId(2)).unwrap();
+        w.ledger.mint(a, 1000).unwrap();
+        w.ledger.transfer(a, b, 300).unwrap();
+        let (ok, live, audit, iou) = audit_world_ledger(&w.save_json()).unwrap();
+        assert!(ok);
+        assert_eq!((live, audit, iou), (1000, 1000, 0));
+        // Branch-down withdrawal: live drops by the IOU, audit holds.
+        w.ledger.withdraw_atm(a, 90, false, 100).unwrap();
+        let (ok, live, audit, iou) = audit_world_ledger(&w.save_json()).unwrap();
+        assert!(ok);
+        assert_eq!((live, audit, iou), (910, 1000, 90));
+        assert!(audit_world_ledger("{bad").is_err());
     }
 }

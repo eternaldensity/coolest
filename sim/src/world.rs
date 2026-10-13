@@ -11,7 +11,7 @@ use crate::power::PowerGrid;
 use crate::scheduler::Scheduler;
 use crate::deck::Host;
 use crate::shop::Shop;
-use crate::street::{Ports, Section, gen_section};
+use crate::street::{Ports, Section, gen_section, gen_section_weighted};
 use crate::veil::Veil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,27 +130,41 @@ impl World {
 
     /// Generate (or fetch) a section, constraining shared-side ports from
     /// existing neighbors so roads/rivers continue across the seam.
+    /// Presence and absence both propagate: a neighbor with no facing port
+    /// shuts this side instead of rolling a road onto its wall.
     pub fn ensure_section(&mut self, sx: i32, sy: i32) {
         if self.sections.iter().any(|s| s.sx == sx && s.sy == sy) {
             return;
         }
-        let port = |x: i32, y: i32, f: fn(&Section) -> Option<u8>| {
-            self.sections.iter().find(|s| s.sx == x && s.sy == y).and_then(f)
+        let face = |x: i32, y: i32, f: fn(&Section) -> Option<u8>| -> (bool, Option<u8>) {
+            match self.sections.iter().find(|s| s.sx == x && s.sy == y) {
+                None => (false, None),
+                Some(s) => (true, f(s)),
+            }
         };
         let mut want = Ports::default();
-        if let Some(w) = port(sx - 1, sy, |s| s.ports.e) {
-            want.w = Some(w);
+        let mut shut = [false; 4]; // N,S,E,W
+        match face(sx - 1, sy, |s| s.ports.e) {
+            (_, Some(v)) => want.w = Some(v),
+            (true, None) => shut[3] = true,
+            _ => {}
         }
-        if let Some(w) = port(sx + 1, sy, |s| s.ports.w) {
-            want.e = Some(w);
+        match face(sx + 1, sy, |s| s.ports.w) {
+            (_, Some(v)) => want.e = Some(v),
+            (true, None) => shut[2] = true,
+            _ => {}
         }
-        if let Some(w) = port(sx, sy - 1, |s| s.ports.s) {
-            want.n = Some(w);
+        match face(sx, sy - 1, |s| s.ports.s) {
+            (_, Some(v)) => want.n = Some(v),
+            (true, None) => shut[0] = true,
+            _ => {}
         }
-        if let Some(w) = port(sx, sy + 1, |s| s.ports.n) {
-            want.s = Some(w);
+        match face(sx, sy + 1, |s| s.ports.n) {
+            (_, Some(v)) => want.s = Some(v),
+            (true, None) => shut[1] = true,
+            _ => {}
         }
-        self.sections.push(gen_section(self.seed, sx, sy, want));
+        self.sections.push(gen_section_weighted(self.seed, sx, sy, want, &[], shut));
     }
 
     pub fn section_at(&self, sx: i32, sy: i32) -> Option<&Section> {
