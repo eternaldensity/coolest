@@ -300,6 +300,16 @@ impl World {
             .map(|s| &s.shop)
     }
 
+    /// Nearest shop within counter reach (Chebyshev ≤ 1), mirroring the Buy
+    /// radius: clients show the counter panel for these tiles.
+    pub fn shop_near_at(&self, x: u8, y: u8) -> Option<&Shop> {
+        self.shops
+            .iter()
+            .filter(|s| (s.x as i16 - x as i16).abs() <= 1 && (s.y as i16 - y as i16).abs() <= 1)
+            .min_by_key(|s| (s.x as i16 - x as i16).abs() + (s.y as i16 - y as i16).abs())
+            .map(|s| &s.shop)
+    }
+
     /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
     /// home/work/leisure are local tiles; timetable comes from role.
     pub fn spawn_npc(

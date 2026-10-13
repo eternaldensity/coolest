@@ -406,9 +406,10 @@ impl eframe::App for Shell {
                 ui.label("@ you · n folk · . floor · # blocked · gold = shop counter (stand on it, Buy)");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 // Snapshot world reads up front: UI callbacks below need &mut self.
+                // Counter shows within reach (counter serves adjacent tiles).
                 let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
                 let counter: Vec<(String, i64, u32)> = self.server.world
-                    .shop_at(here.x, here.y)
+                    .shop_near_at(here.x, here.y)
                     .map(|shop| shop.stock.iter().map(|(k, l)| (k.clone(), l.price_cents, l.qty)).collect())
                     .unwrap_or_default();
                 let npcs = self.server.world.npc_positions();

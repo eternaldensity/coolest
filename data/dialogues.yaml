@@ -17,8 +17,6 @@
       options:
         - label: "Trade."
           effect: trade
-        - label: "Leave."
-          next: bye
     bye:
       text: "Mind the door on your way out."
       options: []
