@@ -125,4 +125,10 @@ mod tests {
         assert_eq!(soak(7, 20, 500), soak(7, 20, 500));
         assert_ne!(soak(7, 20, 500), soak(8, 20, 500));
     }
+
+    #[test]
+    fn soak_gate_budget_deterministic() {
+        // design/12 gate budget: 100 bots x 10k ticks completes + replays equal.
+        assert_eq!(soak(7, 100, 10000), soak(7, 100, 10000));
+    }
 }

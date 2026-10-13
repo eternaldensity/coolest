@@ -330,4 +330,29 @@ mod tests {
         assert_eq!(bounced.log_surface(), 2); // two transit logs to scrub
         assert_eq!(bounced.trace_threshold(), 8);
     }
+
+    #[test]
+    fn route_never_revisits_nodes_on_loopy_topology() {
+        // Ring 1-2-3-4-5-1 plus chords that tempt A->B->A detours.
+        let mut g = NetGraph::new();
+        for i in 1..=5u64 {
+            g.add_node(HostId(i), NetKind::Oldnet, 50, false);
+        }
+        let wire = LinkKind::Wired { damaged: false };
+        for (a, b) in [(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)] {
+            g.add_link(HostId(a), HostId(b), wire, 1, 0).unwrap();
+        }
+        g.add_link(HostId(1), HostId(3), wire, 1, 0).unwrap();
+        g.add_link(HostId(2), HostId(5), wire, 1, 0).unwrap();
+        for (a, b) in [(1u64, 4u64), (2, 4), (1, 5), (3, 5), (5, 3)] {
+            let r = g.route(HostId(a), HostId(b)).unwrap();
+            let mut seen = std::collections::BTreeSet::new();
+            for h in &r.path {
+                assert!(seen.insert(h.0), "route revisits {h:?}: {:?}", r.path);
+            }
+            assert!(r.hops() <= 4, "detour longer than node count: {:?}", r.path);
+            assert_eq!(r.path[0], HostId(a));
+            assert_eq!(r.path[r.path.len() - 1], HostId(b));
+        }
+    }
 }

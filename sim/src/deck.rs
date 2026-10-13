@@ -707,6 +707,32 @@ mod tests {
     }
 
     #[test]
+    fn damage_soak_floors_at_zero_and_heal_caps() {
+        // Full u8 sweep on every pole: saturating floor, no panic.
+        for stat in ["dedication", "focus", "stability", "courage", "clarity"] {
+            for n in [0u8, 1, 9, 10, 11, 100, 255] {
+                let mut h = host();
+                h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+                h.damage_stat(EntityId(80), stat, n).unwrap();
+                let got = match stat {
+                    "dedication" => h.stats[&80].dedication,
+                    "focus" => h.stats[&80].focus,
+                    "stability" => h.stats[&80].stability,
+                    "courage" => h.stats[&80].courage,
+                    _ => h.stats[&80].clarity,
+                };
+                assert_eq!(got, 10u8.saturating_sub(n), "{stat} -{n}");
+            }
+        }
+        // Heal from the floor caps at the 20 soft cap, never wraps.
+        let mut h = host();
+        h.load(EntityId(81), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.damage_stat(EntityId(81), "focus", 255).unwrap();
+        h.heal_lowest(EntityId(81), 255).unwrap();
+        assert_eq!(h.stats[&81].focus, 20);
+    }
+
+    #[test]
     fn exploit_once_then_burned_patched_blocks() {
         let mut h = host();
         h.add_vuln("cve-2006-0001");
