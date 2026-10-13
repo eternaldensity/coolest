@@ -53,6 +53,23 @@ impl Shop {
 
     /// Customer purchase: transfer price buyer→till, decrement stock.
     pub fn buy(&mut self, ledger: &mut Ledger, buyer: u64, item: &str) -> Result<(), SimError> {
+        self.buy_with_cash(ledger, buyer, 0, item)
+    }
+
+    /// Purchase split across bank transfer and pocket cash. The cash part
+    /// enters the books as a logged mint to the till (a cash deposit), so
+    /// the ledger stays closed; pocket accounting stays caller-side.
+    /// Fails before moving anything when the bank part overdraws.
+    pub fn buy_with_cash(
+        &mut self,
+        ledger: &mut Ledger,
+        buyer: u64,
+        cash: i64,
+        item: &str,
+    ) -> Result<(), SimError> {
+        if cash < 0 {
+            return Err(SimError::new("neg_amt", "cash >= 0", "negative"));
+        }
         let line =
             self.stock
                 .get_mut(item)
@@ -60,7 +77,18 @@ impl Shop {
         if line.qty == 0 {
             return Err(SimError::new("sold_out", "qty > 0", "empty"));
         }
-        ledger.transfer(buyer, self.till, line.price_cents)?;
+        if cash > line.price_cents {
+            // Overpaying cash is a shop error, not a tip: refuse cleanly.
+            return Err(SimError::new("overpay", "cash <= price", "too much"));
+        }
+        // Fails before moving anything when the bank part overdraws.
+        let bank_part = (line.price_cents - cash).max(0);
+        if bank_part > 0 {
+            ledger.transfer(buyer, self.till, bank_part)?;
+        }
+        if cash > 0 {
+            ledger.mint(self.till, cash)?;
+        }
         line.qty -= 1;
         Ok(())
     }
@@ -127,6 +155,30 @@ mod tests {
         assert_eq!(l.balance(buyer).unwrap(), 900);
         assert_eq!(l.balance(till).unwrap(), 600);
         assert_eq!(s.stock["ration"].qty, 1);
+        assert_eq!(l.live_sum(), l.audit_sum());
+    }
+
+    #[test]
+    fn buy_with_cash_splits_bank_and_deposit() {
+        let (mut l, buyer, _, till, mut s) = setup();
+        // Refusals first, while ration is stocked: overpay, negative cash.
+        assert!(s.buy_with_cash(&mut l, buyer, 101, "ration").is_err());
+        assert!(s.buy_with_cash(&mut l, buyer, -1, "ration").is_err());
+        assert_eq!(s.stock["ration"].qty, 2);
+        // Bank covers 60 of 100; 40 cash enters the books as till mint.
+        s.buy_with_cash(&mut l, buyer, 40, "ration").unwrap();
+        assert_eq!(l.balance(buyer).unwrap(), 940);
+        assert_eq!(l.balance(till).unwrap(), 600);
+        assert_eq!(s.stock["ration"].qty, 1);
+        assert_eq!(l.live_sum(), l.audit_sum());
+        // Full cash: bank untouched, till minted the price.
+        s.buy_with_cash(&mut l, buyer, 100, "ration").unwrap();
+        assert_eq!(l.balance(buyer).unwrap(), 940);
+        assert_eq!(l.balance(till).unwrap(), 700);
+        assert_eq!(s.stock["ration"].qty, 0);
+        assert_eq!(l.live_sum(), l.audit_sum());
+        // Sold out refuses even with exact cash.
+        assert!(s.buy_with_cash(&mut l, buyer, 100, "ration").is_err());
         assert_eq!(l.live_sum(), l.audit_sum());
     }
 

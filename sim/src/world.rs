@@ -656,7 +656,21 @@ impl World {
                     .get(&intent.actor.0)
                     .copied()
                     .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
-                shop.buy(&mut self.ledger, acct, item)?;
+                // Paychecks land in pocket cash while shops draw the bank
+                // ledger: bridge them pocket-first so earned money spends.
+                // Check the combined total before moving anything.
+                let price = shop
+                    .stock
+                    .get(item)
+                    .map(|l| l.price_cents)
+                    .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
+                let bank = self.ledger.balance(acct)?;
+                let cash = (price - bank.min(price)).max(0);
+                if cash > b.money {
+                    return Err(SimError::new("overdraw", "funds", "short"));
+                }
+                shop.buy_with_cash(&mut self.ledger, acct, cash, item)?;
+                b.money -= cash;
                 // Restock from sales: the wholesale supplier account fills
                 // lines the till can cover, so shelves refill while you earn.
                 let supplier = match self.supplier {
@@ -978,6 +992,57 @@ mod tests {
             })
             .is_err());
         assert_eq!(w.ledger.live_sum(), before);
+    }
+
+    #[test]
+    fn pocket_cash_covers_bank_shortfall() {
+        use crate::shop::Shop;
+        // The reported bug: paychecks land in pocket cash while shops draw
+        // the bank ledger, so a $15 firewall rejected a $20 pocket.
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 1400).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("firewall", 1500, 1, 1, 1, 1200);
+        w.place_shop(8, 8, shop);
+        // Pocket 200 + bank 1400 covers 1500: bank drains, pocket pays 100.
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 200);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("firewall".into()),
+        })
+        .unwrap();
+        assert!(w.host(crate::ids::HostId(1)).unwrap().firewall());
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 100);
+        assert_eq!(w.ledger.balance(acct).unwrap(), 0);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn combined_shortfall_is_refused_atomically() {
+        use crate::shop::Shop;
+        let mut v = World::new(3);
+        v.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = v.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        v.ledger.mint(acct, 50).unwrap();
+        let mut shop = Shop::new(v.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("meds", 400, 2, 1, 3, 900);
+        v.place_shop(8, 8, shop);
+        v.set_needs(EntityId(1), 80, 70, 20, 3);
+        // Bank 50 + pocket 20 cannot cover 400: refused, nothing moves.
+        v.tick = v.next_at(EntityId(1));
+        assert!(v
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("meds".into()),
+            })
+            .is_err());
+        assert_eq!(v.needs(EntityId(1)).unwrap().2, 20);
+        assert_eq!(v.ledger.balance(acct).unwrap(), 50);
+        assert_eq!(v.shop_at(8, 8).unwrap().stock["meds"].qty, 2);
+        assert_eq!(v.ledger.live_sum(), v.ledger.audit_sum());
     }
 
     #[test]
