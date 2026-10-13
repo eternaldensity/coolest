@@ -10,7 +10,7 @@ dodge traces — become what you do.
 
 ## Status
 
-Playable sim + headless client (44 tests green). Graphical shell pending.
+Playable sim + headless client (89 tests green). Graphical shell pending.
 
 - `cargo test --workspace` — full suite
 - `cargo run -p client-web` — scripted tour of all systems

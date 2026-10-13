@@ -18,7 +18,7 @@
 ```bash
 git clone <repo> coolest && cd coolest
 
-# All tests (44 as of M5 + client core)
+# All tests (89 and growing)
 cargo test --workspace
 
 # Lint gate (CI blocks on warnings)

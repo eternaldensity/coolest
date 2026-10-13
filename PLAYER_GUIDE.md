@@ -70,7 +70,7 @@ both bars down:
 
 ```bash
 cargo run -p client-web   # scripted tour of all systems
-cargo test --workspace     # prove the rules hold (44 tests)
+cargo test --workspace     # prove the rules hold (89 tests)
 ```
 
 Keys (`hjklyubn`, `>`, `<`, Tab, `Ctrl-K` palette) and the full pane layout
