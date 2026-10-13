@@ -15,7 +15,9 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new(seed: u64) -> Self {
-        Self { server: Arc::new(Mutex::new(Server::new(seed))) }
+        Self {
+            server: Arc::new(Mutex::new(Server::new(seed))),
+        }
     }
 
     /// Serve forever. One task per connection; intents apply in arrival order.
@@ -46,7 +48,9 @@ async fn handle_conn(server: Arc<Mutex<Server>>, stream: TcpStream) -> std::io::
                 s.submit(intent);
                 let mut out = s.step();
                 match out.pop() {
-                    Some((delta, events)) => serde_json::json!({"ok": true, "delta": delta, "events": events}),
+                    Some((delta, events)) => {
+                        serde_json::json!({"ok": true, "delta": delta, "events": events})
+                    }
                     None => serde_json::json!({"ok": false, "err": "dropped"}),
                 }
             }
@@ -63,8 +67,30 @@ mod tests {
 
     fn spawn_setup(rt: &Runtime) {
         let mut s = rt.server.try_lock().unwrap();
-        s.world.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
-        s.world.spawn(EntityId(2), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 4, y: 4 }, 1);
+        s.world.spawn(
+            EntityId(1),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 8,
+                y: 8,
+            },
+            1,
+        );
+        s.world.spawn(
+            EntityId(2),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 4,
+                y: 4,
+            },
+            1,
+        );
     }
 
     async fn send(addr: std::net::SocketAddr, lines: &[String]) -> Vec<String> {
@@ -82,7 +108,11 @@ mod tests {
     }
 
     fn intent(actor: u64, d: Dir) -> String {
-        serde_json::to_string(&Intent { actor: EntityId(actor), verb: Verb::Move(d) }).unwrap()
+        serde_json::to_string(&Intent {
+            actor: EntityId(actor),
+            verb: Verb::Move(d),
+        })
+        .unwrap()
     }
 
     #[tokio::test]

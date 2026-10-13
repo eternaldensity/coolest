@@ -37,15 +37,40 @@ pub fn draw_street(px: &mut Pixmap, section: &sim::Section, actors: &[(u8, u8)])
     background(px);
     for y in 0..16u8 {
         for x in 0..16u8 {
-            let (r, g, b) = if section.walkable(x, y) { (64, 64, 72) } else { (20, 20, 26) };
-            rect(x as f32 * TILE, y as f32 * TILE, TILE - 1.0, TILE - 1.0, Rgb(r, g, b), px);
+            let (r, g, b) = if section.walkable(x, y) {
+                (64, 64, 72)
+            } else {
+                (20, 20, 26)
+            };
+            rect(
+                x as f32 * TILE,
+                y as f32 * TILE,
+                TILE - 1.0,
+                TILE - 1.0,
+                Rgb(r, g, b),
+                px,
+            );
         }
     }
     for (_, gx, gy) in &section.guarantees {
-        rect(*gx as f32 * TILE, *gy as f32 * TILE, TILE - 1.0, TILE - 1.0, Rgb(200, 160, 40), px);
+        rect(
+            *gx as f32 * TILE,
+            *gy as f32 * TILE,
+            TILE - 1.0,
+            TILE - 1.0,
+            Rgb(200, 160, 40),
+            px,
+        );
     }
     for (ax, ay) in actors {
-        rect(*ax as f32 * TILE, *ay as f32 * TILE, TILE - 1.0, TILE - 1.0, Rgb(220, 60, 60), px);
+        rect(
+            *ax as f32 * TILE,
+            *ay as f32 * TILE,
+            TILE - 1.0,
+            TILE - 1.0,
+            Rgb(220, 60, 60),
+            px,
+        );
     }
 }
 
@@ -54,9 +79,23 @@ pub fn draw_deck(px: &mut Pixmap, host: &sim::Host) {
     background(px);
     for prog in host.progs.values() {
         for tail in &prog.tail {
-            rect(tail.0 as f32 * TILE, tail.1 as f32 * TILE, TILE - 1.0, TILE - 1.0, Rgb(40, 140, 140), px);
+            rect(
+                tail.0 as f32 * TILE,
+                tail.1 as f32 * TILE,
+                TILE - 1.0,
+                TILE - 1.0,
+                Rgb(40, 140, 140),
+                px,
+            );
         }
-        rect(prog.head.0 as f32 * TILE, prog.head.1 as f32 * TILE, TILE - 1.0, TILE - 1.0, Rgb(120, 240, 240), px);
+        rect(
+            prog.head.0 as f32 * TILE,
+            prog.head.1 as f32 * TILE,
+            TILE - 1.0,
+            TILE - 1.0,
+            Rgb(120, 240, 240),
+            px,
+        );
     }
 }
 
@@ -71,7 +110,7 @@ pub fn tile_center(px: &Pixmap, x: u8, y: u8) -> (u8, u8, u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::{CellPos, EntityId, Host, HostId, Ports, gen_section};
+    use sim::{gen_section, CellPos, EntityId, Host, HostId, Ports};
 
     fn canvas() -> Pixmap {
         Pixmap::new(16 * TILE as u32, 16 * TILE as u32).unwrap()
@@ -96,7 +135,8 @@ mod tests {
     #[test]
     fn deck_marks_head_brighter_than_tail() {
         let mut h = Host::new(HostId(1), 12, 8, 100);
-        h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1).unwrap();
+        h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1)
+            .unwrap();
         h.step(EntityId(10), CellPos(3, 2)).unwrap();
         let mut px = canvas();
         draw_deck(&mut px, &h);

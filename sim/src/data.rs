@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::error::SimError;
+use serde::{Deserialize, Serialize};
 
 /// Data-file loader (design/11 rule 4): content lives in data/*.yaml,
 /// validated here. Code keeps safe defaults; files are the tuning surface.
@@ -44,8 +44,14 @@ pub struct CardTable {
 }
 
 const KNOWN_DISTRICTS: [&str; 8] = [
-    "residential", "shop", "park", "industrial",
-    "gov", "rural", "forest", "lake",
+    "residential",
+    "shop",
+    "park",
+    "industrial",
+    "gov",
+    "rural",
+    "forest",
+    "lake",
 ];
 
 pub fn parse_jobs(s: &str) -> Result<Vec<JobDef>, SimError> {
@@ -56,7 +62,11 @@ pub fn parse_jobs(s: &str) -> Result<Vec<JobDef>, SimError> {
     }
     for j in &jobs {
         if j.id.is_empty() || j.payout_cents <= 0 {
-            return Err(SimError::new("data", "named job with payout > 0", "bad entry"));
+            return Err(SimError::new(
+                "data",
+                "named job with payout > 0",
+                "bad entry",
+            ));
         }
     }
     Ok(jobs)
@@ -72,7 +82,11 @@ pub fn parse_vulns(s: &str) -> Result<Vec<VulnDef>, SimError> {
     ids.sort_unstable();
     ids.dedup();
     if ids.len() != vulns.len() || ids.iter().any(|id| id.is_empty()) {
-        return Err(SimError::new("data", "unique non-empty vuln ids", "dup/blank"));
+        return Err(SimError::new(
+            "data",
+            "unique non-empty vuln ids",
+            "dup/blank",
+        ));
     }
     Ok(vulns)
 }
@@ -121,8 +135,14 @@ mod tests {
     fn repo_files_parse_and_match_code() {
         let jobs = parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
         assert_eq!(jobs.len(), 2);
-        assert_eq!((jobs[0].payout_cents, jobs[0].mood_cost, jobs[0].food_cost), (60, 5, 2));
-        assert_eq!((jobs[1].payout_cents, jobs[1].mood_cost, jobs[1].food_cost), (120, 9, 4));
+        assert_eq!(
+            (jobs[0].payout_cents, jobs[0].mood_cost, jobs[0].food_cost),
+            (60, 5, 2)
+        );
+        assert_eq!(
+            (jobs[1].payout_cents, jobs[1].mood_cost, jobs[1].food_cost),
+            (120, 9, 4)
+        );
 
         let vulns = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
         assert_eq!(vulns.len(), 3);
@@ -140,7 +160,10 @@ mod tests {
         let ds = parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap();
         assert_eq!(ds.len(), 3);
         let shop = ds.iter().find(|d| d.id == "shopkeeper").unwrap();
-        assert!(shop.states["hi"].options.iter().any(|c| c.effect.as_deref() == Some("trade")));
+        assert!(shop.states["hi"]
+            .options
+            .iter()
+            .any(|c| c.effect.as_deref() == Some("trade")));
         let cop = ds.iter().find(|d| d.id == "cop").unwrap();
         assert!(cop.starts.contains_key("wanted"));
     }
@@ -148,8 +171,13 @@ mod tests {
     #[test]
     fn rejects_bad_content() {
         assert!(parse_jobs("[]").is_err());
-        assert!(parse_jobs("- id: x\n  payout_cents: 0\n  mood_cost: 1\n  food_cost: 1\n").is_err());
-        assert!(parse_vulns("- id: a\n  target: t\n  effect: e\n- id: a\n  target: t\n  effect: e\n").is_err());
+        assert!(
+            parse_jobs("- id: x\n  payout_cents: 0\n  mood_cost: 1\n  food_cost: 1\n").is_err()
+        );
+        assert!(parse_vulns(
+            "- id: a\n  target: t\n  effect: e\n- id: a\n  target: t\n  effect: e\n"
+        )
+        .is_err());
         assert!(parse_districts("[]").is_err());
         assert!(parse_cards("negative: []\npositive: []\nmanipulation: []\n").is_err());
         assert!(parse_jobs("not: [valid").is_err());

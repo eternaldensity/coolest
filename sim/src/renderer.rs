@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::ids::{EntityId, HostId, TileId};
+use serde::{Deserialize, Serialize};
 
 /// Serializable view snapshots. Sim produces these; clients render them.
 /// Keeps Bevy / Godot / Web interchangeable (design/08).

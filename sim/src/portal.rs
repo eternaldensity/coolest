@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::ids::EntityId;
+use serde::{Deserialize, Serialize};
 
 /// Multi-city portals (design/08 + roadmap): cities are shards with no
 /// shared sim traffic. Portals move travelers (and mail) between them.
@@ -37,7 +37,11 @@ impl PortalNet {
 
     pub fn find(&self, city: u32, sx: i32, sy: i32, x: u8, y: u8) -> Option<&Portal> {
         self.portals.iter().find(|p| {
-            p.from_city == city && p.from_sx == sx && p.from_sy == sy && p.from_x == x && p.from_y == y
+            p.from_city == city
+                && p.from_sx == sx
+                && p.from_sy == sy
+                && p.from_x == x
+                && p.from_y == y
         })
     }
 
@@ -54,8 +58,16 @@ mod tests {
 
     fn portal() -> Portal {
         Portal {
-            from_city: 1, from_sx: 0, from_sy: 0, from_x: 14, from_y: 8,
-            to_city: 2, to_sx: 0, to_sy: 0, to_x: 1, to_y: 8,
+            from_city: 1,
+            from_sx: 0,
+            from_sy: 0,
+            from_x: 14,
+            from_y: 8,
+            to_city: 2,
+            to_sx: 0,
+            to_sy: 0,
+            to_x: 1,
+            to_y: 8,
             toll_cents: 50,
         }
     }
@@ -68,8 +80,15 @@ mod tests {
         assert_eq!((p.to_city, p.to_sx, p.to_x), (2, 0, 1));
         assert!(net.find(1, 0, 0, 1, 1).is_none());
         assert!(net.find(2, 0, 0, 14, 8).is_none()); // one-way until linked back
-        // Destination tile struct for the receiving world to spawn into.
-        let dest = Pos { city: p.to_city, sx: p.to_sx, sy: p.to_sy, z: 0, x: p.to_x, y: p.to_y };
+                                                     // Destination tile struct for the receiving world to spawn into.
+        let dest = Pos {
+            city: p.to_city,
+            sx: p.to_sx,
+            sy: p.to_sy,
+            z: 0,
+            x: p.to_x,
+            y: p.to_y,
+        };
         assert_eq!((dest.city, dest.x), (2, 1));
     }
 

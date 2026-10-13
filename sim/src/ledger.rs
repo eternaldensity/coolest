@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// M3c closed ledger (design/04): no duping — every transfer has a source.
 /// Σ balances == Σ mints − Σ burns. Replicas are views; this is truth.
@@ -41,12 +41,21 @@ impl Ledger {
     pub fn open(&mut self, owner: EntityId, branch: HostId) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        self.accounts.insert(id, Account { id, owner, branch, balance_cents: 0 });
+        self.accounts.insert(
+            id,
+            Account {
+                id,
+                owner,
+                branch,
+                balance_cents: 0,
+            },
+        );
         id
     }
 
     pub fn balance(&self, acct: u64) -> Result<i64, SimError> {
-        self.accounts.get(&acct)
+        self.accounts
+            .get(&acct)
             .map(|a| a.balance_cents)
             .ok_or(SimError::new("no_acct", "open account", "missing"))
     }
@@ -55,8 +64,11 @@ impl Ledger {
         if amt < 0 {
             return Err(SimError::new("neg_amt", "amt >= 0", "negative"));
         }
-        let a = self.accounts.get_mut(&to)
-            .ok_or(SimError::new("no_acct", "open account", "missing"))?;
+        let a = self.accounts.get_mut(&to).ok_or(SimError::new(
+            "no_acct",
+            "open account",
+            "missing",
+        ))?;
         a.balance_cents += amt;
         self.log.push(Tx::Mint { to, amt });
         Ok(())
@@ -71,7 +83,8 @@ impl Ledger {
             return Err(SimError::new("overdraw", "funds", "short"));
         }
         self.accounts.get_mut(&from).unwrap().balance_cents -= amt;
-        self.accounts.get_mut(&to)
+        self.accounts
+            .get_mut(&to)
             .ok_or(SimError::new("no_acct", "open account", "missing"))?
             .balance_cents += amt;
         self.log.push(Tx::Transfer { from, to, amt });
@@ -110,7 +123,13 @@ impl Ledger {
 
     /// ATM withdraw. Branch up: normal burn. Branch down: serve from cache
     /// cap, record IOU to reconcile when the branch returns.
-    pub fn withdraw_atm(&mut self, acct: u64, amt: i64, branch_up: bool, cache_cap: i64) -> Result<(), SimError> {
+    pub fn withdraw_atm(
+        &mut self,
+        acct: u64,
+        amt: i64,
+        branch_up: bool,
+        cache_cap: i64,
+    ) -> Result<(), SimError> {
         if amt <= 0 {
             return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
         }
@@ -134,7 +153,13 @@ impl Ledger {
     }
 
     /// Zombie/spam income for a host on a given day, capped per host/day.
-    pub fn credit_spam(&mut self, to: u64, host: HostId, day: u64, amt: i64) -> Result<i64, SimError> {
+    pub fn credit_spam(
+        &mut self,
+        to: u64,
+        host: HostId,
+        day: u64,
+        amt: i64,
+    ) -> Result<i64, SimError> {
         if amt < 0 {
             return Err(SimError::new("neg_amt", "amt >= 0", "negative"));
         }
@@ -175,7 +200,11 @@ impl Mailbox {
         if self.outbox.len() >= MAIL_CAP || self.inbox.len() >= MAIL_CAP {
             return Err(SimError::new("mailbox_full", "cap 20", "full"));
         }
-        let m = Mail { from, to, body: body.to_string() };
+        let m = Mail {
+            from,
+            to,
+            body: body.to_string(),
+        };
         self.outbox.push(m.clone());
         self.inbox.push(m);
         Ok(())
@@ -216,8 +245,8 @@ mod tests {
         l.withdraw_atm(a, 90, false, 100).unwrap(); // branch down, within cap
         assert_eq!(l.ious(), &[(a, 90)]);
         assert!(l.withdraw_atm(a, 500, false, 100).is_err()); // over cap
-        // IOU path skips the log (no burn) but live sum still consistent
-        // with mint/burn accounting minus outstanding IOUs.
+                                                              // IOU path skips the log (no burn) but live sum still consistent
+                                                              // with mint/burn accounting minus outstanding IOUs.
         assert_eq!(l.live_sum(), l.audit_sum() - 90);
     }
 
@@ -236,7 +265,8 @@ mod tests {
     fn mailbox_caps_at_20() {
         let mut m = Mailbox::new();
         for i in 0..20 {
-            m.send(EntityId(1), EntityId(2), &format!("msg {i}")).unwrap();
+            m.send(EntityId(1), EntityId(2), &format!("msg {i}"))
+                .unwrap();
         }
         assert!(m.send(EntityId(1), EntityId(2), "one too many").is_err());
     }
@@ -247,7 +277,9 @@ mod tests {
         // the closed-book invariant must hold after each step.
         let mut rng = crate::street::Rng::new(1234);
         let mut l = Ledger::new();
-        let accts: Vec<u64> = (0..4u64).map(|i| l.open(EntityId(i), HostId(i % 2 + 1))).collect();
+        let accts: Vec<u64> = (0..4u64)
+            .map(|i| l.open(EntityId(i), HostId(i % 2 + 1)))
+            .collect();
         let amts = [0i64, 1, 7, 100, 999, 100_000];
         let (mut oks, mut errs) = (0u32, 0u32);
         for _ in 0..3000 {
@@ -260,7 +292,9 @@ mod tests {
                 2 => l.burn(a, amt),
                 3 => l.withdraw_atm(a, amt, true, 50_000),
                 4 => l.withdraw_atm(a, amt, false, 50_000),
-                _ => l.credit_spam(a, HostId(1 + rng.below(3) as u64), rng.below(4) as u64, amt).map(|_| ()),
+                _ => l
+                    .credit_spam(a, HostId(1 + rng.below(3) as u64), rng.below(4) as u64, amt)
+                    .map(|_| ()),
             };
             match r {
                 Ok(()) => oks += 1,

@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use crate::error::SimError;
 use crate::ledger::Ledger;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Shop economy (design/05-06): stock with prices, till as a ledger account,
 /// catalogue auto-order. Money always moves through the closed ledger —
@@ -24,19 +24,39 @@ pub struct Shop {
 
 impl Shop {
     pub fn new(till: u64) -> Self {
-        Self { till, stock: BTreeMap::new() }
+        Self {
+            till,
+            stock: BTreeMap::new(),
+        }
     }
 
-    pub fn add_line(&mut self, item: &str, price_cents: i64, qty: u32, restock_at: u32, restock_qty: u32, restock_cost_cents: i64) {
-        self.stock.insert(item.to_string(), Stock {
-            price_cents, qty, restock_at, restock_qty, restock_cost_cents,
-        });
+    pub fn add_line(
+        &mut self,
+        item: &str,
+        price_cents: i64,
+        qty: u32,
+        restock_at: u32,
+        restock_qty: u32,
+        restock_cost_cents: i64,
+    ) {
+        self.stock.insert(
+            item.to_string(),
+            Stock {
+                price_cents,
+                qty,
+                restock_at,
+                restock_qty,
+                restock_cost_cents,
+            },
+        );
     }
 
     /// Customer purchase: transfer price buyer→till, decrement stock.
     pub fn buy(&mut self, ledger: &mut Ledger, buyer: u64, item: &str) -> Result<(), SimError> {
-        let line = self.stock.get_mut(item)
-            .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
+        let line =
+            self.stock
+                .get_mut(item)
+                .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
         if line.qty == 0 {
             return Err(SimError::new("sold_out", "qty > 0", "empty"));
         }
@@ -46,9 +66,16 @@ impl Shop {
     }
 
     /// Restock one line: till pays the supplier, qty tops up.
-    pub fn restock(&mut self, ledger: &mut Ledger, supplier: u64, item: &str) -> Result<(), SimError> {
-        let line = self.stock.get_mut(item)
-            .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
+    pub fn restock(
+        &mut self,
+        ledger: &mut Ledger,
+        supplier: u64,
+        item: &str,
+    ) -> Result<(), SimError> {
+        let line =
+            self.stock
+                .get_mut(item)
+                .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
         ledger.transfer(self.till, supplier, line.restock_cost_cents)?;
         line.qty += line.restock_qty;
         Ok(())
@@ -92,7 +119,6 @@ mod tests {
         s.add_line("meds", 400, 0, 1, 3, 900);
         (l, buyer, supplier, till, s)
     }
-
 
     #[test]
     fn buy_moves_money_and_stock() {

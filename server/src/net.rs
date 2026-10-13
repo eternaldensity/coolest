@@ -4,10 +4,14 @@
 //! `{"ok":true,"delta":..,"events":..}` or `{"ok":false,"err":".."}`.
 //! Message framing this simple keeps the later QUIC/WebSocket swap mechanical.
 
-use std::io::{BufRead, Write};
 use crate::Server;
+use std::io::{BufRead, Write};
 
-pub fn handle<R: BufRead, W: Write>(server: &mut Server, reader: R, mut writer: W) -> std::io::Result<usize> {
+pub fn handle<R: BufRead, W: Write>(
+    server: &mut Server,
+    reader: R,
+    mut writer: W,
+) -> std::io::Result<usize> {
     let mut n = 0;
     for line in reader.lines() {
         let line = line?;
@@ -20,7 +24,9 @@ pub fn handle<R: BufRead, W: Write>(server: &mut Server, reader: R, mut writer: 
                 server.submit(intent);
                 let mut out = server.step();
                 match out.pop() {
-                    Some((delta, events)) => serde_json::json!({"ok": true, "delta": delta, "events": events}),
+                    Some((delta, events)) => {
+                        serde_json::json!({"ok": true, "delta": delta, "events": events})
+                    }
                     None => serde_json::json!({"ok": false, "err": "dropped"}),
                 }
             }
@@ -35,13 +41,17 @@ pub fn handle<R: BufRead, W: Write>(server: &mut Server, reader: R, mut writer: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim::{Dir, EntityId, Intent, Pos, Verb};
     use std::io::{BufReader, BufWriter};
     use std::net::{TcpListener, TcpStream};
     use std::time::Duration;
-    use sim::{Dir, EntityId, Intent, Pos, Verb};
 
     fn intent_line(d: Dir) -> String {
-        serde_json::to_string(&Intent { actor: EntityId(1), verb: Verb::Move(d) }).unwrap()
+        serde_json::to_string(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(d),
+        })
+        .unwrap()
     }
 
     #[test]
@@ -51,7 +61,18 @@ mod tests {
         let server_thread = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut server = Server::new(5);
-            server.world.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
+            server.world.spawn(
+                EntityId(1),
+                Pos {
+                    city: 1,
+                    sx: 0,
+                    sy: 0,
+                    z: 0,
+                    x: 8,
+                    y: 8,
+                },
+                1,
+            );
             let read = BufReader::new(stream.try_clone().unwrap());
             let write = BufWriter::new(stream);
             let n = handle(&mut server, read, write).unwrap();
@@ -59,7 +80,9 @@ mod tests {
         });
 
         let mut stream = TcpStream::connect(addr).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         writeln!(stream, "{}", intent_line(Dir::E)).unwrap();
         writeln!(stream, "{}", intent_line(Dir::S)).unwrap();
         writeln!(stream, "not json").unwrap();
@@ -82,7 +105,18 @@ mod tests {
     #[test]
     fn in_memory_handle_counts_and_skips_blanks() {
         let mut server = Server::new(5);
-        server.world.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
+        server.world.spawn(
+            EntityId(1),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 8,
+                y: 8,
+            },
+            1,
+        );
         let input = format!("{}\n\nbogus\n", intent_line(Dir::E));
         let mut out = Vec::new();
         let n = handle(&mut server, input.as_bytes(), &mut out).unwrap();

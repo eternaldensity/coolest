@@ -2,8 +2,10 @@
 //! committed goldens in data/golden/: TTK table, trace curve, gen stats.
 //! `fidom-tools` binary reprints them; tests fail on drift.
 
-use sim::{CellPos, EntityId, Host, HostId, Ports, Rng, World, Dir, Intent, Verb, Pos, gen_section};
 use server::{replay, Server};
+use sim::{
+    gen_section, CellPos, Dir, EntityId, Host, HostId, Intent, Ports, Pos, Rng, Verb, World,
+};
 
 /// Killer-vs-killer TTK: grow one len-N program, strike tail cells in order,
 /// then the head. Returns (len, acts to clear).
@@ -11,7 +13,8 @@ pub fn ttk_table() -> Vec<(usize, u32)> {
     let mut out = Vec::new();
     for len in 1..=6usize {
         let mut h = Host::new(HostId(1), 12, 8, 1000);
-        h.load(EntityId(10), EntityId(1), CellPos(0, 0), len as u8, 1).unwrap();
+        h.load(EntityId(10), EntityId(1), CellPos(0, 0), len as u8, 1)
+            .unwrap();
         for i in 1..len as u8 {
             h.step(EntityId(10), CellPos(i, 0)).unwrap();
         }
@@ -47,7 +50,8 @@ pub fn trace_table() -> Vec<(u32, u32, u32)> {
 
 fn measure_trace(threshold: u32, scrambled: bool) -> u32 {
     let mut h = Host::new(HostId(1), 12, 8, 100);
-    h.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+    h.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
+        .unwrap();
     h.start_trace(EntityId(10), threshold).unwrap();
     let mut ticks = 0u32;
     loop {
@@ -120,14 +124,28 @@ pub fn soak(seed: u64, actors: usize, ticks: u64) -> u64 {
     for a in 0..actors {
         let x = 1 + (rng.below(14)) as u8;
         let y = 1 + (rng.below(14)) as u8;
-        w.spawn(EntityId(1000 + a as u64), Pos { city: 1, sx: 0, sy: 0, z: 0, x, y }, 1 + rng.below(10) as u64);
+        w.spawn(
+            EntityId(1000 + a as u64),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x,
+                y,
+            },
+            1 + rng.below(10) as u64,
+        );
     }
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
     for _ in 0..ticks {
         let a = rng.below(actors.max(1) as u32) as u64;
         let d = dirs[rng.below(4) as usize];
         w.tick = w.next_at(EntityId(1000 + a)).max(w.tick);
-        let _ = w.apply(&Intent { actor: EntityId(1000 + a), verb: Verb::Move(d) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1000 + a),
+            verb: Verb::Move(d),
+        });
     }
     w.snapshot_hash()
 }
@@ -162,7 +180,14 @@ pub fn replay_from_files(seed: u64, spawns_json: &str, log_path: &str) -> Result
         .map(|s| {
             (
                 EntityId(s.id),
-                Pos { city: s.city, sx: s.sx, sy: s.sy, z: s.z, x: s.x, y: s.y },
+                Pos {
+                    city: s.city,
+                    sx: s.sx,
+                    sy: s.sy,
+                    z: s.z,
+                    x: s.x,
+                    y: s.y,
+                },
                 s.speed,
             )
         })
@@ -294,9 +319,26 @@ mod tests {
     fn replay_cli_path_reproduces_server_hash() {
         use sim::{Dir, Verb};
         let mut s = Server::new(9);
-        s.world.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
-        s.submit(Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
-        s.submit(Intent { actor: EntityId(1), verb: Verb::Move(Dir::S) });
+        s.world.spawn(
+            EntityId(1),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 8,
+                y: 8,
+            },
+            1,
+        );
+        s.submit(Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::E),
+        });
+        s.submit(Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::S),
+        });
         s.step();
         let expect = s.world.snapshot_hash();
         let dir = unique_tmp("replay");
@@ -325,8 +367,30 @@ mod tests {
     fn ledger_audit_accepts_funded_and_iou_worlds() {
         use sim::HostId;
         let mut w = World::new(3);
-        w.spawn(EntityId(1), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 }, 1);
-        w.spawn(EntityId(2), Pos { city: 1, sx: 0, sy: 0, z: 0, x: 9, y: 8 }, 1);
+        w.spawn(
+            EntityId(1),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 8,
+                y: 8,
+            },
+            1,
+        );
+        w.spawn(
+            EntityId(2),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 9,
+                y: 8,
+            },
+            1,
+        );
         let a = w.open_account(EntityId(1), HostId(1)).unwrap();
         let b = w.open_account(EntityId(2), HostId(2)).unwrap();
         w.ledger.mint(a, 1000).unwrap();

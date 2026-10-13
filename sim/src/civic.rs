@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::crime::Standing;
+use serde::{Deserialize, Serialize};
 
 /// M1b civic sim (design/05 + 2006 scope cut): data-driven day timetables,
 /// ambient-only NPCs (no hunger checks), cops pursue Wanted on sight —
@@ -39,41 +39,48 @@ pub struct Timetable {
 impl Timetable {
     pub fn at(&self, hour: u8) -> Activity {
         let h = hour % 24;
-        self.slots.iter()
+        self.slots
+            .iter()
             .find(|(s, e, _)| h >= *s && h < *e)
             .map(|(_, _, a)| *a)
             .unwrap_or(Activity::Home)
     }
 
     pub fn shopkeeper() -> Self {
-        Self { slots: vec![
-            (0, 6, Activity::Sleep),
-            (6, 10, Activity::Work),
-            (10, 14, Activity::Work),
-            (14, 18, Activity::Work),
-            (18, 22, Activity::Leisure),
-            (22, 24, Activity::Home),
-        ]}
+        Self {
+            slots: vec![
+                (0, 6, Activity::Sleep),
+                (6, 10, Activity::Work),
+                (10, 14, Activity::Work),
+                (14, 18, Activity::Work),
+                (18, 22, Activity::Leisure),
+                (22, 24, Activity::Home),
+            ],
+        }
     }
 
     pub fn office() -> Self {
-        Self { slots: vec![
-            (0, 6, Activity::Sleep),
-            (6, 9, Activity::Home),
-            (9, 17, Activity::Work),
-            (17, 22, Activity::Leisure),
-            (22, 24, Activity::Sleep),
-        ]}
+        Self {
+            slots: vec![
+                (0, 6, Activity::Sleep),
+                (6, 9, Activity::Home),
+                (9, 17, Activity::Work),
+                (17, 22, Activity::Leisure),
+                (22, 24, Activity::Sleep),
+            ],
+        }
     }
 
     /// Cops patrol in two shifts; off-duty still cop when roused.
     pub fn cop_day() -> Self {
-        Self { slots: vec![
-            (0, 6, Activity::Sleep),
-            (6, 14, Activity::Patrol),
-            (14, 22, Activity::Home),
-            (22, 24, Activity::Sleep),
-        ]}
+        Self {
+            slots: vec![
+                (0, 6, Activity::Sleep),
+                (6, 14, Activity::Patrol),
+                (14, 22, Activity::Home),
+                (22, 24, Activity::Sleep),
+            ],
+        }
     }
 }
 

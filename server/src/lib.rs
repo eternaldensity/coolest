@@ -9,8 +9,8 @@ pub mod net;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runtime;
 
-use std::collections::VecDeque;
 use sim::{Delta, Event, Intent, World};
+use std::collections::VecDeque;
 
 /// Server owns time. Clients send Intents; step() applies them in arrival
 /// order, jumping the clock to each actor's next due tick (never rewinding).
@@ -22,7 +22,11 @@ pub struct Server {
 
 impl Server {
     pub fn new(seed: u64) -> Self {
-        Self { world: World::new(seed), queue: VecDeque::new(), log: Vec::new() }
+        Self {
+            world: World::new(seed),
+            queue: VecDeque::new(),
+            log: Vec::new(),
+        }
     }
 
     pub fn submit(&mut self, intent: Intent) {
@@ -78,7 +82,9 @@ impl Server {
     }
 
     pub fn save_log(&self, path: &str) -> std::io::Result<()> {
-        let lines: Vec<String> = self.log.iter()
+        let lines: Vec<String> = self
+            .log
+            .iter()
             .map(|i| serde_json::to_string(i).unwrap_or_default())
             .collect();
         std::fs::write(path, lines.join("\n"))
@@ -101,11 +107,7 @@ impl Server {
 
 /// File replay (design/12): fresh world + spawns, feed logged intents.
 /// Returns the resulting world for hash comparison.
-pub fn replay(
-    seed: u64,
-    spawns: &[(sim::EntityId, sim::Pos, u64)],
-    intents: Vec<Intent>,
-) -> World {
+pub fn replay(seed: u64, spawns: &[(sim::EntityId, sim::Pos, u64)], intents: Vec<Intent>) -> World {
     let mut s = Server::new(seed);
     for (id, pos, speed) in spawns {
         s.world.spawn(*id, *pos, *speed);
@@ -123,11 +125,21 @@ mod tests {
     use sim::{Dir, EntityId, Pos, Verb};
 
     fn pos(x: u8, y: u8) -> Pos {
-        Pos { city: 1, sx: 0, sy: 0, z: 0, x, y }
+        Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x,
+            y,
+        }
     }
 
     fn mover(d: Dir) -> Intent {
-        Intent { actor: EntityId(1), verb: Verb::Move(d) }
+        Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(d),
+        }
     }
 
     #[test]
@@ -149,7 +161,10 @@ mod tests {
         let mut s = Server::new(9);
         s.world.spawn(EntityId(1), pos(8, 8), 1);
         s.submit(mover(Dir::E));
-        s.submit(Intent { actor: EntityId(99), verb: Verb::Wait }); // unknown
+        s.submit(Intent {
+            actor: EntityId(99),
+            verb: Verb::Wait,
+        }); // unknown
         let out = s.step();
         assert_eq!(out.len(), 1);
         assert_eq!(s.log.len(), 1);

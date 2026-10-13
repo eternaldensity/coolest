@@ -3,7 +3,10 @@
 //!        fidom-tools replay <seed> <spawns.json> <log.jsonl> | mapgen-check [n] [seed0] | ledger-audit <world-save.json>
 
 use std::time::Instant;
-use tools::{audit_world_ledger, gen_report, gen_stats, mapgen_report, replay_from_files, soak, trace_csv, ttk_csv};
+use tools::{
+    audit_world_ledger, gen_report, gen_stats, mapgen_report, replay_from_files, soak, trace_csv,
+    ttk_csv,
+};
 
 fn fail(msg: String) -> ! {
     eprintln!("{msg}");
@@ -30,7 +33,10 @@ fn main() {
             let seed: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(7);
             let t = Instant::now();
             let hash = soak(seed, actors, ticks);
-            println!("soak actors={actors} ticks={ticks} hash={hash:016x} elapsed_ms={}", t.elapsed().as_millis());
+            println!(
+                "soak actors={actors} ticks={ticks} hash={hash:016x} elapsed_ms={}",
+                t.elapsed().as_millis()
+            );
         }
         Some("replay") => {
             let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);

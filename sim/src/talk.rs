@@ -1,6 +1,6 @@
+use crate::error::SimError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use crate::error::SimError;
 
 /// Data-driven dialogue (design/05 chat + 2006 console-talk): trees of
 /// states with player options. Effects that touch the world (trade, missions)
@@ -61,7 +61,9 @@ impl Dialogue {
     }
 
     pub fn start_for(&self, key: Option<&str>) -> &str {
-        key.and_then(|k| self.starts.get(k)).map(|s| s.as_str()).unwrap_or(&self.start)
+        key.and_then(|k| self.starts.get(k))
+            .map(|s| s.as_str())
+            .unwrap_or(&self.start)
     }
 }
 
@@ -76,7 +78,12 @@ pub struct Conversation {
 impl Conversation {
     pub fn new(dialogue: std::rc::Rc<Dialogue>, start_key: Option<&str>) -> Self {
         let state = dialogue.start_for(start_key).to_string();
-        Self { dialogue, state, done: false, last_effect: None }
+        Self {
+            dialogue,
+            state,
+            done: false,
+            last_effect: None,
+        }
     }
 
     pub fn text(&self) -> &str {
@@ -93,7 +100,9 @@ impl Conversation {
         if self.done {
             return Err(SimError::new("talk_over", "open talk", "ended"));
         }
-        let choice = self.dialogue.states[&self.state].options.get(idx)
+        let choice = self.dialogue.states[&self.state]
+            .options
+            .get(idx)
             .ok_or(SimError::new("no_choice", "listed option", "bad index"))?
             .clone();
         self.last_effect = choice.effect.clone();
@@ -116,18 +125,37 @@ mod tests {
 
     fn shopkeeper() -> std::rc::Rc<Dialogue> {
         let mut states = BTreeMap::new();
-        states.insert("hi".to_string(), Node {
-            text: "Welcome in. Shelves are stocked, prices are fair.".to_string(),
-            options: vec![
-                Choice { label: "Trade.".to_string(), next: None, effect: Some("trade".to_string()) },
-                Choice { label: "Just looking.".to_string(), next: Some("bye".to_string()), effect: None },
-            ],
-        });
-        states.insert("bye".to_string(), Node {
-            text: "Mind the door on your way out.".to_string(),
-            options: vec![],
-        });
-        std::rc::Rc::new(Dialogue { id: "shop".to_string(), start: "hi".to_string(), starts: BTreeMap::new(), states })
+        states.insert(
+            "hi".to_string(),
+            Node {
+                text: "Welcome in. Shelves are stocked, prices are fair.".to_string(),
+                options: vec![
+                    Choice {
+                        label: "Trade.".to_string(),
+                        next: None,
+                        effect: Some("trade".to_string()),
+                    },
+                    Choice {
+                        label: "Just looking.".to_string(),
+                        next: Some("bye".to_string()),
+                        effect: None,
+                    },
+                ],
+            },
+        );
+        states.insert(
+            "bye".to_string(),
+            Node {
+                text: "Mind the door on your way out.".to_string(),
+                options: vec![],
+            },
+        );
+        std::rc::Rc::new(Dialogue {
+            id: "shop".to_string(),
+            start: "hi".to_string(),
+            starts: BTreeMap::new(),
+            states,
+        })
     }
 
     #[test]
@@ -159,22 +187,48 @@ mod tests {
     #[test]
     fn validation_rejects_dangling() {
         let mut states = BTreeMap::new();
-        states.insert("hi".to_string(), Node {
-            text: "x".to_string(),
-            options: vec![Choice { label: "go".to_string(), next: Some("nowhere".to_string()), effect: None }],
-        });
-        let d = Dialogue { id: "bad".to_string(), start: "hi".to_string(), starts: BTreeMap::new(), states };
+        states.insert(
+            "hi".to_string(),
+            Node {
+                text: "x".to_string(),
+                options: vec![Choice {
+                    label: "go".to_string(),
+                    next: Some("nowhere".to_string()),
+                    effect: None,
+                }],
+            },
+        );
+        let d = Dialogue {
+            id: "bad".to_string(),
+            start: "hi".to_string(),
+            starts: BTreeMap::new(),
+            states,
+        };
         assert!(d.validate().is_err());
-        let d2 = Dialogue { id: "bad2".to_string(), start: "missing".to_string(), starts: BTreeMap::new(), states: BTreeMap::new() };
+        let d2 = Dialogue {
+            id: "bad2".to_string(),
+            start: "missing".to_string(),
+            starts: BTreeMap::new(),
+            states: BTreeMap::new(),
+        };
         assert!(d2.validate().is_err());
     }
 
     #[test]
     fn alt_starts_branch() {
         let mut inner = shopkeeper();
-        std::rc::Rc::get_mut(&mut inner).unwrap().starts.insert("wanted".to_string(), "bye".to_string());
+        std::rc::Rc::get_mut(&mut inner)
+            .unwrap()
+            .starts
+            .insert("wanted".to_string(), "bye".to_string());
         let d = inner;
-        assert_eq!(Conversation::new(d.clone(), Some("wanted")).text(), "Mind the door on your way out.");
-        assert_eq!(Conversation::new(d.clone(), None).text(), "Welcome in. Shelves are stocked, prices are fair.");
+        assert_eq!(
+            Conversation::new(d.clone(), Some("wanted")).text(),
+            "Mind the door on your way out."
+        );
+        assert_eq!(
+            Conversation::new(d.clone(), None).text(),
+            "Welcome in. Shelves are stocked, prices are fair."
+        );
     }
 }

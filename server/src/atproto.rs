@@ -39,8 +39,7 @@ fn max_lengths(kind: RecordKind) -> &'static [(&'static str, usize)] {
 
 /// Lexicon id embedded in the schema must match the expected record kind.
 pub fn lexicon_id(kind: RecordKind) -> Result<String, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(schema(kind)).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(schema(kind)).map_err(|e| e.to_string())?;
     v.pointer("/id")
         .and_then(|id| id.as_str())
         .map(|s| s.to_string())
@@ -51,10 +50,13 @@ pub fn lexicon_id(kind: RecordKind) -> Result<String, String> {
 /// length caps honored, handle-ish fields non-blank.
 pub fn validate_record(kind: RecordKind, body: &str) -> Result<BTreeMap<String, String>, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
-    let obj = v.as_object().ok_or_else(|| "record must be an object".to_string())?;
+    let obj = v
+        .as_object()
+        .ok_or_else(|| "record must be an object".to_string())?;
     let mut out = BTreeMap::new();
     for field in required_fields(kind) {
-        let s = obj.get(*field)
+        let s = obj
+            .get(*field)
             .and_then(|x| x.as_str())
             .ok_or_else(|| format!("missing/invalid {field}"))?;
         if s.trim().is_empty() {
@@ -67,7 +69,8 @@ pub fn validate_record(kind: RecordKind, body: &str) -> Result<BTreeMap<String, 
             if s.len() > *max {
                 return Err(format!("{field} over {max} chars"));
             }
-            out.entry(field.to_string()).or_insert_with(|| s.to_string());
+            out.entry(field.to_string())
+                .or_insert_with(|| s.to_string());
         }
     }
     Ok(out)
@@ -86,25 +89,36 @@ mod tests {
 
     #[test]
     fn valid_records_pass() {
-        let m = validate_record(RecordKind::Mail,
-            r#"{"to":"eve.example","body":"initiate here","createdAt":"2026-10-06T00:00:00Z"}"#).unwrap();
+        let m = validate_record(
+            RecordKind::Mail,
+            r#"{"to":"eve.example","body":"initiate here","createdAt":"2026-10-06T00:00:00Z"}"#,
+        )
+        .unwrap();
         assert_eq!(m["to"], "eve.example");
         let b = validate_record(RecordKind::Board,
             r#"{"city":"c1","title":"jobs","body":"debug script 60c","createdAt":"2026-10-06T00:00:00Z"}"#).unwrap();
         assert_eq!(b["city"], "c1");
-        let p = validate_record(RecordKind::Profile,
-            r#"{"handle":"you.example","displayName":"You","createdAt":"2026-10-06T00:00:00Z"}"#).unwrap();
+        let p = validate_record(
+            RecordKind::Profile,
+            r#"{"handle":"you.example","displayName":"You","createdAt":"2026-10-06T00:00:00Z"}"#,
+        )
+        .unwrap();
         assert_eq!(p["handle"], "you.example");
     }
 
     #[test]
     fn invalid_records_fail() {
         assert!(validate_record(RecordKind::Mail, r#"{"to":"x"}"#).is_err()); // missing body
-        assert!(validate_record(RecordKind::Mail, r#"{"to":"","body":"b","createdAt":"t"}"#).is_err()); // blank
+        assert!(
+            validate_record(RecordKind::Mail, r#"{"to":"","body":"b","createdAt":"t"}"#).is_err()
+        ); // blank
         assert!(validate_record(RecordKind::Mail, "not json").is_err());
         let big = "x".repeat(2001);
-        assert!(validate_record(RecordKind::Mail,
-            &format!(r#"{{"to":"x","body":"{big}","createdAt":"t"}}"#)).is_err());
+        assert!(validate_record(
+            RecordKind::Mail,
+            &format!(r#"{{"to":"x","body":"{big}","createdAt":"t"}}"#)
+        )
+        .is_err());
         assert!(validate_record(RecordKind::Board, r#"[]"#).is_err());
     }
 }

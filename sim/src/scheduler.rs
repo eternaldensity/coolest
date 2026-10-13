@@ -1,6 +1,6 @@
+use crate::ids::EntityId;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use crate::ids::EntityId;
 
 /// Energy scheduler: 1 tick = 1s. Entities act at `next_act_at`.
 #[derive(Debug, Default)]
@@ -10,7 +10,9 @@ pub struct Scheduler {
 
 impl Scheduler {
     pub fn new() -> Self {
-        Self { heap: BinaryHeap::new() }
+        Self {
+            heap: BinaryHeap::new(),
+        }
     }
 
     pub fn schedule(&mut self, id: EntityId, at: u64) {

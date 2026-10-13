@@ -33,7 +33,11 @@ fn main() {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .unwrap();
         eframe::WebRunner::new()
-            .start(canvas, web_options, Box::new(|_cc| Ok(Box::new(app::Shell::new(None)))))
+            .start(
+                canvas,
+                web_options,
+                Box::new(|_cc| Ok(Box::new(app::Shell::new(None)))),
+            )
             .await
             .expect("failed to start eframe");
     });

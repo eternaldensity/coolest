@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, VecDeque};
 
 /// M2a Deck arena: one host's RAM grid + programs.
 /// M2b adds cards/resources/paired-stats; M2c adds trace/vulns.
@@ -28,15 +28,25 @@ pub struct DeckStats {
 
 impl Default for DeckStats {
     fn default() -> Self {
-        Self { dedication: 10, focus: 10, stability: 10, courage: 10, clarity: 10 }
+        Self {
+            dedication: 10,
+            focus: 10,
+            stability: 10,
+            courage: 10,
+            clarity: 10,
+        }
     }
 }
 
 impl DeckStats {
     pub fn lowest(&self) -> &'static str {
         let mut best = ("dedication", self.dedication);
-        for (n, v) in [("focus", self.focus), ("stability", self.stability),
-                       ("courage", self.courage), ("clarity", self.clarity)] {
+        for (n, v) in [
+            ("focus", self.focus),
+            ("stability", self.stability),
+            ("courage", self.courage),
+            ("clarity", self.clarity),
+        ] {
             if v < best.1 {
                 best = (n, v);
             }
@@ -135,18 +145,30 @@ pub struct Host {
 impl Host {
     pub fn new(id: HostId, w: u8, h: u8, cpu_total: u32) -> Self {
         Self {
-            id, w, h, cpu_total,
-            cells: Vec::new(), progs: BTreeMap::new(),
-            makers: BTreeMap::new(), stocks: BTreeMap::new(),
-            stats: BTreeMap::new(), effects: BTreeMap::new(),
-            vulns: BTreeMap::new(), breached: false,
-            logs: Vec::new(), trace: None,
-            monitor_armed: false, flagged: false,
+            id,
+            w,
+            h,
+            cpu_total,
+            cells: Vec::new(),
+            progs: BTreeMap::new(),
+            makers: BTreeMap::new(),
+            stocks: BTreeMap::new(),
+            stats: BTreeMap::new(),
+            effects: BTreeMap::new(),
+            vulns: BTreeMap::new(),
+            breached: false,
+            logs: Vec::new(),
+            trace: None,
+            monitor_armed: false,
+            flagged: false,
         }
     }
 
     pub fn cpu_load(&self) -> u32 {
-        self.progs.values().map(|p| 1 + p.len() as u32 * p.cpu_per_seg as u32).sum()
+        self.progs
+            .values()
+            .map(|p| 1 + p.len() as u32 * p.cpu_per_seg as u32)
+            .sum()
     }
 
     pub fn overloaded(&self) -> bool {
@@ -158,8 +180,13 @@ impl Host {
     }
 
     fn cell_get(&self, x: u8, y: u8) -> Option<Segment> {
-        self.cells.iter().find(|c| c.x == x && c.y == y)
-            .map(|c| Segment { prog: c.prog, is_head: c.is_head })
+        self.cells
+            .iter()
+            .find(|c| c.x == x && c.y == y)
+            .map(|c| Segment {
+                prog: c.prog,
+                is_head: c.is_head,
+            })
     }
 
     fn cell_put(&mut self, x: u8, y: u8, prog: EntityId, is_head: bool) {
@@ -167,7 +194,12 @@ impl Host {
             c.prog = prog;
             c.is_head = is_head;
         } else {
-            self.cells.push(CellSlot { x, y, prog, is_head });
+            self.cells.push(CellSlot {
+                x,
+                y,
+                prog,
+                is_head,
+            });
         }
     }
 
@@ -185,7 +217,11 @@ impl Host {
         cpu_per_seg: u8,
     ) -> Result<(), SimError> {
         if !self.free(at) {
-            return Err(SimError::new("cell_busy", "free cell", "occupied/out of bounds"));
+            return Err(SimError::new(
+                "cell_busy",
+                "free cell",
+                "occupied/out of bounds",
+            ));
         }
         if self.progs.contains_key(&prog.0) {
             return Err(SimError::new("dup_prog", "fresh id", "exists"));
@@ -196,21 +232,34 @@ impl Host {
             return Err(SimError::new("cpu_overload", "headroom", "over budget"));
         }
         self.cell_put(at.0, at.1, prog, true);
-        self.progs.insert(prog.0, Program {
-            id: prog, owner, head: at,
-            tail: VecDeque::new(), max_len: max_len.max(1), cpu_per_seg,
-        });
+        self.progs.insert(
+            prog.0,
+            Program {
+                id: prog,
+                owner,
+                head: at,
+                tail: VecDeque::new(),
+                max_len: max_len.max(1),
+                cpu_per_seg,
+            },
+        );
         Ok(())
     }
 
     /// 4-dir step of the head. Grows by 1 unless at max_len (then slides: drop last tail).
     pub fn step(&mut self, prog: EntityId, to: CellPos) -> Result<(), SimError> {
         if !self.free(to) {
-            return Err(SimError::new("cell_busy", "free cell", "occupied/out of bounds"));
+            return Err(SimError::new(
+                "cell_busy",
+                "free cell",
+                "occupied/out of bounds",
+            ));
         }
         // 4-dir adjacency.
-        let p = self.progs.get(&prog.0)
-            .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+        let p =
+            self.progs
+                .get(&prog.0)
+                .ok_or(SimError::new("no_prog", "live program", "missing"))?;
         let dx = (to.0 as i16 - p.head.0 as i16).abs();
         let dy = (to.1 as i16 - p.head.1 as i16).abs();
         if dx + dy != 1 {
@@ -244,8 +293,11 @@ impl Host {
     /// Strike a cell: deletes one tail segment, or kills on headshot.
     /// Returns true if a program died.
     pub fn strike(&mut self, target: CellPos) -> Result<bool, SimError> {
-        let seg = self.cell_get(target.0, target.1)
-            .ok_or(SimError::new("no_target", "program cell", "empty"))?;
+        let seg = self.cell_get(target.0, target.1).ok_or(SimError::new(
+            "no_target",
+            "program cell",
+            "empty",
+        ))?;
         let victim = seg.prog;
         if seg.is_head {
             self.remove_program(victim);
@@ -263,13 +315,17 @@ impl Host {
     /// Takeover: attacker's head must be 4-adjacent to victim's head.
     /// Ownership flips; costs the caller 2 acts (enforced by scheduler side).
     pub fn takeover(&mut self, attacker: EntityId, victim_head: CellPos) -> Result<(), SimError> {
-        let seg = self.cell_get(victim_head.0, victim_head.1)
+        let seg = self
+            .cell_get(victim_head.0, victim_head.1)
             .ok_or(SimError::new("no_target", "program head", "empty"))?;
         if !seg.is_head {
             return Err(SimError::new("not_head", "head cell", "tail"));
         }
-        let a = self.progs.get(&attacker.0)
-            .ok_or(SimError::new("no_prog", "live attacker", "missing"))?;
+        let a = self.progs.get(&attacker.0).ok_or(SimError::new(
+            "no_prog",
+            "live attacker",
+            "missing",
+        ))?;
         let dx = (victim_head.0 as i16 - a.head.0 as i16).abs();
         let dy = (victim_head.1 as i16 - a.head.1 as i16).abs();
         if dx + dy != 1 {
@@ -297,11 +353,23 @@ impl Host {
 
     /// Clone a segment to a free cell (the `copy` card). The child starts at
     /// len 1 with the same owner, build, and maker — never shares cells.
-    pub fn clone_to(&mut self, prog: EntityId, new_id: EntityId, at: CellPos) -> Result<(), SimError> {
-        let p = self.progs.get(&prog.0).cloned()
-            .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+    pub fn clone_to(
+        &mut self,
+        prog: EntityId,
+        new_id: EntityId,
+        at: CellPos,
+    ) -> Result<(), SimError> {
+        let p = self.progs.get(&prog.0).cloned().ok_or(SimError::new(
+            "no_prog",
+            "live program",
+            "missing",
+        ))?;
         if !self.free(at) {
-            return Err(SimError::new("cell_busy", "free cell", "occupied/out of bounds"));
+            return Err(SimError::new(
+                "cell_busy",
+                "free cell",
+                "occupied/out of bounds",
+            ));
         }
         if self.progs.contains_key(&new_id.0) {
             return Err(SimError::new("dup_prog", "fresh id", "exists"));
@@ -310,10 +378,17 @@ impl Host {
             return Err(SimError::new("cpu_overload", "headroom", "over budget"));
         }
         self.cell_put(at.0, at.1, new_id, true);
-        self.progs.insert(new_id.0, Program {
-            id: new_id, owner: p.owner, head: at,
-            tail: VecDeque::new(), max_len: p.max_len, cpu_per_seg: p.cpu_per_seg,
-        });
+        self.progs.insert(
+            new_id.0,
+            Program {
+                id: new_id,
+                owner: p.owner,
+                head: at,
+                tail: VecDeque::new(),
+                max_len: p.max_len,
+                cpu_per_seg: p.cpu_per_seg,
+            },
+        );
         if let Some(maker) = self.makers.get(&prog.0).cloned() {
             self.makers.insert(new_id.0, maker);
         }
@@ -323,14 +398,22 @@ impl Host {
     /// Card ids in data/cards.yaml that this build implements. The yaml
     /// cross-check test fails on drift in either direction.
     pub fn implemented_cards() -> Vec<&'static str> {
-        vec!["distract", "freakout", "tank", "patch", "spike", "overload", "farm", "copy"]
+        vec![
+            "distract", "freakout", "tank", "patch", "spike", "overload", "farm", "copy",
+        ]
     }
 
     // ---- M2c: vulns, trace/bounce/logs, monitor ----
 
     /// Register a vuln on this host (data-driven in vulns.yaml later; 3 for M2).
     pub fn add_vuln(&mut self, id: &str) {
-        self.vulns.insert(id.to_string(), VulnState { patched: false, burned: false });
+        self.vulns.insert(
+            id.to_string(),
+            VulnState {
+                patched: false,
+                burned: false,
+            },
+        );
     }
 
     /// Exploit fires once per vuln: sets breached. Patched or burned → Err.
@@ -338,8 +421,10 @@ impl Host {
         if !self.progs.contains_key(&prog.0) {
             return Err(SimError::new("no_prog", "live program", "missing"));
         }
-        let v = self.vulns.get_mut(vuln)
-            .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
+        let v =
+            self.vulns
+                .get_mut(vuln)
+                .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
         if v.patched {
             return Err(SimError::new("patched", "unpatched vuln", "patched"));
         }
@@ -355,8 +440,10 @@ impl Host {
     }
 
     pub fn patch(&mut self, vuln: &str) -> Result<(), SimError> {
-        let v = self.vulns.get_mut(vuln)
-            .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
+        let v =
+            self.vulns
+                .get_mut(vuln)
+                .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
         v.patched = true;
         Ok(())
     }
@@ -382,7 +469,11 @@ impl Host {
         if !self.progs.contains_key(&target.0) {
             return Err(SimError::new("no_prog", "live target", "missing"));
         }
-        self.trace = Some(Trace { target, progress: 0, threshold });
+        self.trace = Some(Trace {
+            target,
+            progress: 0,
+            threshold,
+        });
         if self.monitor_armed {
             self.flagged = true;
         }
@@ -419,23 +510,39 @@ impl Host {
     /// Produce `base` units of `res` into the owner's stock.
     /// Multiplied by rate only if the program's type list includes it.
     pub fn produce(&mut self, prog: EntityId, res: Res, base: u32) -> Result<u32, SimError> {
-        let p = self.progs.get(&prog.0)
-            .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+        let p =
+            self.progs
+                .get(&prog.0)
+                .ok_or(SimError::new("no_prog", "live program", "missing"))?;
         let mult = match self.makers.get(&prog.0) {
             Some((makes, rate)) if makes.contains(&res) => *rate as u32,
             _ => 1,
         };
         let amount = base * mult;
-        *self.stocks.entry(p.owner.0).or_default().entry(res).or_insert(0) += amount;
+        *self
+            .stocks
+            .entry(p.owner.0)
+            .or_default()
+            .entry(res)
+            .or_insert(0) += amount;
         Ok(amount)
     }
 
     pub fn stock(&self, owner: EntityId, res: Res) -> u32 {
-        self.stocks.get(&owner.0).and_then(|m| m.get(&res)).copied().unwrap_or(0)
+        self.stocks
+            .get(&owner.0)
+            .and_then(|m| m.get(&res))
+            .copied()
+            .unwrap_or(0)
     }
 
     fn spend(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {
-        let e = self.stocks.entry(owner.0).or_default().entry(res).or_insert(0);
+        let e = self
+            .stocks
+            .entry(owner.0)
+            .or_default()
+            .entry(res)
+            .or_insert(0);
         if *e < n {
             return Err(SimError::new("no_resource", "stocked units", "short"));
         }
@@ -467,8 +574,11 @@ impl Host {
     }
 
     fn deal_damage(&mut self, target: CellPos, mut dmg: u32) -> Result<bool, SimError> {
-        let seg = self.cell_get(target.0, target.1)
-            .ok_or(SimError::new("no_target", "program cell", "empty"))?;
+        let seg = self.cell_get(target.0, target.1).ok_or(SimError::new(
+            "no_target",
+            "program cell",
+            "empty",
+        ))?;
         let victim = seg.prog;
         // Shield absorbs segment damage first.
         if let Some(fx) = self.effects.get_mut(&victim.0) {
@@ -517,17 +627,23 @@ impl Host {
     }
 
     pub fn is_skipped(&self, prog: EntityId) -> bool {
-        self.effects.get(&prog.0).map(|v| v.contains(&Fx::SkipNext)).unwrap_or(false)
+        self.effects
+            .get(&prog.0)
+            .map(|v| v.contains(&Fx::SkipNext))
+            .unwrap_or(false)
     }
 
     /// End of a program's turn: DoT eats one tail segment (Stability poison),
     /// then all next-turn effects expire.
     pub fn end_turn(&mut self, prog: EntityId) {
         if let Some(fx) = self.effects.remove(&prog.0) {
-            let dots: u32 = fx.iter().filter_map(|f| match f {
-                Fx::DotNext(n) => Some(*n as u32),
-                _ => None,
-            }).sum();
+            let dots: u32 = fx
+                .iter()
+                .filter_map(|f| match f {
+                    Fx::DotNext(n) => Some(*n as u32),
+                    _ => None,
+                })
+                .sum();
             for _ in 0..dots {
                 if let Some(p) = self.progs.get_mut(&prog.0) {
                     if let Some(c) = p.tail.pop_back() {
@@ -585,7 +701,8 @@ mod tests {
     fn killer_ttk_is_3_to_4() {
         // Two len-3 killers: 3 tail/head strikes to clear.
         let mut h = host();
-        h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1).unwrap();
+        h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1)
+            .unwrap();
         h.step(EntityId(10), CellPos(3, 2)).unwrap();
         h.step(EntityId(10), CellPos(4, 2)).unwrap();
         assert_eq!(h.progs[&10].len(), 3);
@@ -599,11 +716,15 @@ mod tests {
     #[test]
     fn cpu_overload_blocks_load_and_growth() {
         let mut h = Host::new(HostId(2), 12, 8, 3);
-        h.load(EntityId(20), EntityId(1), CellPos(0, 0), 2, 1).unwrap(); // load 2
-        assert!(h.load(EntityId(21), EntityId(1), CellPos(5, 5), 2, 1).is_err()); // 2+2>3
-        // Growth while at cap is fine (still under), but overload blocks step.
+        h.load(EntityId(20), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap(); // load 2
+        assert!(h
+            .load(EntityId(21), EntityId(1), CellPos(5, 5), 2, 1)
+            .is_err()); // 2+2>3
+                        // Growth while at cap is fine (still under), but overload blocks step.
         let mut h2 = Host::new(HostId(3), 12, 8, 100);
-        h2.load(EntityId(30), EntityId(1), CellPos(0, 0), 4, 1).unwrap();
+        h2.load(EntityId(30), EntityId(1), CellPos(0, 0), 4, 1)
+            .unwrap();
         h2.step(EntityId(30), CellPos(1, 0)).unwrap();
         assert_eq!(h2.progs[&30].len(), 2);
     }
@@ -611,8 +732,10 @@ mod tests {
     #[test]
     fn takeover_flips_owner() {
         let mut h = host();
-        h.load(EntityId(40), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
-        h.load(EntityId(41), EntityId(2), CellPos(0, 2), 2, 1).unwrap();
+        h.load(EntityId(40), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        h.load(EntityId(41), EntityId(2), CellPos(0, 2), 2, 1)
+            .unwrap();
         h.step(EntityId(40), CellPos(0, 1)).unwrap(); // adjacent to victim head
         h.takeover(EntityId(40), CellPos(0, 2)).unwrap();
         assert_eq!(h.owner_of(EntityId(41)), Some(EntityId(1)));
@@ -623,15 +746,23 @@ mod tests {
     #[test]
     fn clone_inherits_owner_build_and_maker() {
         let mut h = host();
-        h.load(EntityId(40), EntityId(1), CellPos(0, 0), 4, 2).unwrap();
+        h.load(EntityId(40), EntityId(1), CellPos(0, 0), 4, 2)
+            .unwrap();
         h.set_maker(EntityId(40), vec![Res::Algo], 2).unwrap();
-        h.clone_to(EntityId(40), EntityId(44), CellPos(5, 5)).unwrap();
+        h.clone_to(EntityId(40), EntityId(44), CellPos(5, 5))
+            .unwrap();
         assert_eq!(h.owner_of(EntityId(44)), Some(EntityId(1)));
         assert_eq!(h.progs[&44].max_len, 4);
         assert_eq!(h.produce(EntityId(44), Res::Algo, 1).unwrap(), 2); // maker copied
-        assert!(h.clone_to(EntityId(40), EntityId(44), CellPos(6, 6)).is_err()); // dup id
-        assert!(h.clone_to(EntityId(99), EntityId(45), CellPos(6, 6)).is_err()); // missing
-        assert!(h.clone_to(EntityId(40), EntityId(45), CellPos(5, 5)).is_err()); // busy
+        assert!(h
+            .clone_to(EntityId(40), EntityId(44), CellPos(6, 6))
+            .is_err()); // dup id
+        assert!(h
+            .clone_to(EntityId(99), EntityId(45), CellPos(6, 6))
+            .is_err()); // missing
+        assert!(h
+            .clone_to(EntityId(40), EntityId(45), CellPos(5, 5))
+            .is_err()); // busy
     }
 
     #[test]
@@ -650,7 +781,8 @@ mod tests {
     #[test]
     fn produce_pays_rate_only_on_match() {
         let mut h = host();
-        h.load(EntityId(50), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.load(EntityId(50), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
         h.set_maker(EntityId(50), vec![Res::Loop], 3).unwrap();
         assert_eq!(h.produce(EntityId(50), Res::Loop, 2).unwrap(), 6);
         assert_eq!(h.produce(EntityId(50), Res::Data, 2).unwrap(), 2); // off-type: x1
@@ -661,29 +793,39 @@ mod tests {
     fn consume_and_consume_all_scale_damage() {
         let mut h = host();
         // Victim len-3.
-        h.load(EntityId(60), EntityId(2), CellPos(2, 2), 3, 1).unwrap();
+        h.load(EntityId(60), EntityId(2), CellPos(2, 2), 3, 1)
+            .unwrap();
         h.step(EntityId(60), CellPos(3, 2)).unwrap();
         h.step(EntityId(60), CellPos(4, 2)).unwrap();
         // Attacker funds 2 Loop: base 1 + 2 = 3 segs = full clear via tail cell.
-        h.load(EntityId(61), EntityId(1), CellPos(8, 7), 2, 1).unwrap();
+        h.load(EntityId(61), EntityId(1), CellPos(8, 7), 2, 1)
+            .unwrap();
         h.set_maker(EntityId(61), vec![Res::Loop], 2).unwrap();
         h.produce(EntityId(61), Res::Loop, 1).unwrap(); // stock 2
-        assert!(h.card_strike(EntityId(1), CellPos(4, 2), Some((Res::Loop, 2)), None).unwrap());
+        assert!(h
+            .card_strike(EntityId(1), CellPos(4, 2), Some((Res::Loop, 2)), None)
+            .unwrap());
         assert!(!h.progs.contains_key(&60)); // headshot kills regardless of dmg
-        // Unfunded consume rejected.
-        h.load(EntityId(62), EntityId(2), CellPos(6, 6), 2, 1).unwrap();
-        assert!(h.card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 9)), None).is_err());
+                                             // Unfunded consume rejected.
+        h.load(EntityId(62), EntityId(2), CellPos(6, 6), 2, 1)
+            .unwrap();
+        assert!(h
+            .card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 9)), None)
+            .is_err());
         // Funded tail strike scales: len-1 victim + 1 funded dmg clears tail, head survives.
         h.step(EntityId(62), CellPos(7, 6)).unwrap(); // len 2
         h.produce(EntityId(61), Res::Loop, 1).unwrap(); // stock 2 again
-        assert!(!h.card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 1)), None).unwrap());
+        assert!(!h
+            .card_strike(EntityId(1), CellPos(6, 6), Some((Res::Loop, 1)), None)
+            .unwrap());
         assert_eq!(h.progs[&62].len(), 1);
     }
 
     #[test]
     fn skip_shield_dot_expire_next_turn() {
         let mut h = host();
-        h.load(EntityId(70), EntityId(1), CellPos(0, 0), 3, 1).unwrap();
+        h.load(EntityId(70), EntityId(1), CellPos(0, 0), 3, 1)
+            .unwrap();
         h.step(EntityId(70), CellPos(1, 0)).unwrap();
         h.step(EntityId(70), CellPos(2, 0)).unwrap(); // len 3
         h.apply_fx(EntityId(70), Fx::SkipNext).unwrap();
@@ -697,7 +839,8 @@ mod tests {
     #[test]
     fn stats_damage_and_heal_lowest() {
         let mut h = host();
-        h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
         h.damage_stat(EntityId(80), "focus", 4).unwrap();
         assert_eq!(h.stats[&80].focus, 6);
         let name = h.heal_lowest(EntityId(80), 2).unwrap();
@@ -712,7 +855,8 @@ mod tests {
         for stat in ["dedication", "focus", "stability", "courage", "clarity"] {
             for n in [0u8, 1, 9, 10, 11, 100, 255] {
                 let mut h = host();
-                h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+                h.load(EntityId(80), EntityId(1), CellPos(0, 0), 2, 1)
+                    .unwrap();
                 h.damage_stat(EntityId(80), stat, n).unwrap();
                 let got = match stat {
                     "dedication" => h.stats[&80].dedication,
@@ -726,7 +870,8 @@ mod tests {
         }
         // Heal from the floor caps at the 20 soft cap, never wraps.
         let mut h = host();
-        h.load(EntityId(81), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.load(EntityId(81), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
         h.damage_stat(EntityId(81), "focus", 255).unwrap();
         h.heal_lowest(EntityId(81), 255).unwrap();
         assert_eq!(h.stats[&81].focus, 20);
@@ -737,7 +882,8 @@ mod tests {
         let mut h = host();
         h.add_vuln("cve-2006-0001");
         h.add_vuln("cve-2006-0002");
-        h.load(EntityId(90), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.load(EntityId(90), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
         h.set_monitor(true);
         h.exploit(EntityId(90), "cve-2006-0001").unwrap();
         assert!(h.breached);
@@ -751,7 +897,9 @@ mod tests {
     #[test]
     fn trace_runs_slower_scrambled() {
         let mut plain = host();
-        plain.load(EntityId(91), EntityId(2), CellPos(0, 0), 2, 1).unwrap();
+        plain
+            .load(EntityId(91), EntityId(2), CellPos(0, 0), 2, 1)
+            .unwrap();
         plain.start_trace(EntityId(91), 6).unwrap();
         let mut ticks = 0;
         while !plain.tick_trace(false) {
@@ -760,7 +908,8 @@ mod tests {
         assert_eq!(ticks, 2); // 2+2+2: third tick completes
 
         let mut slow = host();
-        slow.load(EntityId(92), EntityId(2), CellPos(0, 0), 2, 1).unwrap();
+        slow.load(EntityId(92), EntityId(2), CellPos(0, 0), 2, 1)
+            .unwrap();
         slow.start_trace(EntityId(92), 6).unwrap();
         let mut ticks = 0;
         while !slow.tick_trace(true) {
@@ -777,7 +926,8 @@ mod tests {
         h.log(EntityId(2), 101, HostId(9));
         // No program on host yet: scrub refused.
         assert!(h.scrub_log(EntityId(1)).is_err());
-        h.load(EntityId(93), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+        h.load(EntityId(93), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
         assert_eq!(h.scrub_log(EntityId(1)).unwrap(), 1);
         assert_eq!(h.logs.len(), 1); // other's entry survives
     }

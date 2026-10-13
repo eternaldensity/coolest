@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use crate::error::SimError;
 use crate::ids::EntityId;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// M5 Veil (design/01/03/08): helmet entry uploads a MindToken. Death
 /// ejects with mindpower drain (not permadeath outside hardcore).
@@ -52,13 +52,29 @@ impl Veil {
         if self.tokens.contains_key(&owner.0) {
             return Err(SimError::new("already_in", "single token", "duplicate"));
         }
-        self.tokens.insert(owner.0, MindToken { hp: 10, mindpower, files: Vec::new(), controls: None, area: 0 });
+        self.tokens.insert(
+            owner.0,
+            MindToken {
+                hp: 10,
+                mindpower,
+                files: Vec::new(),
+                controls: None,
+                area: 0,
+            },
+        );
         Ok(())
     }
 
     /// Register a hosted area. Area 0 always exists as the default lobby.
     pub fn add_area(&mut self, id: u64, name: &str, exits: Vec<u64>, is_exit: bool) {
-        self.areas.insert(id, Area { name: name.to_string(), exits, is_exit });
+        self.areas.insert(
+            id,
+            Area {
+                name: name.to_string(),
+                exits,
+                is_exit,
+            },
+        );
     }
 
     /// Helmet entry directly into a named area.
@@ -79,7 +95,9 @@ impl Veil {
     }
 
     pub fn area_info(&self, id: u64) -> Option<(String, Vec<u64>, bool)> {
-        self.areas.get(&id).map(|a| (a.name.clone(), a.exits.clone(), a.is_exit))
+        self.areas
+            .get(&id)
+            .map(|a| (a.name.clone(), a.exits.clone(), a.is_exit))
     }
 
     pub fn area_of(&self, owner: EntityId) -> Option<u64> {
@@ -111,8 +129,9 @@ impl Veil {
         if area != 0 && !self.areas.contains_key(&area) {
             return Err(SimError::new("no_area", "hosted area", "missing"));
         }
-        let cur = self.area_of(owner)
-            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        let cur =
+            self.area_of(owner)
+                .ok_or(SimError::new("not_inside", "active token", "absent"))?;
         if cur != area && !self.neighbors(cur).contains(&area) {
             return Err(SimError::new("no_exit", "linked area", "unlinked"));
         }
@@ -152,8 +171,11 @@ impl Veil {
     /// Damage the mind. At 0 HP the token dies: eject + heavy drain.
     /// Returns the drain applied (0 if survived).
     pub fn damage(&mut self, owner: EntityId, n: u8) -> Result<u8, SimError> {
-        let t = self.tokens.get_mut(&owner.0)
-            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        let t = self.tokens.get_mut(&owner.0).ok_or(SimError::new(
+            "not_inside",
+            "active token",
+            "absent",
+        ))?;
         t.hp = t.hp.saturating_sub(n);
         if t.hp == 0 {
             self.tokens.remove(&owner.0);
@@ -165,19 +187,29 @@ impl Veil {
 
     /// Clean exit (or kickout at <5 mindpower): light drain.
     pub fn eject(&mut self, owner: EntityId) -> Result<u8, SimError> {
-        self.tokens.remove(&owner.0)
+        self.tokens
+            .remove(&owner.0)
             .map(|_| KICK_DRAIN)
             .ok_or(SimError::new("not_inside", "active token", "absent"))
     }
 
     /// Mental transfer: take over a nearby lower-mindpower host.
     /// Host takes the damage instead while controlled.
-    pub fn transfer(&mut self, owner: EntityId, host: EntityId, host_mp: u8, in_range: bool) -> Result<(), SimError> {
+    pub fn transfer(
+        &mut self,
+        owner: EntityId,
+        host: EntityId,
+        host_mp: u8,
+        in_range: bool,
+    ) -> Result<(), SimError> {
         if !in_range {
             return Err(SimError::new("out_of_range", "nearby host", "too far"));
         }
-        let t = self.tokens.get_mut(&owner.0)
-            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        let t = self.tokens.get_mut(&owner.0).ok_or(SimError::new(
+            "not_inside",
+            "active token",
+            "absent",
+        ))?;
         if host_mp >= t.mindpower {
             return Err(SimError::new("strong_host", "lower-mp host", "too strong"));
         }
@@ -192,19 +224,27 @@ impl Veil {
     /// Carry a mind-file. Capacity = current mindpower file count.
     /// Cloning onto disk erases the source (caller enforces: take then drop).
     pub fn carry(&mut self, owner: EntityId, name: &str) -> Result<(), SimError> {
-        let t = self.tokens.get_mut(&owner.0)
-            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        let t = self.tokens.get_mut(&owner.0).ok_or(SimError::new(
+            "not_inside",
+            "active token",
+            "absent",
+        ))?;
         if t.files.len() >= t.mindpower as usize {
             return Err(SimError::new("mind_full", "capacity", "full"));
         }
-        t.files.push(MindFile { name: name.to_string() });
+        t.files.push(MindFile {
+            name: name.to_string(),
+        });
         Ok(())
     }
 
     /// Read = delete-after-view (single-use). Returns the file name.
     pub fn read(&mut self, owner: EntityId, idx: usize) -> Result<String, SimError> {
-        let t = self.tokens.get_mut(&owner.0)
-            .ok_or(SimError::new("not_inside", "active token", "absent"))?;
+        let t = self.tokens.get_mut(&owner.0).ok_or(SimError::new(
+            "not_inside",
+            "active token",
+            "absent",
+        ))?;
         if idx >= t.files.len() {
             return Err(SimError::new("no_file", "carried file", "missing"));
         }
@@ -292,7 +332,7 @@ mod tests {
         v.move_to(EntityId(1), 3).unwrap();
         assert!(v.move_to(EntityId(1), 9).is_err()); // unknown area
         assert!(v.enter_at(EntityId(2), 8, 9).is_err()); // unknown entry
-        // Unlinked 4 still reaches an exit via the 0-lobby hub (two hops).
+                                                         // Unlinked 4 still reaches an exit via the 0-lobby hub (two hops).
         v.enter_at(EntityId(3), 8, 4).unwrap();
         assert_eq!(v.nearest_exit(EntityId(3)), Some(3));
     }

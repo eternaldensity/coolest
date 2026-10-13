@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 use crate::ledger::{Ledger, Mail, Mailbox};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Mailer programs (design/04 + 2006): anyone can send from their own box.
 /// Reading someone else's box needs a hack-enabled Mailer+ (rare loot),
@@ -52,16 +52,13 @@ impl ZombieNet {
 
     /// One day's spam run. `accts` maps owner -> ledger account.
     /// Returns total paid (capped per host/day inside the ledger).
-    pub fn payout_day(
-        &self,
-        ledger: &mut Ledger,
-        day: u64,
-        accts: &BTreeMap<u64, u64>,
-    ) -> i64 {
+    pub fn payout_day(&self, ledger: &mut Ledger, day: u64, accts: &BTreeMap<u64, u64>) -> i64 {
         let mut total = 0;
         for (host, owner) in &self.hosts {
             if let Some(acct) = accts.get(owner) {
-                total += ledger.credit_spam(*acct, HostId(*host), day, 400).unwrap_or(0);
+                total += ledger
+                    .credit_spam(*acct, HostId(*host), day, 400)
+                    .unwrap_or(0);
             }
         }
         total
@@ -76,9 +73,15 @@ mod tests {
     fn snoop_needs_plus() {
         let mut mbox = Mailbox::new();
         mbox.send(EntityId(2), EntityId(2), "secret plans").unwrap();
-        let plain = Mailer { owner: EntityId(1), plus: false };
+        let plain = Mailer {
+            owner: EntityId(1),
+            plus: false,
+        };
         assert!(plain.snoop(&mbox).is_err());
-        let plus = Mailer { owner: EntityId(1), plus: true };
+        let plus = Mailer {
+            owner: EntityId(1),
+            plus: true,
+        };
         let seen = plus.snoop(&mbox).unwrap();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].body, "secret plans");

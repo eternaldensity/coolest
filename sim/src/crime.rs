@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// M4a conduct model (design/05): alignment is observed behavior +
 /// traceability, not a sheet toggle. NPC alignment static; the player's
@@ -83,7 +83,8 @@ impl Record {
 
     /// Evidence-weighted severity mass.
     pub fn mass(&self) -> f32 {
-        self.entries.iter()
+        self.entries
+            .iter()
             .map(|c| c.act.severity() as f32 * c.evidence.clamp(0.0, 1.0))
             .sum()
     }
@@ -148,7 +149,13 @@ impl Clans {
         Self::default()
     }
 
-    pub fn join(&mut self, clan: u64, member: EntityId, fee_paid: bool, initiated: bool) -> Result<(), SimError> {
+    pub fn join(
+        &mut self,
+        clan: u64,
+        member: EntityId,
+        fee_paid: bool,
+        initiated: bool,
+    ) -> Result<(), SimError> {
         if !fee_paid || !initiated {
             return Err(SimError::new("dues", "fee + initiation", "unpaid/unproven"));
         }
@@ -157,7 +164,10 @@ impl Clans {
     }
 
     pub fn is_member(&self, clan: u64, member: EntityId) -> bool {
-        self.members.get(&clan).map(|m| m.contains(&member.0)).unwrap_or(false)
+        self.members
+            .get(&clan)
+            .map(|m| m.contains(&member.0))
+            .unwrap_or(false)
     }
 
     pub fn mark_enemy(&mut self, member: EntityId, clan: u64) {
@@ -165,14 +175,19 @@ impl Clans {
     }
 
     pub fn is_enemy(&self, member: EntityId, clan: u64) -> bool {
-        self.enemies.get(&member.0).map(|e| e.contains(&clan)).unwrap_or(false)
+        self.enemies
+            .get(&member.0)
+            .map(|e| e.contains(&clan))
+            .unwrap_or(false)
     }
 
     /// Two beings are friendly if they share a clan and neither is its enemy.
     pub fn friendly(&self, a: EntityId, b: EntityId) -> bool {
         self.members.iter().any(|(clan, m)| {
-            m.contains(&a.0) && m.contains(&b.0)
-                && !self.is_enemy(a, *clan) && !self.is_enemy(b, *clan)
+            m.contains(&a.0)
+                && m.contains(&b.0)
+                && !self.is_enemy(a, *clan)
+                && !self.is_enemy(b, *clan)
         })
     }
 }
@@ -205,7 +220,13 @@ impl License {
     /// at full evidence (the heavy penalty).
     pub fn abuse(&mut self, record: &mut Record, tick: u64) {
         self.revoked = true;
-        record.report(Crime { act: Act::Attack, at_host: None, tick, victim: None, evidence: 1.0 });
+        record.report(Crime {
+            act: Act::Attack,
+            at_host: None,
+            tick,
+            victim: None,
+            evidence: 1.0,
+        });
     }
 }
 
@@ -214,7 +235,13 @@ mod tests {
     use super::*;
 
     fn crime(act: Act, evidence: f32) -> Crime {
-        Crime { act, at_host: Some(HostId(1)), tick: 10, victim: None, evidence }
+        Crime {
+            act,
+            at_host: Some(HostId(1)),
+            tick: 10,
+            victim: None,
+            evidence,
+        }
     }
 
     #[test]
@@ -249,7 +276,10 @@ mod tests {
         assert!((trace_evidence(1.0, Alignment::Authority, true) - 1.0).abs() < 1e-6);
         // Rumors barely move the needle.
         let mut r = Record::new();
-        r.report(crime(Act::Murder, trace_evidence(1.0, Alignment::Evil, false)));
+        r.report(crime(
+            Act::Murder,
+            trace_evidence(1.0, Alignment::Evil, false),
+        ));
         assert_eq!(r.alignment(), Alignment::Untrusted);
         assert_eq!(r.standing(), Standing::Fined);
     }

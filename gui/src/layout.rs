@@ -41,26 +41,71 @@ pub struct Panes {
 /// 1280x800 single window. Map enlarges when off-device (actions hides);
 //  `map_focused` selects that variant.
 pub fn layout(map_focused: bool) -> Panes {
-    let window = Rect { x: 0, y: 0, w: 1280, h: 800 };
-    let console = Rect { x: 0, y: 640, w: 1280, h: 160 };
-    let status = Rect { x: 0, y: 0, w: 240, h: 640 };
+    let window = Rect {
+        x: 0,
+        y: 0,
+        w: 1280,
+        h: 800,
+    };
+    let console = Rect {
+        x: 0,
+        y: 640,
+        w: 1280,
+        h: 160,
+    };
+    let status = Rect {
+        x: 0,
+        y: 0,
+        w: 240,
+        h: 640,
+    };
     if map_focused {
         Panes {
             window,
             console,
             status,
-            actions: Rect { x: 0, y: 0, w: 0, h: 0 },
-            notify: Rect { x: 1040, y: 0, w: 240, h: 80 },
-            map: Rect { x: 240, y: 80, w: 1040, h: 560 },
+            actions: Rect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+            notify: Rect {
+                x: 1040,
+                y: 0,
+                w: 240,
+                h: 80,
+            },
+            map: Rect {
+                x: 240,
+                y: 80,
+                w: 1040,
+                h: 560,
+            },
         }
     } else {
         Panes {
             window,
             console,
             status,
-            actions: Rect { x: 440, y: 0, w: 400, h: 120 },
-            notify: Rect { x: 1040, y: 0, w: 240, h: 80 },
-            map: Rect { x: 840, y: 80, w: 440, h: 560 },
+            actions: Rect {
+                x: 440,
+                y: 0,
+                w: 400,
+                h: 120,
+            },
+            notify: Rect {
+                x: 1040,
+                y: 0,
+                w: 240,
+                h: 80,
+            },
+            map: Rect {
+                x: 840,
+                y: 80,
+                w: 440,
+                h: 560,
+            },
         }
     }
 }

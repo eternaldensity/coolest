@@ -1,21 +1,26 @@
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use crate::civic::{cop_duty, role_table, Role};
+use crate::crime::Standing;
+use crate::deck::Host;
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
-use crate::civic::{Role, cop_duty, role_table};
-use crate::crime::Standing;
 use crate::ledger::Ledger;
 use crate::net::NetGraph;
 use crate::pos::Pos;
 use crate::power::PowerGrid;
 use crate::scheduler::Scheduler;
-use crate::deck::Host;
 use crate::shop::Shop;
-use crate::street::{Ports, Section, gen_section, gen_section_weighted};
+use crate::street::{gen_section, gen_section_weighted, Ports, Section};
 use crate::veil::Veil;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Dir { N, S, E, W }
+pub enum Dir {
+    N,
+    S,
+    E,
+    W,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Intent {
@@ -128,13 +133,32 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 
 impl World {
     pub fn new(seed: u64) -> Self {
-        Self { tick: 0, seed, version: SAVE_VERSION, beings: BTreeMap::new(), jobs: DEFAULT_JOBS.to_vec(), ledger: Ledger::new(), accts: BTreeMap::new(), shops: Vec::new(), npcs: BTreeMap::new(), sections: Vec::new(), hosts: BTreeMap::new(), net: NetGraph::new(), power: PowerGrid::new(), veil: Veil::new(), sched: Scheduler::new() }
+        Self {
+            tick: 0,
+            seed,
+            version: SAVE_VERSION,
+            beings: BTreeMap::new(),
+            jobs: DEFAULT_JOBS.to_vec(),
+            ledger: Ledger::new(),
+            accts: BTreeMap::new(),
+            shops: Vec::new(),
+            npcs: BTreeMap::new(),
+            sections: Vec::new(),
+            hosts: BTreeMap::new(),
+            net: NetGraph::new(),
+            power: PowerGrid::new(),
+            veil: Veil::new(),
+            sched: Scheduler::new(),
+        }
     }
 
     /// Override the job table from data/jobs.yaml (validated by data::parse_jobs).
     pub fn set_jobs(&mut self, defs: &[crate::data::JobDef]) {
         if !defs.is_empty() {
-            self.jobs = defs.iter().map(|d| (d.payout_cents, d.mood_cost, d.food_cost)).collect();
+            self.jobs = defs
+                .iter()
+                .map(|d| (d.payout_cents, d.mood_cost, d.food_cost))
+                .collect();
         }
     }
 
@@ -174,7 +198,8 @@ impl World {
             (true, None) => shut[1] = true,
             _ => {}
         }
-        self.sections.push(gen_section_weighted(self.seed, sx, sy, want, &[], shut));
+        self.sections
+            .push(gen_section_weighted(self.seed, sx, sy, want, &[], shut));
     }
 
     pub fn section_at(&self, sx: i32, sy: i32) -> Option<&Section> {
@@ -187,7 +212,9 @@ impl World {
 
     /// Fetch or create a Deck arena for a host (12x8, 100 CPU default).
     pub fn ensure_host(&mut self, id: HostId) -> &mut Host {
-        self.hosts.entry(id.0).or_insert_with(|| Host::new(id, 12, 8, 100))
+        self.hosts
+            .entry(id.0)
+            .or_insert_with(|| Host::new(id, 12, 8, 100))
     }
 
     pub fn host(&self, id: HostId) -> Option<&Host> {
@@ -196,10 +223,18 @@ impl World {
 
     pub fn spawn(&mut self, id: EntityId, pos: Pos, speed: u64) {
         self.ensure_section(pos.sx, pos.sy);
-        self.beings.insert(id.0, Being {
-            pos, next_at: 0, speed,
-            food: 80, mood: 70, money: 200, rations: 3,
-        });
+        self.beings.insert(
+            id.0,
+            Being {
+                pos,
+                next_at: 0,
+                speed,
+                food: 80,
+                mood: 70,
+                money: 200,
+                rations: 3,
+            },
+        );
         self.sched.schedule(id, 0);
     }
 
@@ -223,17 +258,49 @@ impl World {
     }
 
     pub fn shop_at(&self, x: u8, y: u8) -> Option<&Shop> {
-        self.shops.iter().find(|s| s.x == x && s.y == y).map(|s| &s.shop)
+        self.shops
+            .iter()
+            .find(|s| s.x == x && s.y == y)
+            .map(|s| &s.shop)
     }
 
     /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
     /// home/work/leisure are local tiles; timetable comes from role.
-    pub fn spawn_npc(&mut self, id: EntityId, role: Role, home: (u8, u8), work: (u8, u8), leisure: (u8, u8), speed: u64) {
-        self.npcs.insert(id.0, Npc { pos: Pos { city: 1, sx: 0, sy: 0, z: 0, x: home.0, y: home.1 }, next_at: 0, speed, role, home, work, leisure });
+    pub fn spawn_npc(
+        &mut self,
+        id: EntityId,
+        role: Role,
+        home: (u8, u8),
+        work: (u8, u8),
+        leisure: (u8, u8),
+        speed: u64,
+    ) {
+        self.npcs.insert(
+            id.0,
+            Npc {
+                pos: Pos {
+                    city: 1,
+                    sx: 0,
+                    sy: 0,
+                    z: 0,
+                    x: home.0,
+                    y: home.1,
+                },
+                next_at: 0,
+                speed,
+                role,
+                home,
+                work,
+                leisure,
+            },
+        );
     }
 
     pub fn npc_positions(&self) -> Vec<(u64, u8, u8)> {
-        self.npcs.iter().map(|(id, n)| (*id, n.pos.x, n.pos.y)).collect()
+        self.npcs
+            .iter()
+            .map(|(id, n)| (*id, n.pos.x, n.pos.y))
+            .collect()
     }
 
     pub fn npc_role(&self, id: u64) -> Option<Role> {
@@ -241,7 +308,10 @@ impl World {
     }
 
     pub fn npc_full(&self) -> Vec<(u64, Pos, Role)> {
-        self.npcs.iter().map(|(id, n)| (*id, n.pos, n.role)).collect()
+        self.npcs
+            .iter()
+            .map(|(id, n)| (*id, n.pos, n.role))
+            .collect()
     }
 
     /// Advance NPCs whose turn is due. hour drives timetables; wanted maps
@@ -257,7 +327,10 @@ impl World {
             let table = role_table(self.npcs[&id].role);
             let target = self.npc_target(id, &table, hour, wanted);
             let n = self.npcs.get_mut(&id).unwrap();
-            let (dx, dy) = (target.0 as i16 - n.pos.x as i16, target.1 as i16 - n.pos.y as i16);
+            let (dx, dy) = (
+                target.0 as i16 - n.pos.x as i16,
+                target.1 as i16 - n.pos.y as i16,
+            );
             // Step along the farther axis (4-dir, border-clamped like PCs).
             let (nx, ny) = if dx.abs() >= dy.abs() {
                 (n.pos.x as i16 + dx.signum(), n.pos.y as i16)
@@ -272,7 +345,13 @@ impl World {
         }
     }
 
-    fn npc_target(&self, id: u64, table: &crate::civic::Timetable, hour: u8, wanted: &BTreeMap<u64, Standing>) -> (u8, u8) {
+    fn npc_target(
+        &self,
+        id: u64,
+        table: &crate::civic::Timetable,
+        hour: u8,
+        wanted: &BTreeMap<u64, Standing>,
+    ) -> (u8, u8) {
         let n = &self.npcs[&id];
         if n.role == Role::Cop {
             // Nearest Wanted being, if any — pursuit overrides the timetable.
@@ -281,7 +360,8 @@ impl World {
                 if wanted.get(bid).copied().unwrap_or(Standing::Clean) != Standing::Wanted {
                     continue;
                 }
-                let d = (b.pos.x as i32 - n.pos.x as i32).abs() + (b.pos.y as i32 - n.pos.y as i32).abs();
+                let d = (b.pos.x as i32 - n.pos.x as i32).abs()
+                    + (b.pos.y as i32 - n.pos.y as i32).abs();
                 if best.map(|(_, bd)| d < bd).unwrap_or(true) {
                     best = Some(((b.pos.x, b.pos.y), d));
                 }
@@ -304,12 +384,17 @@ impl World {
     #[cfg(test)]
     fn set_needs(&mut self, id: EntityId, food: u8, mood: u8, money: i64, rations: u8) {
         if let Some(b) = self.beings.get_mut(&id.0) {
-            b.food = food; b.mood = mood; b.money = money; b.rations = rations;
+            b.food = food;
+            b.mood = mood;
+            b.money = money;
+            b.rations = rations;
         }
     }
 
     pub fn needs(&self, id: EntityId) -> Option<(u8, u8, i64, u8)> {
-        self.beings.get(&id.0).map(|b| (b.food, b.mood, b.money, b.rations))
+        self.beings
+            .get(&id.0)
+            .map(|b| (b.food, b.mood, b.money, b.rations))
     }
 
     pub fn pos_of(&self, id: EntityId) -> Option<Pos> {
@@ -344,12 +429,18 @@ impl World {
 
     /// Next scheduled act tick (server scheduler jumps the clock here).
     pub fn next_at(&self, id: EntityId) -> u64 {
-        self.beings.get(&id.0).map(|b| b.next_at).unwrap_or(self.tick)
+        self.beings
+            .get(&id.0)
+            .map(|b| b.next_at)
+            .unwrap_or(self.tick)
     }
 
     pub fn apply(&mut self, intent: &Intent) -> Result<(Delta, Vec<Event>), SimError> {
-        let b = self.beings.get_mut(&intent.actor.0)
-            .ok_or(SimError::new("unknown_actor", "spawned entity", "missing"))?;
+        let b = self.beings.get_mut(&intent.actor.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
         if self.tick < b.next_at {
             return Err(SimError::new("too_early", "tick >= next_at", "acted early"));
         }
@@ -371,8 +462,10 @@ impl World {
             Verb::Wait => {}
             Verb::Move(d) => {
                 let (dx, dy) = match d {
-                    Dir::N => (0, -1), Dir::S => (0, 1),
-                    Dir::E => (1, 0), Dir::W => (-1, 0),
+                    Dir::N => (0, -1),
+                    Dir::S => (0, 1),
+                    Dir::E => (1, 0),
+                    Dir::W => (-1, 0),
                 };
                 let nx = pos.x as i16 + dx;
                 let ny = pos.y as i16 + dy;
@@ -413,8 +506,11 @@ impl World {
                 kind = "ate";
             }
             Verb::Work(j) => {
-                let (pay, mood_c, food_c) = *self.jobs.get(j as usize)
-                    .ok_or(SimError::new("no_job", "known job", "bad id"))?;
+                let (pay, mood_c, food_c) = *self.jobs.get(j as usize).ok_or(SimError::new(
+                    "no_job",
+                    "known job",
+                    "bad id",
+                ))?;
                 if b.food == 0 || b.mood == 0 {
                     return Err(SimError::new("job_lockout", "food>0,mood>0", "depleted"));
                 }
@@ -432,10 +528,16 @@ impl World {
                 kind = "watched";
             }
             Verb::Buy(ref item) => {
-                let shop = self.shops.iter_mut().find(|s| s.x == pos.x && s.y == pos.y)
+                let shop = self
+                    .shops
+                    .iter_mut()
+                    .find(|s| s.x == pos.x && s.y == pos.y)
                     .ok_or(SimError::new("no_shop", "shop counter", "none here"))?;
                 let shop = &mut shop.shop;
-                let acct = self.accts.get(&intent.actor.0).copied()
+                let acct = self
+                    .accts
+                    .get(&intent.actor.0)
+                    .copied()
                     .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
                 shop.buy(&mut self.ledger, acct, item)?;
                 // M1 food shops sell rations that go straight to the pack.
@@ -447,13 +549,23 @@ impl World {
         }
         b.pos = pos;
         // Starving doubles time cost (soft fail, not hard game-over per synthesis).
-        let eff = if b.food == 0 { b.speed.max(1) * 2 } else { b.speed.max(1) };
+        let eff = if b.food == 0 {
+            b.speed.max(1) * 2
+        } else {
+            b.speed.max(1)
+        };
         b.next_at = self.tick + eff;
         self.sched.schedule(intent.actor, b.next_at);
         self.tick += 1;
         Ok((
-            Delta { moved: vec![(intent.actor, pos)] },
-            vec![Event { tick: self.tick, actor: intent.actor, kind: kind.into() }],
+            Delta {
+                moved: vec![(intent.actor, pos)],
+            },
+            vec![Event {
+                tick: self.tick,
+                actor: intent.actor,
+                kind: kind.into(),
+            }],
         ))
     }
 
@@ -499,7 +611,14 @@ mod tests {
     use super::*;
 
     fn pos(x: u8, y: u8) -> Pos {
-        Pos { city: 1, sx: 0, sy: 0, z: 0, x, y }
+        Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x,
+            y,
+        }
     }
 
     #[test]
@@ -508,7 +627,10 @@ mod tests {
             let mut w = World::new(42);
             w.spawn(EntityId(1), pos(8, 8), 10);
             for _ in 0..5 {
-                let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+                let _ = w.apply(&Intent {
+                    actor: EntityId(1),
+                    verb: Verb::Move(Dir::E),
+                });
                 // fast-forward scheduler time like server would
                 w.tick = w.beings[&1].next_at - 9;
                 // note: test helper jumps; real server advances tick to next due
@@ -521,8 +643,14 @@ mod tests {
         w1.spawn(EntityId(1), pos(1, 1), 1);
         w2.spawn(EntityId(1), pos(1, 1), 1);
         for _ in 0..3 {
-            let _ = w1.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) });
-            let _ = w2.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) });
+            let _ = w1.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(Dir::W),
+            });
+            let _ = w2.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(Dir::W),
+            });
         }
         assert_eq!(w1.snapshot_hash(), w2.snapshot_hash());
         // Borders now cross sections instead of blocking: three steps west
@@ -535,7 +663,10 @@ mod tests {
     fn save_load_roundtrip_preserves_hash() {
         let mut w = World::new(7);
         w.spawn(EntityId(1), pos(8, 8), 2);
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::E),
+        });
         let s = w.save_json();
         let w2 = World::load_json(&s).expect("load");
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
@@ -546,7 +677,10 @@ mod tests {
     fn save_version_stamps_and_migrates_v1() {
         let mut w = World::new(7);
         w.spawn(EntityId(1), pos(8, 8), 2);
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::E),
+        });
         let s = w.save_json();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["version"], serde_json::json!(SAVE_VERSION));
@@ -557,7 +691,10 @@ mod tests {
         assert_eq!(w2.snapshot_hash(), w.snapshot_hash());
         // Future versions refuse with a clear error, not silent corruption.
         let mut future = v;
-        future.as_object_mut().unwrap().insert("version".into(), 99.into());
+        future
+            .as_object_mut()
+            .unwrap()
+            .insert("version".into(), 99.into());
         let err = World::load_json(&serde_json::to_string(&future).unwrap()).unwrap_err();
         assert_eq!(err.kind, "load");
         assert!(World::load_json("{bad").is_err());
@@ -569,21 +706,30 @@ mod tests {
         w.spawn(EntityId(1), pos(8, 8), 1);
         // Starter: 80/70, 200c, 3 rations. Decay applies per act.
         let (_, mood0, m0, _) = w.needs(EntityId(1)).unwrap();
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Work(0) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Work(0),
+        });
         let (food, mood, money, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!(money, m0 + 60);
         assert!(mood < mood0 && food < 80);
 
         // Eat consumes ration, restores food.
         let (_, _, _, r0) = w.needs(EntityId(1)).unwrap();
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Eat });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Eat,
+        });
         let (food2, _, _, r1) = w.needs(EntityId(1)).unwrap();
         assert_eq!(r1, r0 - 1);
         assert!(food2 > food);
 
         // Watch costs money, restores mood.
         let (_, mood_b, money_b, _) = w.needs(EntityId(1)).unwrap();
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Watch });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Watch,
+        });
         let (_, mood2, money2, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!(money2, money_b - 30);
         assert!(mood2 > mood_b - 1); // net of decay + restore
@@ -592,12 +738,20 @@ mod tests {
         w.set_needs(EntityId(1), 10, 0, 100, 1);
         // need tick >= next_at: jump clock like server would
         w.tick = w.beings[&1].next_at;
-        assert!(w.apply(&Intent { actor: EntityId(1), verb: Verb::Work(0) }).is_err());
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Work(0)
+            })
+            .is_err());
         // Starving doubles step cost.
         w.set_needs(EntityId(1), 1, 50, 100, 1);
         w.tick = w.beings[&1].next_at;
         let t0 = w.tick;
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        });
         assert_eq!(w.beings[&1].next_at, t0 + 2); // speed 1 x2 while starving
     }
 
@@ -606,21 +760,37 @@ mod tests {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
         w.tick = w.next_at(EntityId(1));
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
         let (f0, m0, _, _) = w.needs(EntityId(1)).unwrap();
         // 10 frozen minutes pass with the chunk unloaded.
         w.tick += 600;
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
         let (f1, m1, _, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!((f0 - f1, m0 - m1), (11, 11)); // 10 catch-up + 1 act
-        // No absence, no catch-up: steady play costs exactly the act.
+                                                  // No absence, no catch-up: steady play costs exactly the act.
         w.tick = w.next_at(EntityId(1));
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
         let (f2, m2, _, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!((f1 - f2, m1 - m2), (1, 1));
         // Huge absence floors at zero without panic.
         w.tick += 1_000_000;
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
         let (f3, m3, _, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!((f3, m3), (0, 0));
     }
@@ -637,24 +807,48 @@ mod tests {
         w.place_shop(8, 8, shop);
         // Walk away: no counter here.
         w.tick = w.next_at(EntityId(1));
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::E),
+        });
         w.tick = w.next_at(EntityId(1));
-        assert!(w.apply(&Intent { actor: EntityId(1), verb: Verb::Buy("ration".into()) }).is_err());
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("ration".into())
+            })
+            .is_err());
         // Back on the tile: buy, pack gains a ration, then eat it.
         w.tick = w.next_at(EntityId(1));
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::W),
+        });
         w.tick = w.next_at(EntityId(1));
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Buy("ration".into()) }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("ration".into()),
+        })
+        .unwrap();
         assert_eq!(w.needs(EntityId(1)).unwrap().3, 4); // spawn 3 + 1 bought
         w.tick = w.next_at(EntityId(1));
         let (f0, _, _, _) = w.needs(EntityId(1)).unwrap();
-        w.apply(&Intent { actor: EntityId(1), verb: Verb::Eat }).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Eat,
+        })
+        .unwrap();
         assert!(w.needs(EntityId(1)).unwrap().0 > f0);
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
         // Unbanked stranger cannot buy.
         w.spawn(EntityId(2), pos(8, 8), 1);
         w.tick = w.next_at(EntityId(2));
-        assert!(w.apply(&Intent { actor: EntityId(2), verb: Verb::Buy("ration".into()) }).is_err());
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(2),
+                verb: Verb::Buy("ration".into())
+            })
+            .is_err());
     }
 
     #[test]
@@ -708,7 +902,11 @@ mod tests {
         // Walk east across the seam: 7 steps from x=8 (9..14, cross, 1).
         for _ in 0..7 {
             w.tick = w.next_at(EntityId(1));
-            w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::E) }).unwrap();
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(Dir::E),
+            })
+            .unwrap();
         }
         let b = &w.beings[&1];
         assert_eq!((b.pos.sx, b.pos.x), (1, 1));
@@ -718,7 +916,11 @@ mod tests {
         // Walk back west: no new section, same sim both ways.
         for _ in 0..7 {
             w.tick = w.next_at(EntityId(1));
-            w.apply(&Intent { actor: EntityId(1), verb: Verb::Move(Dir::W) }).unwrap();
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(Dir::W),
+            })
+            .unwrap();
         }
         let b = &w.beings[&1];
         // One step crosses (lands x=14), six more walk to x=8.
@@ -729,7 +931,11 @@ mod tests {
         v.spawn(EntityId(1), pos(8, 8), 1);
         for d in [Dir::E; 7].into_iter().chain([Dir::W; 7]) {
             v.tick = v.next_at(EntityId(1));
-            v.apply(&Intent { actor: EntityId(1), verb: Verb::Move(d) }).unwrap();
+            v.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(d),
+            })
+            .unwrap();
         }
         assert_eq!(w.snapshot_hash(), v.snapshot_hash());
     }
@@ -740,7 +946,11 @@ mod tests {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
         w.ensure_host(crate::ids::HostId(1));
-        w.hosts.get_mut(&1).unwrap().load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1).unwrap();
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1)
+            .unwrap();
         let s = w.save_json();
         let w2 = World::load_json(&s).unwrap();
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
@@ -790,14 +1000,20 @@ mod tests {
         w.set_jobs(&defs);
         w.spawn(EntityId(1), pos(8, 8), 1);
         let (_, _, m0, _) = w.needs(EntityId(1)).unwrap();
-        let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Work(1) });
+        let _ = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Work(1),
+        });
         let (_, _, m1, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!(m1, m0 + 120); // file value, not code constant
-        // Old snapshots without a jobs table still load (serde default).
+                                  // Old snapshots without a jobs table still load (serde default).
         let mut w2 = World::load_json(r#"{"tick":0,"seed":1,"beings":{}}"#).unwrap();
         w2.spawn(EntityId(9), pos(8, 8), 1);
         let (_, _, n0, _) = w2.needs(EntityId(9)).unwrap();
-        let _ = w2.apply(&Intent { actor: EntityId(9), verb: Verb::Work(0) });
+        let _ = w2.apply(&Intent {
+            actor: EntityId(9),
+            verb: Verb::Work(0),
+        });
         assert_eq!(w2.needs(EntityId(9)).unwrap().2, n0 + 60);
     }
 }

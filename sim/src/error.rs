@@ -7,13 +7,21 @@ pub struct SimError {
 
 impl SimError {
     pub fn new(kind: &'static str, expected: &'static str, got: &'static str) -> Self {
-        Self { kind, expected, got }
+        Self {
+            kind,
+            expected,
+            got,
+        }
     }
 }
 
 impl std::fmt::Display for SimError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: expected {}, got {}", self.kind, self.expected, self.got)
+        write!(
+            f,
+            "{}: expected {}, got {}",
+            self.kind, self.expected, self.got
+        )
     }
 }
 

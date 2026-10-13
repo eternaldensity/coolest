@@ -110,7 +110,16 @@ impl Section {
 
 fn all_districts() -> [District; 8] {
     use District::*;
-    [Residential, Shop, Park, Industrial, Gov, Rural, Forest, Lake]
+    [
+        Residential,
+        Shop,
+        Park,
+        Industrial,
+        Gov,
+        Rural,
+        Forest,
+        Lake,
+    ]
 }
 
 /// Generate a section. `want_ports` constrains sides already fixed by a
@@ -135,7 +144,14 @@ pub fn gen_section_weighted(
 ) -> Section {
     let mut attempt: u64 = 0;
     loop {
-        let s = gen_once(seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)), sx, sy, want_ports, districts, shut);
+        let s = gen_once(
+            seed ^ (attempt.wrapping_mul(0x9E3779B97F4A7C15)),
+            sx,
+            sy,
+            want_ports,
+            districts,
+            shut,
+        );
         if s.reachable((8, 8)) || attempt >= 20 {
             return s;
         }
@@ -159,8 +175,18 @@ fn pick_district(rng: &mut Rng, districts: &[(District, u32, u8)]) -> (District,
     (d, base)
 }
 
-fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports, districts: &[(District, u32, u8)], shut: [bool; 4]) -> Section {
-    let mut rng = Rng::new(seed ^ ((sx as u64).wrapping_mul(0xBF58476D1CE4E5B9)) ^ ((sy as u64).wrapping_mul(0x94D049BB133111EB)));
+fn gen_once(
+    seed: u64,
+    sx: i32,
+    sy: i32,
+    want_ports: Ports,
+    districts: &[(District, u32, u8)],
+    shut: [bool; 4],
+) -> Section {
+    let mut rng = Rng::new(
+        seed ^ ((sx as u64).wrapping_mul(0xBF58476D1CE4E5B9))
+            ^ ((sy as u64).wrapping_mul(0x94D049BB133111EB)),
+    );
     let (district, difficulty) = pick_district(&mut rng, districts);
     // Ports: honor constraints, shut stays absent, else 50% a road exits at random row/col.
     let mut ports = want_ports;
@@ -203,13 +229,18 @@ fn gen_once(seed: u64, sx: i32, sy: i32, want_ports: Ports, districts: &[(Distri
         }
     }
     Section {
-        sx, sy, district, difficulty, walk,
+        sx,
+        sy,
+        district,
+        difficulty,
+        walk,
         guarantees: vec![
             (GuaranteeKind::Computer, comp.0, comp.1),
             (GuaranteeKind::Door, door.0, door.1),
             (GuaranteeKind::Egress, egress.0, egress.1),
         ],
-        ports, blocked,
+        ports,
+        blocked,
     }
 }
 
@@ -250,19 +281,22 @@ mod tests {
     fn weighted_districts_follow_file() {
         use crate::data::parse_districts;
         let defs = parse_districts(include_str!("../../data/districts.yaml")).unwrap();
-        let table: Vec<(District, u32, u8)> = defs.iter().map(|d| {
-            let district = match d.id.as_str() {
-                "residential" => District::Residential,
-                "shop" => District::Shop,
-                "park" => District::Park,
-                "industrial" => District::Industrial,
-                "gov" => District::Gov,
-                "rural" => District::Rural,
-                "forest" => District::Forest,
-                _ => District::Lake,
-            };
-            (district, d.weight, d.difficulty_base)
-        }).collect();
+        let table: Vec<(District, u32, u8)> = defs
+            .iter()
+            .map(|d| {
+                let district = match d.id.as_str() {
+                    "residential" => District::Residential,
+                    "shop" => District::Shop,
+                    "park" => District::Park,
+                    "industrial" => District::Industrial,
+                    "gov" => District::Gov,
+                    "rural" => District::Rural,
+                    "forest" => District::Forest,
+                    _ => District::Lake,
+                };
+                (district, d.weight, d.difficulty_base)
+            })
+            .collect();
         // Single-district table forces the outcome; base shifts difficulty.
         let gov = vec![(District::Gov, 1, 2)];
         for seed in 0..20u64 {
@@ -273,7 +307,8 @@ mod tests {
         }
         // Full file table: all outcomes are known districts.
         for seed in 0..50u64 {
-            let s = gen_section_weighted(seed, seed as i32, 0, Ports::default(), &table, [false; 4]);
+            let s =
+                gen_section_weighted(seed, seed as i32, 0, Ports::default(), &table, [false; 4]);
             assert!(s.reachable((8, 8)), "seed {seed} unreachable");
         }
     }
@@ -281,9 +316,25 @@ mod tests {
     #[test]
     fn neighbor_ports_agree() {
         // A fixes east exit at row 7; B honors west constraint.
-        let a = gen_section(11, 0, 0, Ports { e: Some(7), ..Ports::default() });
+        let a = gen_section(
+            11,
+            0,
+            0,
+            Ports {
+                e: Some(7),
+                ..Ports::default()
+            },
+        );
         assert_eq!(a.ports.e, Some(7));
-        let b = gen_section(12, 1, 0, Ports { w: Some(7), ..Ports::default() });
+        let b = gen_section(
+            12,
+            1,
+            0,
+            Ports {
+                w: Some(7),
+                ..Ports::default()
+            },
+        );
         assert_eq!(b.ports.w, Some(7));
     }
 

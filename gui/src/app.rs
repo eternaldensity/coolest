@@ -6,12 +6,12 @@
 use client_web::status_line;
 use eframe::egui;
 use server::Server;
+use sim::{
+    cop_duty, CellPos, Dir, EntityId, HostId, Intent, LinkKind, NetKind, Pos, Role, Standing,
+    Timetable, Verb,
+};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use sim::{
-    CellPos, Dir, EntityId, HostId, Intent, LinkKind, NetKind, Pos,
-    Role, Standing, Timetable, Verb, cop_duty,
-};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -22,7 +22,14 @@ enum Tab {
 }
 
 fn pos(x: u8, y: u8) -> Pos {
-    Pos { city: 1, sx: 0, sy: 0, z: 0, x, y }
+    Pos {
+        city: 1,
+        sx: 0,
+        sy: 0,
+        z: 0,
+        x,
+        y,
+    }
 }
 
 /// Save slot: a real file on desktop, a browser-local key on web (where
@@ -94,14 +101,38 @@ impl Shell {
         let actor = EntityId(1);
         server.world.spawn(actor, pos(8, 8), 10);
 
-        server.world.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
-        server.world.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
-        server.world.net.add_node(HostId(3), NetKind::Betanet, 50, false);
-        server.world.net.add_link(HostId(1), HostId(2), LinkKind::Wired { damaged: false }, 5, 0).ok();
-        server.world.net.add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10).ok();
+        server
+            .world
+            .net
+            .add_node(HostId(1), NetKind::Oldnet, 10, false);
+        server
+            .world
+            .net
+            .add_node(HostId(2), NetKind::Oldnet, 100, true);
+        server
+            .world
+            .net
+            .add_node(HostId(3), NetKind::Betanet, 50, false);
+        server
+            .world
+            .net
+            .add_link(
+                HostId(1),
+                HostId(2),
+                LinkKind::Wired { damaged: false },
+                5,
+                0,
+            )
+            .ok();
+        server
+            .world
+            .net
+            .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+            .ok();
         server.world.ensure_host(HostId(1));
         let mut talks = BTreeMap::new();
-        for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default() {
+        for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
+        {
             talks.insert(d.id.clone(), Rc::new(d));
         }
         // Demo veil complex: lobby - ops - roof(exit).
@@ -109,8 +140,12 @@ impl Shell {
         server.world.veil.add_area(2, "ops", vec![1, 3], false);
         server.world.veil.add_area(3, "roof", vec![2], true);
 
-        server.world.spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
-        server.world.spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
+        server
+            .world
+            .spawn_npc(EntityId(10), Role::Shopkeeper, (3, 3), (12, 4), (8, 12), 20);
+        server
+            .world
+            .spawn_npc(EntityId(11), Role::Cop, (4, 12), (12, 12), (8, 8), 15);
         // Demo economy: player bank account with starter funds + a food
         // shop by the spawn. Till belongs to the shopkeeper (EntityId 10).
         let buyer = server.world.open_account(actor, HostId(1)).unwrap();
@@ -145,12 +180,19 @@ impl Shell {
 
     fn say_status(&mut self) {
         if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
-            self.say(format!("{} rations={rations} tick={}", status_line(food, mood, money), self.server.world.tick));
+            self.say(format!(
+                "{} rations={rations} tick={}",
+                status_line(food, mood, money),
+                self.server.world.tick
+            ));
         }
     }
 
     fn do_verb(&mut self, verb: Verb) {
-        self.server.submit(Intent { actor: self.actor, verb });
+        self.server.submit(Intent {
+            actor: self.actor,
+            verb,
+        });
         let out = self.server.step();
         if out.is_empty() {
             self.say("rejected (timing/lockout?)".to_string());
@@ -162,7 +204,8 @@ impl Shell {
         let cmd = std::mem::take(&mut self.input);
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
-            "help" => self.say("move arrows/hjkl · eat · work 0/1 · watch · buy <item> · talk".to_string()),
+            "help" => self
+                .say("move arrows/hjkl · eat · work 0/1 · watch · buy <item> · talk".to_string()),
             "eat" => self.do_verb(Verb::Eat),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             "talk" => self.start_talk(),
@@ -180,9 +223,13 @@ impl Shell {
             Some(p) => p,
             None => return vec![],
         };
-        self.server.world.npc_full().into_iter()
+        self.server
+            .world
+            .npc_full()
+            .into_iter()
             .filter(|(_, p, _)| {
-                p.sx == here.sx && p.sy == here.sy
+                p.sx == here.sx
+                    && p.sy == here.sy
                     && (p.x as i16 - here.x as i16).abs() <= 1
                     && (p.y as i16 - here.y as i16).abs() <= 1
             })
@@ -217,13 +264,17 @@ impl Shell {
     }
 
     fn move_key(&mut self, ctx: &egui::Context) {
-        let dir = if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::K)) {
+        let dir = if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::K))
+        {
             Some(Dir::N)
-        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::J)) {
+        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown) || i.key_pressed(egui::Key::J))
+        {
             Some(Dir::S)
-        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::H)) {
+        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::H))
+        {
             Some(Dir::W)
-        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::L)) {
+        } else if ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::L))
+        {
             Some(Dir::E)
         } else {
             None
@@ -232,7 +283,6 @@ impl Shell {
             self.do_verb(Verb::Move(d));
         }
     }
-
 }
 
 impl eframe::App for Shell {
@@ -249,7 +299,9 @@ impl eframe::App for Shell {
             self.move_key(&ctx);
             // Ambient tick: NPC timetables advance on game time (clean record demo).
             let hour = ((self.server.world.tick / 60) % 24) as u8;
-            self.server.world.step_npcs(hour, &std::collections::BTreeMap::new());
+            self.server
+                .world
+                .step_npcs(hour, &std::collections::BTreeMap::new());
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -267,12 +319,24 @@ impl eframe::App for Shell {
                 ui.label(status_line(food, mood, money));
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 if food < 30 || mood < 30 {
-                    ui.label(egui::RichText::new("! needs low — Eat / Watch soon").color(egui::Color32::RED));
+                    ui.label(
+                        egui::RichText::new("! needs low — Eat / Watch soon")
+                            .color(egui::Color32::RED),
+                    );
                 }
             }
-            ui.label(egui::RichText::new(format!("Objective: {}", self.server.world.advise(self.actor))).strong());
+            ui.label(
+                egui::RichText::new(format!(
+                    "Objective: {}",
+                    self.server.world.advise(self.actor)
+                ))
+                .strong(),
+            );
             let cop = Timetable::cop_day();
-            ui.label(format!("cop 10:00 -> {:?}", cop_duty(&cop, 10, Standing::Clean)));
+            ui.label(format!(
+                "cop 10:00 -> {:?}",
+                cop_duty(&cop, 10, Standing::Clean)
+            ));
             ui.horizontal(|ui| {
                 if ui.button("Save").clicked() {
                     let msg = persist_save(&self.server);
@@ -287,16 +351,21 @@ impl eframe::App for Shell {
 
         egui::Panel::bottom("console").show(ui, |ui| {
             ui.horizontal(|ui| {
-                let resp = ui.add(egui::TextEdit::singleline(&mut self.input).hint_text("eat | work 0 | watch | help"));
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.input)
+                        .hint_text("eat | work 0 | watch | help"),
+                );
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.run_command();
                 }
             });
-            egui::ScrollArea::vertical().max_height(90.0).show(ui, |ui| {
-                for line in self.log.iter().rev().take(8) {
-                    ui.label(line);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height(90.0)
+                .show(ui, |ui| {
+                    for line in self.log.iter().rev().take(8) {
+                        ui.label(line);
+                    }
+                });
         });
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {

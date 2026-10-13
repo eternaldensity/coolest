@@ -9,7 +9,10 @@ use sim::{EntityId, RenderView};
 
 /// egui target: `ui.label(RichText::new(status_line(...)))` in status pane.
 pub fn status_line(food: u8, mood: u8, money_cents: i64) -> String {
-    format!("food {food:3}  mood {mood:3}  ${:.2}", money_cents as f64 / 100.0)
+    format!(
+        "food {food:3}  mood {mood:3}  ${:.2}",
+        money_cents as f64 / 100.0
+    )
 }
 
 /// egui target: tile button glyph in the Street grid.
@@ -25,13 +28,19 @@ pub fn tile_glyph(tile: u16) -> char {
 
 /// egui target: `ui.add(ProgressBar::show(deck_bar(...)))` in actions pane.
 pub fn deck_bar(used: u32, total: u32) -> String {
-    let pct = used.checked_mul(100).and_then(|v| v.checked_div(total)).unwrap_or(0);
+    let pct = used
+        .checked_mul(100)
+        .and_then(|v| v.checked_div(total))
+        .unwrap_or(0);
     format!("CPU {used}/{total} ({pct}%)")
 }
 
 /// egui target: selectable node card in the Net map.
 pub fn net_line(from: u64, to: u64, latency_ms: u32, toll_cents: i64) -> String {
-    format!("{from}→{to} {latency_ms}ms toll ${:.2}", toll_cents as f64 / 100.0)
+    format!(
+        "{from}→{to} {latency_ms}ms toll ${:.2}",
+        toll_cents as f64 / 100.0
+    )
 }
 
 /// Headless client: stores the last view per mode + a capped console log.
@@ -44,7 +53,11 @@ pub struct WebClient {
 
 impl WebClient {
     pub fn new() -> Self {
-        Self { last: None, log: Vec::new(), log_cap: 200 }
+        Self {
+            last: None,
+            log: Vec::new(),
+            log_cap: 200,
+        }
     }
 
     pub fn say(&mut self, line: &str) {
@@ -85,12 +98,31 @@ mod tests {
         c.say("b");
         c.say("c");
         assert_eq!(c.log, vec!["b".to_string(), "c".to_string()]);
-        let tile = TileId { city: 1, sx: 0, sy: 0, z: 0, x: 8, y: 8 };
-        c.render(&RenderView::Street(StreetView { center: tile, tiles: vec![], actors: vec![] }));
+        let tile = TileId {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: 8,
+            y: 8,
+        };
+        c.render(&RenderView::Street(StreetView {
+            center: tile,
+            tiles: vec![],
+            actors: vec![],
+        }));
         assert!(matches!(c.last, Some(RenderView::Street(_))));
-        c.render(&RenderView::Net(NetView { focus: HostId(1), nodes: vec![], edges: vec![] }));
+        c.render(&RenderView::Net(NetView {
+            focus: HostId(1),
+            nodes: vec![],
+            edges: vec![],
+        }));
         assert!(matches!(c.last, Some(RenderView::Net(_))));
-        c.render(&RenderView::Deck(DeckView { host: HostId(1), ram_used: 3, ram_total: 96 }));
+        c.render(&RenderView::Deck(DeckView {
+            host: HostId(1),
+            ram_used: 3,
+            ram_total: 96,
+        }));
         assert!(matches!(c.last, Some(RenderView::Deck(_))));
     }
 }
