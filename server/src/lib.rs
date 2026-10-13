@@ -183,10 +183,14 @@ mod tests {
 
     #[test]
     fn disk_snapshot_and_log_replay() {
-        let dir = "/tmp/opencode/fidom-test";
-        let _ = std::fs::create_dir_all(dir);
-        let snap_path = format!("{dir}/snap.json");
-        let log_path = format!("{dir}/log.jsonl");
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("fidom-test-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let snap_path = dir.join("snap.json");
+        let log_path = dir.join("log.jsonl");
 
         let mut s = Server::new(9);
         s.world.spawn(EntityId(1), pos(8, 8), 1);
@@ -194,18 +198,23 @@ mod tests {
         s.submit(mover(Dir::S));
         s.step();
         let hash = s.world.snapshot_hash();
-        s.save_snapshot(&snap_path).unwrap();
-        s.save_log(&log_path).unwrap();
+        let snap_str = snap_path.to_str().unwrap();
+        let log_str = log_path.to_str().unwrap();
+        s.save_snapshot(snap_str).unwrap();
+        s.save_log(log_str).unwrap();
 
         let mut s2 = Server::new(1);
-        s2.load_snapshot(&snap_path).unwrap();
+        s2.load_snapshot(snap_str).unwrap();
         assert_eq!(s2.world.snapshot_hash(), hash);
 
-        let intents = Server::load_log(&log_path).unwrap();
+        let intents = Server::load_log(log_str).unwrap();
         assert_eq!(intents.len(), 2);
         let w = super::replay(9, &[(EntityId(1), pos(8, 8), 1)], intents);
         assert_eq!(w.snapshot_hash(), hash);
 
-        assert!(Server::load_log(&format!("{dir}/missing.jsonl")).is_err());
+        let missing = dir.join("missing.jsonl");
+        assert!(Server::load_log(missing.to_str().unwrap()).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
