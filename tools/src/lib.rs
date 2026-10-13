@@ -4,7 +4,8 @@
 
 use server::{replay, Server};
 use sim::{
-    gen_section, CellPos, Dir, EntityId, Host, HostId, Intent, Ports, Pos, Rng, Verb, World,
+    gen_section, CellPos, Dir, EntityId, Host, HostId, Intent, LinkKind, NetKind, Ports, Pos, Rng,
+    Verb, World,
 };
 
 /// Killer-vs-killer TTK: grow one len-N program, strike tail cells in order,
@@ -150,7 +151,69 @@ pub fn soak(seed: u64, actors: usize, ticks: u64) -> u64 {
     w.snapshot_hash()
 }
 
-/// Spawn spec for `replay`: tile coords default to city 1, section (0,0), z 0.
+/// Chaos soak (design/12 nightly): random walks plus periodic power
+/// kill/restore on a live tri-net, with blackout-aware routing attempted
+/// throughout. Returns the snapshot hash. Deterministic per seed.
+pub fn chaos_soak(seed: u64, actors: usize, ticks: u64) -> u64 {
+    let mut rng = Rng::new(seed);
+    let mut w = World::new(seed);
+    w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+    w.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+    w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+    w.net
+        .add_link(
+            HostId(1),
+            HostId(2),
+            LinkKind::Wired { damaged: false },
+            5,
+            0,
+        )
+        .unwrap();
+    w.net
+        .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+        .unwrap();
+    w.power.anchor(HostId(1), (0, 0));
+    w.power.anchor(HostId(2), (1, 0));
+    w.power.anchor(HostId(3), (0, 1));
+    for a in 0..actors {
+        let x = 1 + (rng.below(14)) as u8;
+        let y = 1 + (rng.below(14)) as u8;
+        w.spawn(
+            EntityId(1000 + a as u64),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x,
+                y,
+            },
+            1 + rng.below(10) as u64,
+        );
+    }
+    let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
+    for t in 0..ticks {
+        if t % 97 == 0 {
+            let s = (rng.below(2) as i32, rng.below(2) as i32);
+            if rng.below(2) == 0 {
+                w.power.kill(s);
+            } else {
+                w.power.restore(s);
+            }
+        }
+        if t % 31 == 0 {
+            let _ = w.power.powered_route(&w.net, HostId(1), HostId(3));
+        }
+        let a = rng.below(actors.max(1) as u32) as u64;
+        let d = dirs[rng.below(4) as usize];
+        w.tick = w.next_at(EntityId(1000 + a)).max(w.tick);
+        let _ = w.apply(&Intent {
+            actor: EntityId(1000 + a),
+            verb: Verb::Move(d),
+        });
+    }
+    w.snapshot_hash()
+}
 #[derive(serde::Deserialize)]
 struct SpawnSpec {
     id: u64,
@@ -305,6 +368,12 @@ mod tests {
     fn soak_gate_budget_deterministic() {
         // design/12 gate budget: 100 bots x 10k ticks completes + replays equal.
         assert_eq!(soak(7, 100, 10000), soak(7, 100, 10000));
+    }
+
+    #[test]
+    fn chaos_soak_deterministic() {
+        assert_eq!(chaos_soak(7, 30, 2000), chaos_soak(7, 30, 2000));
+        assert_ne!(chaos_soak(7, 30, 2000), chaos_soak(8, 30, 2000));
     }
 
     fn unique_tmp(name: &str) -> std::path::PathBuf {

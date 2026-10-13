@@ -1,11 +1,12 @@
 //! fidom-tools: balance CSVs, gen stats, soak runs (design/12).
 //! Usage: fidom-tools balance | gen [n] [seed0] | gen-report [n] [seed0] | soak [actors] [ticks] [seed]
-//!        fidom-tools replay <seed> <spawns.json> <log.jsonl> | mapgen-check [n] [seed0] | ledger-audit <world-save.json>
+//!        fidom-tools chaos [actors] [ticks] [seed] | replay <seed> <spawns.json> <log.jsonl>
+//!        fidom-tools mapgen-check [n] [seed0] | ledger-audit <world-save.json>
 
 use std::time::Instant;
 use tools::{
-    audit_world_ledger, gen_report, gen_stats, mapgen_report, replay_from_files, soak, trace_csv,
-    ttk_csv,
+    audit_world_ledger, chaos_soak, gen_report, gen_stats, mapgen_report, replay_from_files, soak,
+    trace_csv, ttk_csv,
 };
 
 fn fail(msg: String) -> ! {
@@ -35,6 +36,17 @@ fn main() {
             let hash = soak(seed, actors, ticks);
             println!(
                 "soak actors={actors} ticks={ticks} hash={hash:016x} elapsed_ms={}",
+                t.elapsed().as_millis()
+            );
+        }
+        Some("chaos") => {
+            let actors: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(100);
+            let ticks: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(100000);
+            let seed: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(7);
+            let t = Instant::now();
+            let hash = chaos_soak(seed, actors, ticks);
+            println!(
+                "chaos actors={actors} ticks={ticks} hash={hash:016x} elapsed_ms={}",
                 t.elapsed().as_millis()
             );
         }

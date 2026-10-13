@@ -27,6 +27,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Whole merge gate in one shot (fmt, clippy, tests, lexicons, hygiene)
 ./gate.sh
 
+# Nightly heavy gates (1000-seed gen, 1M-tick soak, power chaos)
+./nightly.sh
+
 # Headless smoke demo: survival → deck → net → ledger → crime → veil
 cargo run -p client-web
 ```
