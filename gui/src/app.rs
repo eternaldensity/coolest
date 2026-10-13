@@ -523,6 +523,19 @@ impl eframe::App for Shell {
                 }
                 let (ax, ay) = (here.x, here.y);
                 let counter_at = self.server.world.shop_pos_near(here.x, here.y);
+                // Glyph colors follow the active theme: hardcoding for one
+                // theme made @ invisible on the other (light default).
+                let dark = ui.visuals().dark_mode;
+                let ink = |glyph: &str| match glyph {
+                    "@" if dark => egui::Color32::WHITE,
+                    "@" => egui::Color32::from_rgb(0, 90, 200),
+                    "n" if dark => egui::Color32::LIGHT_GREEN,
+                    "n" => egui::Color32::from_rgb(0, 140, 0),
+                    "$" if dark => egui::Color32::from_rgb(255, 190, 40),
+                    "$" => egui::Color32::from_rgb(176, 118, 0),
+                    "#" => egui::Color32::DARK_GRAY,
+                    _ => egui::Color32::GRAY,
+                };
                 egui::Grid::new("street").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..16u8 {
                         for x in 0..16u8 {
@@ -537,13 +550,7 @@ impl eframe::App for Shell {
                             } else {
                                 "#"
                             };
-                            let color = match ch {
-                                "@" => egui::Color32::WHITE,
-                                "n" => egui::Color32::LIGHT_GREEN,
-                                "$" => egui::Color32::from_rgb(255, 190, 40),
-                                "#" => egui::Color32::DARK_GRAY,
-                                _ => egui::Color32::GRAY,
-                            };
+                            let color = ink(ch);
                             ui.label(egui::RichText::new(ch).monospace().color(color));
                         }
                         ui.end_row();
