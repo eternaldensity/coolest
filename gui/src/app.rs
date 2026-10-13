@@ -35,23 +35,41 @@ fn pos(x: u8, y: u8) -> Pos {
 /// Save slot: a real file on desktop, a browser-local key on web (where
 /// the sandbox has no filesystem).
 #[cfg(not(target_arch = "wasm32"))]
-const SAVE_SLOT: &str = "/tmp/opencode/fidom-save.json";
+fn save_slot() -> std::path::PathBuf {
+    // Platform temp dir (%TEMP% on Windows, /tmp on unix) so the exe works
+    // everywhere; created on demand since it may not exist.
+    std::env::temp_dir()
+        .join("opencode")
+        .join("fidom-save.json")
+}
 #[cfg(target_arch = "wasm32")]
 const SAVE_SLOT: &str = "fidom-save";
 
 #[cfg(not(target_arch = "wasm32"))]
 fn persist_save(server: &Server) -> String {
-    match server.save_snapshot(SAVE_SLOT) {
-        Ok(()) => "saved".to_string(),
-        Err(e) => format!("save failed: {e}"),
+    let path = save_slot();
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return "save failed: cannot create save directory".to_string();
+        }
+    }
+    match path.to_str() {
+        Some(p) => match server.save_snapshot(p) {
+            Ok(()) => "saved".to_string(),
+            Err(e) => format!("save failed: {e}"),
+        },
+        None => "save failed: save path is not UTF-8".to_string(),
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn persist_load(server: &mut Server) -> String {
-    match server.load_snapshot(SAVE_SLOT) {
-        Ok(()) => "loaded".to_string(),
-        Err(e) => format!("load failed: {e}"),
+    match save_slot().to_str() {
+        Some(p) => match server.load_snapshot(p) {
+            Ok(()) => "loaded".to_string(),
+            Err(e) => format!("load failed: {e}"),
+        },
+        None => "load failed: save path is not UTF-8".to_string(),
     }
 }
 
@@ -646,5 +664,37 @@ impl eframe::App for Shell {
             }
         });
         ui.ctx().request_repaint();
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_slot_roundtrips() {
+        let mut s = Server::new(9);
+        s.world.spawn(
+            EntityId(1),
+            Pos {
+                city: 1,
+                sx: 0,
+                sy: 0,
+                z: 0,
+                x: 8,
+                y: 8,
+            },
+            1,
+        );
+        s.submit(Intent {
+            actor: EntityId(1),
+            verb: Verb::Move(Dir::E),
+        });
+        s.step();
+        let hash = s.world.snapshot_hash();
+        assert_eq!(persist_save(&s), "saved");
+        let mut s2 = Server::new(1);
+        assert_eq!(persist_load(&mut s2), "loaded");
+        assert_eq!(s2.world.snapshot_hash(), hash);
     }
 }
