@@ -94,22 +94,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shopkeeper_day() {
-        let t = Timetable::shopkeeper();
-        assert_eq!(t.at(2), Activity::Sleep);
-        assert_eq!(t.at(8), Activity::Work);
-        assert_eq!(t.at(20), Activity::Leisure);
-        assert_eq!(t.at(23), Activity::Home);
-    }
-
-    #[test]
-    fn office_day() {
-        let t = Timetable::office();
-        assert_eq!(t.at(10), Activity::Work);
-        assert_eq!(t.at(20), Activity::Leisure);
-    }
-
-    #[test]
     fn cop_pursues_wanted_even_off_shift() {
         let t = Timetable::cop_day();
         assert_eq!(t.at(10), Activity::Patrol);

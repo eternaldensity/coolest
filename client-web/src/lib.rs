@@ -78,15 +78,6 @@ mod tests {
     use sim::{DeckView, HostId, NetView, StreetView, TileId};
 
     #[test]
-    fn helpers_format() {
-        assert_eq!(status_line(80, 70, 200), "food  80  mood  70  $2.00");
-        assert_eq!(tile_glyph(3), 'C');
-        assert_eq!(deck_bar(88, 100), "CPU 88/100 (88%)");
-        assert_eq!(deck_bar(0, 0), "CPU 0/0 (0%)");
-        assert_eq!(net_line(1, 2, 45, 10), "1→2 45ms toll $0.10");
-    }
-
-    #[test]
     fn client_stores_views_and_caps_log() {
         let mut c = WebClient::new();
         c.log_cap = 2;

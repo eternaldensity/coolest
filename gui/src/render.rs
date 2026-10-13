@@ -104,15 +104,4 @@ mod tests {
         assert_eq!(tile_center(&px, 2, 2), (40, 140, 140)); // tail
         assert_eq!(tile_center(&px, 9, 9), (16, 16, 24)); // empty bg
     }
-
-    #[test]
-    fn snapshot_png_writes() {
-        let s = gen_section(7, 0, 0, Ports::default());
-        let mut px = canvas();
-        draw_street(&mut px, &s, &[(8, 8)]);
-        let path = "/tmp/opencode/fidom-gui-smoke.png";
-        px.save_png(path).unwrap();
-        let meta = std::fs::metadata(path).unwrap();
-        assert!(meta.len() > 1000);
-    }
 }

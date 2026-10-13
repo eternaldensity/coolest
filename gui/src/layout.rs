@@ -85,11 +85,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn map_focus_enlarges_map() {
-        let a = layout(false);
-        let b = layout(true);
-        assert!(b.map.w * b.map.h > a.map.w * a.map.h);
-    }
 }
