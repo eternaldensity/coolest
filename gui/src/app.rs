@@ -111,6 +111,7 @@ pub struct Shell {
     talks: BTreeMap<String, Rc<sim::Dialogue>>,
     talking: Option<sim::Conversation>,
     frames_left: Option<u32>,
+    jobs: Vec<sim::JobDef>,
 }
 
 impl Shell {
@@ -148,6 +149,11 @@ impl Shell {
             .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
             .ok();
         server.world.ensure_host(HostId(1));
+        // Jobs drive both mechanics and button labels (data/jobs.yaml).
+        let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap_or_default();
+        if !jobs.is_empty() {
+            server.world.set_jobs(&jobs);
+        }
         let mut talks = BTreeMap::new();
         for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
         {
@@ -185,6 +191,7 @@ impl Shell {
             talks,
             talking: None,
             frames_left: frames,
+            jobs,
         };
         shell.say_status();
         shell
@@ -223,8 +230,10 @@ impl Shell {
         let cmd = std::mem::take(&mut self.input);
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
-            "help" => self
-                .say("move arrows/hjkl · eat · work 0/1 · watch · buy <item> · talk".to_string()),
+            "help" => self.say(
+                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk"
+                    .to_string(),
+            ),
             "eat" => self.do_verb(Verb::Eat),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             "talk" => self.start_talk(),
@@ -337,6 +346,13 @@ impl eframe::App for Shell {
             if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
                 ui.label(status_line(food, mood, money));
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
+                let tick = self.server.world.tick;
+                ui.label(format!(
+                    "Day {} {:02}:{:02}",
+                    tick / 1440 + 1,
+                    (tick / 60) % 24,
+                    tick % 60
+                ));
                 if food < 30 || mood < 30 {
                     ui.label(
                         egui::RichText::new("! needs low — Eat / Watch soon")
@@ -372,7 +388,7 @@ impl eframe::App for Shell {
             ui.horizontal(|ui| {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut self.input)
-                        .hint_text("eat | work 0 | watch | help"),
+                        .hint_text("eat | work 0/1 | watch | help"),
                 );
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.run_command();
@@ -381,6 +397,7 @@ impl eframe::App for Shell {
             egui::ScrollArea::vertical()
                 .max_height(90.0)
                 .show(ui, |ui| {
+                    ui.label("Log");
                     for line in self.log.iter().rev().take(8) {
                         ui.label(line);
                     }
@@ -389,21 +406,32 @@ impl eframe::App for Shell {
 
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Street => {
+                // Job buttons carry names + pay from data/jobs.yaml so the
+                // choice means something; indices feed Verb::Work like before.
+                // Fallback labels keep verbs available if the file is corrupt
+                // (data tests pin the file, so this is belt-and-braces).
+                let mut jobs: Vec<(String, i64)> = self
+                    .jobs
+                    .iter()
+                    .map(|d| (d.id.clone(), d.payout_cents))
+                    .collect();
+                if jobs.is_empty() {
+                    jobs = vec![("job-0".to_string(), 60), ("job-1".to_string(), 120)];
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Eat").clicked() {
                         self.do_verb(Verb::Eat);
                     }
-                    if ui.button("Work 0").clicked() {
-                        self.do_verb(Verb::Work(0));
-                    }
-                    if ui.button("Work 1").clicked() {
-                        self.do_verb(Verb::Work(1));
+                    for (i, (id, pay)) in jobs.iter().enumerate() {
+                        if ui.button(format!("Work {i}: {id} {pay}c")).clicked() {
+                            self.do_verb(Verb::Work(i as u8));
+                        }
                     }
                     if ui.button("Watch").clicked() {
                         self.do_verb(Verb::Watch);
                     }
                 });
-                ui.label("@ you · n folk · . floor · # blocked · gold = shop counter (stand on it, Buy)");
+                ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 // Snapshot world reads up front: UI callbacks below need &mut self.
                 // Counter shows within reach (counter serves adjacent tiles).
@@ -494,6 +522,7 @@ impl eframe::App for Shell {
                     ui.separator();
                 }
                 let (ax, ay) = (here.x, here.y);
+                let counter_at = self.server.world.shop_pos_near(here.x, here.y);
                 egui::Grid::new("street").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..16u8 {
                         for x in 0..16u8 {
@@ -501,12 +530,21 @@ impl eframe::App for Shell {
                                 "@"
                             } else if npcs.iter().any(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
                                 "n"
+                            } else if Some((x, y)) == counter_at {
+                                "$"
                             } else if terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true) {
                                 "."
                             } else {
                                 "#"
                             };
-                            ui.label(egui::RichText::new(ch).monospace());
+                            let color = match ch {
+                                "@" => egui::Color32::WHITE,
+                                "n" => egui::Color32::LIGHT_GREEN,
+                                "$" => egui::Color32::from_rgb(255, 190, 40),
+                                "#" => egui::Color32::DARK_GRAY,
+                                _ => egui::Color32::GRAY,
+                            };
+                            ui.label(egui::RichText::new(ch).monospace().color(color));
                         }
                         ui.end_row();
                     }

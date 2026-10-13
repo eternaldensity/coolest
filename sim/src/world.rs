@@ -310,6 +310,15 @@ impl World {
             .map(|s| &s.shop)
     }
 
+    /// Tile position of the nearest shop within counter reach, if any.
+    pub fn shop_pos_near(&self, x: u8, y: u8) -> Option<(u8, u8)> {
+        self.shops
+            .iter()
+            .filter(|s| (s.x as i16 - x as i16).abs() <= 1 && (s.y as i16 - y as i16).abs() <= 1)
+            .min_by_key(|s| (s.x as i16 - x as i16).abs() + (s.y as i16 - y as i16).abs())
+            .map(|s| (s.x, s.y))
+    }
+
     /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
     /// home/work/leisure are local tiles; timetable comes from role.
     pub fn spawn_npc(
@@ -1071,6 +1080,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.needs(EntityId(1)).unwrap().3, 4);
+        assert_eq!(w.shop_pos_near(8, 8), Some((9, 8)));
+        assert_eq!(w.shop_pos_near(0, 0), None);
         // Four tiles off: no counter in reach.
         w.beings.get_mut(&1).unwrap().pos = Pos {
             city: 1,
