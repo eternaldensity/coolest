@@ -155,6 +155,10 @@ pub struct World {
     /// Play-session funnel milestones. Default (all empty) for old saves.
     #[serde(default)]
     funnel: Funnel,
+    /// Wholesale supplier account for shop restocking. Lazily opened on
+    /// first restock (reserved system id); default None for old saves.
+    #[serde(default)]
+    supplier: Option<u64>,
 }
 
 fn default_jobs() -> Vec<(i64, u8, u8)> {
@@ -180,6 +184,7 @@ impl World {
             veil: Veil::new(),
             sched: Scheduler::new(),
             funnel: Funnel::default(),
+            supplier: None,
         }
     }
 
@@ -532,6 +537,14 @@ impl World {
                 let nx = pos.x as i16 + dx;
                 let ny = pos.y as i16 + dy;
                 if (1..=14).contains(&nx) && (1..=14).contains(&ny) {
+                    let walled = self
+                        .sections
+                        .iter()
+                        .find(|s| s.sx == pos.sx && s.sy == pos.sy)
+                        .is_some_and(|s| !s.walkable(nx as u8, ny as u8));
+                    if walled {
+                        return Err(SimError::new("blocked", "walkable tile", "wall"));
+                    }
                     pos.x = nx as u8;
                     pos.y = ny as u8;
                 } else {
@@ -599,10 +612,18 @@ impl World {
                         "installed",
                     ));
                 }
+                // Counters serve adjacent tiles: no pixel-exact standing.
+                // Nearest shop within Chebyshev distance 1 (shops are sparse).
                 let shop = self
                     .shops
                     .iter_mut()
-                    .find(|s| s.x == pos.x && s.y == pos.y)
+                    .filter(|s| {
+                        (s.x as i16 - pos.x as i16).abs() <= 1
+                            && (s.y as i16 - pos.y as i16).abs() <= 1
+                    })
+                    .min_by_key(|s| {
+                        (s.x as i16 - pos.x as i16).abs() + (s.y as i16 - pos.y as i16).abs()
+                    })
                     .ok_or(SimError::new("no_shop", "shop counter", "none here"))?;
                 let shop = &mut shop.shop;
                 let acct = self
@@ -611,6 +632,17 @@ impl World {
                     .copied()
                     .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
                 shop.buy(&mut self.ledger, acct, item)?;
+                // Restock from sales: the wholesale supplier account fills
+                // lines the till can cover, so shelves refill while you earn.
+                let supplier = match self.supplier {
+                    Some(id) => id,
+                    None => {
+                        let id = self.ledger.open(EntityId(u64::MAX), HostId(1));
+                        self.supplier = Some(id);
+                        id
+                    }
+                };
+                shop.auto_order(&mut self.ledger, supplier);
                 // M1 food shops sell rations that go straight to the pack.
                 if item == "ration" {
                     b.rations = b.rations.saturating_add(1);
@@ -965,6 +997,115 @@ mod tests {
     }
 
     #[test]
+    fn walls_block_movement() {
+        let mut w = World::new(4);
+        w.spawn(EntityId(1), pos(8, 8), 10);
+        // Find a walkable tile with a walled orthogonal neighbor.
+        let s = w.section_at(0, 0).unwrap();
+        let mut probe = None;
+        for y in 1..15u8 {
+            for x in 1..15u8 {
+                if !s.walkable(x, y) {
+                    continue;
+                }
+                for (d, dx, dy) in [
+                    (Dir::N, 0, -1),
+                    (Dir::S, 0, 1),
+                    (Dir::E, 1, 0),
+                    (Dir::W, -1, 0),
+                ] {
+                    let (nx, ny) = (x as i16 + dx, y as i16 + dy);
+                    if (1..=14).contains(&nx)
+                        && (1..=14).contains(&ny)
+                        && !s.walkable(nx as u8, ny as u8)
+                    {
+                        probe = Some(((x, y), d));
+                    }
+                }
+            }
+        }
+        let ((fx, fy), dir) = probe.expect("seed has no wall-adjacent floor");
+        w.beings.get_mut(&1).unwrap().pos = Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: fx,
+            y: fy,
+        };
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Move(dir),
+            })
+            .is_err());
+        assert_eq!((w.beings[&1].pos.x, w.beings[&1].pos.y), (fx, fy));
+    }
+
+    #[test]
+    fn counter_serves_adjacent_tiles() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 5000).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("ration", 100, 5, 2, 5, 50);
+        w.place_shop(9, 8, shop);
+        // One tile east of the counter: purchase works.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("ration".into()),
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().3, 4);
+        // Four tiles off: no counter in reach.
+        w.beings.get_mut(&1).unwrap().pos = Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: 5,
+            y: 8,
+        };
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("ration".into()),
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn sales_restock_shelves_from_till() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 5000).unwrap();
+        let till = w.ledger.open(EntityId(9), crate::ids::HostId(9));
+        w.ledger.mint(till, 1000).unwrap();
+        let mut shop = Shop::new(till);
+        shop.add_line("ration", 100, 1, 2, 5, 50);
+        w.place_shop(8, 8, shop);
+        // Last ration on the shelf: sale funds an immediate restock.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("ration".into()),
+        })
+        .unwrap();
+        let stocked = w.shop_at(8, 8).unwrap().stock["ration"].qty;
+        assert_eq!(stocked, 5);
+        let supplier = w.supplier.expect("supplier account opened");
+        assert_eq!(w.ledger.balance(supplier).unwrap(), 50);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
     fn shop_counter_buy_then_eat() {
         use crate::shop::Shop;
         let mut w = World::new(3);
@@ -974,12 +1115,16 @@ mod tests {
         let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
         shop.add_line("ration", 100, 2, 1, 5, 50);
         w.place_shop(8, 8, shop);
-        // Walk away: no counter here.
-        w.tick = w.next_at(EntityId(1));
-        let _ = w.apply(&Intent {
-            actor: EntityId(1),
-            verb: Verb::Move(Dir::E),
-        });
+        // Step away: no counter in reach. (Positioned directly: movement
+        // itself is covered by section_crossing and walls_block_movement.)
+        w.beings.get_mut(&1).unwrap().pos = Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: 5,
+            y: 8,
+        };
         w.tick = w.next_at(EntityId(1));
         assert!(w
             .apply(&Intent {
@@ -988,11 +1133,14 @@ mod tests {
             })
             .is_err());
         // Back on the tile: buy, pack gains a ration, then eat it.
-        w.tick = w.next_at(EntityId(1));
-        let _ = w.apply(&Intent {
-            actor: EntityId(1),
-            verb: Verb::Move(Dir::W),
-        });
+        w.beings.get_mut(&1).unwrap().pos = Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: 8,
+            y: 8,
+        };
         w.tick = w.next_at(EntityId(1));
         w.apply(&Intent {
             actor: EntityId(1),

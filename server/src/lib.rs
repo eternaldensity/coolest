@@ -146,9 +146,15 @@ mod tests {
     fn queue_applies_in_arrival_order() {
         let mut s = Server::new(9);
         s.world.spawn(EntityId(1), pos(8, 8), 1);
-        s.submit(mover(Dir::E));
-        s.submit(mover(Dir::E));
-        s.submit(mover(Dir::S));
+        // Waits isolate queue mechanics from terrain: wall collision
+        // (correctly) drops blocked moves, which would tangle the count.
+        let wait = Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        };
+        s.submit(wait.clone());
+        s.submit(wait.clone());
+        s.submit(wait.clone());
         assert_eq!(s.pending(), 3);
         let out = s.step();
         assert_eq!(out.len(), 3);
