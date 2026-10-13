@@ -32,6 +32,16 @@ fn pos(x: u8, y: u8) -> Pos {
     }
 }
 
+/// One-line effect blurb for stocked items whose benefit is otherwise
+/// unstated. No entry means no promised effect (e.g. meds, pending).
+fn item_blurb(item: &str) -> &'static str {
+    match item {
+        "firewall" => " · slows inbound traces",
+        "ration" => " · +30 food",
+        _ => "",
+    }
+}
+
 /// Save slot: a real file on desktop, a browser-local key on web (where
 /// the sandbox has no filesystem).
 #[cfg(not(target_arch = "wasm32"))]
@@ -513,7 +523,13 @@ impl eframe::App for Shell {
                     ui.label("Counter — type buy <item> or click:");
                     for (item, price, qty) in counter {
                         ui.horizontal(|ui| {
-                            ui.label(format!("{} — {}c ({} left)", item, price, qty));
+                            ui.label(format!(
+                                "{} — {}c ({} left){}",
+                                item,
+                                price,
+                                qty,
+                                item_blurb(&item)
+                            ));
                             if ui.button("Buy").clicked() {
                                 self.do_verb(Verb::Buy(item.clone()));
                             }

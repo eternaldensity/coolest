@@ -485,6 +485,32 @@ impl World {
         if b.money < pay0.max(100) {
             return "Cash low: Work a job (Work 0/1)".to_string();
         }
+        // Firewall objective (M0.5): needs met, so point at the big purchase
+        // and state its benefit. Funds mirror what Buy can spend (pocket +
+        // bank); skipped once host 1 is filtered.
+        if !self.hosts.get(&1).is_some_and(|h| h.firewall()) {
+            if let Some(price) = self
+                .shops
+                .iter()
+                .flat_map(|s| s.shop.stock.get("firewall"))
+                .map(|l| l.price_cents)
+                .min()
+            {
+                let bank = self
+                    .accts
+                    .get(&id.0)
+                    .and_then(|a| self.ledger.balance(*a).ok())
+                    .unwrap_or(0);
+                let funds = b.money + bank;
+                let tag = format!("${:.2}", price as f64 / 100.0);
+                if funds >= price {
+                    return format!("Buy the firewall ({tag}): inbound traces crawl");
+                }
+                if funds * 2 >= price {
+                    return format!("Save up for the firewall ({tag}): inbound traces crawl");
+                }
+            }
+        }
         "Settled: explore (arrows/hjkl), Talk to n, hack via Deck tab".to_string()
     }
 
@@ -1392,6 +1418,34 @@ mod tests {
         assert!(w.advise(EntityId(1)).contains("Locked out"));
         // Unknown actor.
         assert_eq!(w.advise(EntityId(99)), "spawn in");
+    }
+
+    #[test]
+    fn advise_names_firewall_goal_and_benefit() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("firewall", 1500, 1, 1, 1, 1200);
+        w.place_shop(8, 8, shop);
+        // Needs met, broke: still settled, no goal named.
+        assert!(w.advise(EntityId(1)).starts_with("Settled"));
+        // Halfway there: save-up objective with price and benefit.
+        w.set_needs(EntityId(1), 80, 70, 800, 3);
+        let line = w.advise(EntityId(1));
+        assert!(
+            line.contains("Save up")
+                && line.contains("$15.00")
+                && line.contains("inbound traces crawl"),
+            "{line}"
+        );
+        // Affordable: buy objective.
+        w.set_needs(EntityId(1), 80, 70, 2000, 3);
+        let line = w.advise(EntityId(1));
+        assert!(line.contains("Buy the firewall"), "{line}");
+        // Installed: goal retires back to settled.
+        w.ensure_host(crate::ids::HostId(1)).set_firewall(true);
+        assert!(w.advise(EntityId(1)).starts_with("Settled"));
     }
 
     #[test]
