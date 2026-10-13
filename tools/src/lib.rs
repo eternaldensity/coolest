@@ -33,15 +33,29 @@ pub fn ttk_csv() -> String {
     s
 }
 
-/// Trace curve: ticks to complete per threshold, plain vs scrambled.
+/// Trace curve: total ticks to complete per threshold, plain vs scrambled,
+/// measured through the real `Host::start_trace` / `tick_trace` interface
+/// (+2/tick plain, +1/tick scrambled). Counts the completing tick.
 pub fn trace_table() -> Vec<(u32, u32, u32)> {
     let mut out = Vec::new();
     for thr in [4u32, 6, 8, 10] {
-        let plain = thr.div_ceil(2);
-        let scrambled = thr; // +1/tick
-        out.push((thr, plain, scrambled));
+        out.push((thr, measure_trace(thr, false), measure_trace(thr, true)));
     }
     out
+}
+
+fn measure_trace(threshold: u32, scrambled: bool) -> u32 {
+    let mut h = Host::new(HostId(1), 12, 8, 100);
+    h.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1).unwrap();
+    h.start_trace(EntityId(10), threshold).unwrap();
+    let mut ticks = 0u32;
+    loop {
+        ticks += 1;
+        if h.tick_trace(scrambled) {
+            break;
+        }
+    }
+    ticks
 }
 
 pub fn trace_csv() -> String {
