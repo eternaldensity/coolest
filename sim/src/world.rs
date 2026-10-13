@@ -319,6 +319,12 @@ impl World {
             .map(|s| (s.x, s.y))
     }
 
+    /// Tile positions of all shops, for map marking (reach-independent:
+    /// counters show wherever their tile is on screen).
+    pub fn shop_positions(&self) -> Vec<(u8, u8)> {
+        self.shops.iter().map(|s| (s.x, s.y)).collect()
+    }
+
     /// Spawn an ambient NPC (no hunger/mood — design 2006 scope cut).
     /// home/work/leisure are local tiles; timetable comes from role.
     pub fn spawn_npc(
@@ -1082,6 +1088,7 @@ mod tests {
         assert_eq!(w.needs(EntityId(1)).unwrap().3, 4);
         assert_eq!(w.shop_pos_near(8, 8), Some((9, 8)));
         assert_eq!(w.shop_pos_near(0, 0), None);
+        assert_eq!(w.shop_positions(), vec![(9, 8)]);
         // Four tiles off: no counter in reach.
         w.beings.get_mut(&1).unwrap().pos = Pos {
             city: 1,

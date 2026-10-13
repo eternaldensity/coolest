@@ -522,7 +522,7 @@ impl eframe::App for Shell {
                     ui.separator();
                 }
                 let (ax, ay) = (here.x, here.y);
-                let counter_at = self.server.world.shop_pos_near(here.x, here.y);
+                let shop_tiles = self.server.world.shop_positions();
                 // Glyph colors follow the active theme: hardcoding for one
                 // theme made @ invisible on the other (light default).
                 let dark = ui.visuals().dark_mode;
@@ -543,7 +543,7 @@ impl eframe::App for Shell {
                                 "@"
                             } else if npcs.iter().any(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
                                 "n"
-                            } else if Some((x, y)) == counter_at {
+                            } else if shop_tiles.contains(&(x, y)) {
                                 "$"
                             } else if terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true) {
                                 "."
