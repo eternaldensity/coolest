@@ -657,16 +657,17 @@ impl World {
                     .copied()
                     .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
                 // Paychecks land in pocket cash while shops draw the bank
-                // ledger: bridge them pocket-first so earned money spends.
-                // Check the combined total before moving anything.
+                // ledger: bridge them pocket-first so the displayed balance
+                // always moves on a purchase. Check the combined total
+                // before moving anything.
                 let price = shop
                     .stock
                     .get(item)
                     .map(|l| l.price_cents)
                     .ok_or(SimError::new("no_line", "stocked item", "unknown"))?;
                 let bank = self.ledger.balance(acct)?;
-                let cash = (price - bank.min(price)).max(0);
-                if cash > b.money {
+                let cash = b.money.min(price);
+                if bank < price - cash {
                     return Err(SimError::new("overdraw", "funds", "short"));
                 }
                 shop.buy_with_cash(&mut self.ledger, acct, cash, item)?;
@@ -1006,7 +1007,8 @@ mod tests {
         let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
         shop.add_line("firewall", 1500, 1, 1, 1, 1200);
         w.place_shop(8, 8, shop);
-        // Pocket 200 + bank 1400 covers 1500: bank drains, pocket pays 100.
+        // Pocket 200 + bank 1400 covers 1500 pocket-first: pocket drains,
+        // bank pays the remaining 1300.
         assert_eq!(w.needs(EntityId(1)).unwrap().2, 200);
         w.tick = w.next_at(EntityId(1));
         w.apply(&Intent {
@@ -1015,8 +1017,8 @@ mod tests {
         })
         .unwrap();
         assert!(w.host(crate::ids::HostId(1)).unwrap().firewall());
-        assert_eq!(w.needs(EntityId(1)).unwrap().2, 100);
-        assert_eq!(w.ledger.balance(acct).unwrap(), 0);
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 0);
+        assert_eq!(w.ledger.balance(acct).unwrap(), 100);
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
