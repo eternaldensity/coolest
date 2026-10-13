@@ -347,6 +347,15 @@ impl World {
         // Pressure clock: every act costs 1 food + 1 mood (player-only).
         b.food = b.food.saturating_sub(1);
         b.mood = b.mood.saturating_sub(1);
+        // Frozen-chunk catch-up (design/02): while this being's chunk was
+        // unloaded, needs accrued at ~1/min instead of the active 1/act.
+        // Missed == 0 on the normal path, so steady play is untouched.
+        let missed = self.tick.saturating_sub(b.next_at);
+        if missed > 0 {
+            let catch = (missed / 60).min(100) as u8;
+            b.food = b.food.saturating_sub(catch);
+            b.mood = b.mood.saturating_sub(catch);
+        }
         let mut kind = "acted";
         match intent.verb {
             Verb::Wait => {}
@@ -554,6 +563,30 @@ mod tests {
         let t0 = w.tick;
         let _ = w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait });
         assert_eq!(w.beings[&1].next_at, t0 + 2); // speed 1 x2 while starving
+    }
+
+    #[test]
+    fn frozen_chunk_applies_catchup_decay() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        let (f0, m0, _, _) = w.needs(EntityId(1)).unwrap();
+        // 10 frozen minutes pass with the chunk unloaded.
+        w.tick += 600;
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        let (f1, m1, _, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!((f0 - f1, m0 - m1), (11, 11)); // 10 catch-up + 1 act
+        // No absence, no catch-up: steady play costs exactly the act.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        let (f2, m2, _, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!((f1 - f2, m1 - m2), (1, 1));
+        // Huge absence floors at zero without panic.
+        w.tick += 1_000_000;
+        w.apply(&Intent { actor: EntityId(1), verb: Verb::Wait }).unwrap();
+        let (f3, m3, _, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!((f3, m3), (0, 0));
     }
 
     #[test]
