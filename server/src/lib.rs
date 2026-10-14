@@ -37,9 +37,9 @@ impl Server {
         self.queue.len()
     }
 
-    /// Apply everything queued. Returns one (Delta, Events) per intent.
-    /// Failed intents (bad timing/actor) are dropped and NOT logged —
-    /// replay feeds only applied intents, so hashes stay comparable.
+    /// Apply everything queued. Returns one (Delta, Events) per accepted
+    /// intent. Refused intents are dropped from `out` but remain in `log`:
+    /// they advanced the clock, so replay needs them (see `apply_one`).
     pub fn step(&mut self) -> Vec<(Delta, Vec<Event>)> {
         let mut out = Vec::with_capacity(self.queue.len());
         while let Some(intent) = self.queue.pop_front() {
@@ -51,22 +51,22 @@ impl Server {
     }
 
     /// Apply one intent now, jumping the clock to its due tick.
-    /// On success the intent is logged; on failure the concrete
-    /// [`sim::SimError`] is returned so callers can explain the
-    /// rejection (shuttered counter, not_home, ...) instead of a
-    /// generic "rejected".
+    ///
+    /// The intent is logged whether it is accepted or refused: a refusal
+    /// still advanced the world clock to the actor's due tick (and charged
+    /// per-act upkeep), so replaying only the accepted intents would
+    /// diverge. The log is therefore the full processed-intent history
+    /// (design/11 rule 43: the log is the sole source for replay).
+    /// On failure the concrete [`sim::SimError`] is returned so callers
+    /// can explain the rejection (shuttered counter, not_home, ...).
     pub fn apply_one(&mut self, intent: Intent) -> Result<(Delta, Vec<Event>), sim::SimError> {
         let due = self.world.next_at(intent.actor);
         if self.world.tick < due {
             self.world.tick = due;
         }
-        match self.world.apply(&intent) {
-            Ok(res) => {
-                self.log.push(intent);
-                Ok(res)
-            }
-            Err(e) => Err(e),
-        }
+        let outcome = self.world.apply(&intent);
+        self.log.push(intent);
+        outcome
     }
 
     pub fn snapshot(&self) -> String {
@@ -174,17 +174,63 @@ mod tests {
     }
 
     #[test]
-    fn bad_intents_dropped_not_logged() {
+    fn bad_intents_return_errors_but_stay_in_the_log() {
         let mut s = Server::new(9);
         s.world.spawn(EntityId(1), pos(8, 8), 1);
         s.submit(mover(Dir::E));
         s.submit(Intent {
             actor: EntityId(99),
             verb: Verb::Wait,
-        }); // unknown
+        }); // unknown actor
         let out = s.step();
+        // Only the accepted intent yields a result...
         assert_eq!(out.len(), 1);
-        assert_eq!(s.log.len(), 1);
+        // ...but both were processed (and logged) so replay reproduces the
+        // clock advance each one caused.
+        assert_eq!(s.log.len(), 2);
+    }
+
+    #[test]
+    fn refusal_advances_clock_and_replays() {
+        // A shuttered buy is refused, yet it jumps the clock to the actor's
+        // due tick. The intent log must carry it so replays match.
+        let mut a = Server::new(3);
+        a.world.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = a.world.open_account(EntityId(1), sim::HostId(2)).unwrap();
+        a.world.ledger.mint(acct, 5000).unwrap();
+        let mut shop = sim::Shop::new(a.world.ledger.open(EntityId(9), sim::HostId(9)));
+        shop.add_line("ration", 100, 5, 2, 5, 50);
+        shop.set_hours(8, 20);
+        a.world.place_shop(8, 8, shop);
+        a.world.tick = 23 * 60;
+        a.world.tick = a.world.next_at(EntityId(1)).max(a.world.tick);
+
+        let err = a
+            .apply_one(Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("ration".into()),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "shuttered");
+        assert_eq!(a.log.len(), 1, "refusal is logged");
+        let hash = a.world.snapshot_hash();
+
+        // Twin replayed from the log matches, refusal and all.
+        let mut b = Server::new(3);
+        b.world.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = b.world.open_account(EntityId(1), sim::HostId(2)).unwrap();
+        b.world.ledger.mint(acct, 5000).unwrap();
+        let mut shop = sim::Shop::new(b.world.ledger.open(EntityId(9), sim::HostId(9)));
+        shop.add_line("ration", 100, 5, 2, 5, 50);
+        shop.set_hours(8, 20);
+        b.world.place_shop(8, 8, shop);
+        b.world.tick = 23 * 60;
+        b.world.tick = b.world.next_at(EntityId(1)).max(b.world.tick);
+        for i in a.log.clone() {
+            b.submit(i);
+        }
+        b.step();
+        assert_eq!(b.world.snapshot_hash(), hash);
     }
 
     #[test]
@@ -198,13 +244,15 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(err.kind, "unknown_actor");
-        assert!(s.log.is_empty());
+        // Processed intents are logged even when refused, so replay can
+        // reproduce the clock advance; only the message is the difference.
+        assert_eq!(s.log.len(), 1);
         s.apply_one(Intent {
             actor: EntityId(1),
             verb: Verb::Wait,
         })
         .unwrap();
-        assert_eq!(s.log.len(), 1);
+        assert_eq!(s.log.len(), 2);
     }
 
     #[test]
