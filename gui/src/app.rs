@@ -387,11 +387,6 @@ impl Shell {
         if self.tab == Tab::Street {
             let ctx = ui.ctx().clone();
             self.move_key(&ctx);
-            // Ambient tick: NPC timetables advance on game time (clean record demo).
-            let hour = ((self.server.world.tick / 60) % 24) as u8;
-            self.server
-                .world
-                .step_npcs(hour, &std::collections::BTreeMap::new());
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -745,8 +740,11 @@ impl Shell {
                         ui.add(egui::DragValue::new(&mut self.mp).range(0..=20));
                         if ui.button("Jack in @lobby").clicked() {
                             let mp = self.mp;
-                            let msg = match self.server.world.veil.enter_at(self.actor, mp, 1) {
-                                Ok(()) => format!("jacked in (mp {mp})"),
+                            let msg = match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::VeilEnter { mp },
+                            }) {
+                                Ok(_) => format!("jacked in (mp {mp})"),
                                 Err(e) => format!("entry refused: {e}"),
                             };
                             self.say(msg);
@@ -765,8 +763,11 @@ impl Shell {
                         for a in exits {
                             let label = self.server.world.veil.area_info(a).map(|(n, _, x)| format!("{n}{}", if x { " [exit]" } else { "" })).unwrap_or_else(|| format!("area {a}"));
                             if ui.button(format!("→ {label}")).clicked() {
-                                let msg = match self.server.world.veil.move_to(self.actor, a) {
-                                    Ok(()) => format!("moved to {label}"),
+                                let msg = match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::VeilMove { area: a },
+                                }) {
+                                    Ok(_) => format!("moved to {label}"),
                                     Err(e) => format!("blocked: {e}"),
                                 };
                                 self.say(msg);
@@ -775,15 +776,22 @@ impl Shell {
                     });
                     ui.horizontal(|ui| {
                         if ui.button("Seize demo host (mp 3)").clicked() {
-                            let msg = match self.server.world.veil.transfer(self.actor, EntityId(70), 3, true) {
-                                Ok(()) => "host 70 seized".to_string(),
+                            let msg = match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::VeilSeize,
+                            }) {
+                                Ok(_) => "host 70 seized".to_string(),
                                 Err(e) => format!("seize failed: {e}"),
                             };
                             self.say(msg);
                         }
                         if ui.button("Eject").clicked() {
-                            let msg = match self.server.world.veil.eject(self.actor) {
-                                Ok(drain) => format!("ejected (drain {drain})"),
+                            let msg = match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::VeilEject,
+                            }) {
+                                // eject() always drains KICK_DRAIN on success.
+                                Ok(_) => format!("ejected (drain {})", sim::KICK_DRAIN),
                                 Err(e) => format!("eject failed: {e}"),
                             };
                             self.say(msg);
@@ -1138,6 +1146,45 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn veil_full_flow_through_clicks() {
+            let mut h = Harness::new();
+            let at = h.button_center("Veil");
+            h.click(at);
+            // mp slider defaults to 8: jack in, walk to ops, seize, eject.
+            let at = h.button_center("Jack in @lobby");
+            h.click(at);
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("jacked in (mp 8)")),
+                "log: {:?}",
+                h.shell.log
+            );
+            let at = h.button_center("→ ops");
+            h.click(at);
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("moved to ops")),
+                "log: {:?}",
+                h.shell.log
+            );
+            let at = h.button_center("Seize demo host (mp 3)");
+            h.click(at);
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("host 70 seized")),
+                "log: {:?}",
+                h.shell.log
+            );
+            let at = h.button_center("Eject");
+            h.click(at);
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("ejected (drain")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(h.has_text("ejected (drain"), "text: {:?}", h.labels());
+            // Four veil acts went through the server log.
+            assert_eq!(h.shell.server.log.len(), 4);
         }
 
         #[test]
