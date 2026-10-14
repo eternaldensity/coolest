@@ -43,8 +43,9 @@ both bars down:
 - **Deck:** click a cell, `Load killer` a program, `Strike` heads/tails.
   The warden defends host 1 — intrusions draw a trace, and kills count
   toward your record. Every act is logged; replays reproduce the arena.
-- **Net:** `Route 1→3` previews path/tolls; `Damage wire 1-2` sabotage
-  is a logged act (laser links refuse).
+- **Net:** the tab lists hosts (net kind, modem, gateway, `DARK`) and links.
+  `Route 1→3` previews path/tolls and reroutes around dark sections;
+  `Damage wire 1-2` sabotage and `Cut/Restore power` are logged acts.
 - **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize hosts,
   `Eject` (light drain). Death ejects instead of killing.
 
@@ -102,7 +103,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (142 tests)
+cargo test --workspace      # prove the rules hold (149 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
