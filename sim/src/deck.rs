@@ -16,6 +16,38 @@ pub enum Res {
     Algo,
 }
 
+impl Res {
+    /// All three types, in tier order.
+    pub const ALL: [Res; 3] = [Res::Loop, Res::Data, Res::Algo];
+
+    /// Stable index for compact storage / integer requirements.
+    pub fn as_index(self) -> u8 {
+        match self {
+            Res::Loop => 0,
+            Res::Data => 1,
+            Res::Algo => 2,
+        }
+    }
+
+    /// Inverse of [`Res::as_index`]; unknown indices fall back to Loop.
+    pub fn from_index(i: u8) -> Res {
+        match i {
+            1 => Res::Data,
+            2 => Res::Algo,
+            _ => Res::Loop,
+        }
+    }
+
+    /// Lower-case name as used in data files.
+    pub fn name(self) -> &'static str {
+        match self {
+            Res::Loop => "loop",
+            Res::Data => "data",
+            Res::Algo => "algo",
+        }
+    }
+}
+
 /// M2b paired Deck stats (2024). Attacks target the negative pole, next-turn only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeckStats {
@@ -728,6 +760,24 @@ impl Host {
             .and_then(|m| m.get(&res))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Public consume: spend `n` units of `res` from the owner's stock,
+    /// refusing (and moving nothing) when short.
+    pub fn consume(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {
+        self.spend(owner, res, n)
+    }
+
+    /// Add `n` units of `res` to the owner's stock (e.g. manual coding).
+    pub fn add_stock(&mut self, owner: EntityId, res: Res, n: u32) -> u32 {
+        let e = self
+            .stocks
+            .entry(owner.0)
+            .or_default()
+            .entry(res)
+            .or_insert(0);
+        *e += n;
+        *e
     }
 
     fn spend(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {

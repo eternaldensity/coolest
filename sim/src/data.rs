@@ -10,6 +10,26 @@ pub struct JobDef {
     pub payout_cents: i64,
     pub mood_cost: u8,
     pub food_cost: u8,
+    /// Units the job consumes (design/10: jobs require N). 0 = none.
+    #[serde(default)]
+    pub units: u32,
+    /// Resource type the units come from: "loop" | "data" | "algo".
+    /// Absent/blank when `units == 0`.
+    #[serde(default)]
+    pub resource: String,
+}
+
+impl JobDef {
+    /// Resource index for the integer requirement table (0 loop,
+    /// 1 data, 2 algo). Returns None when the job needs no units.
+    pub fn resource_index(&self) -> Option<u8> {
+        match self.resource.as_str() {
+            "loop" => Some(0),
+            "data" => Some(1),
+            "algo" => Some(2),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +94,15 @@ pub fn parse_jobs(s: &str) -> Result<Vec<JobDef>, SimError> {
                 "data",
                 "named job with payout > 0",
                 "bad entry",
+            ));
+        }
+        // A job either needs no units, or names a known resource to draw
+        // from; anything else is a content bug.
+        if j.units > 0 && j.resource_index().is_none() {
+            return Err(SimError::new(
+                "data",
+                "job resource loop|data|algo when units > 0",
+                "unknown resource",
             ));
         }
     }
@@ -172,6 +201,17 @@ mod tests {
         let ppm = |j: &JobDef| j.payout_cents as f64 / j.mood_cost as f64;
         assert!(ppm(&jobs[4]) > ppm(&jobs[0]));
 
+        // Every job names a known resource and requires 4-6 units
+        // (design/10 "jobs require N"; stricter tuning forces deck use).
+        for j in &jobs {
+            assert!(j.units >= 4 && j.units <= 6, "{} units {}", j.id, j.units);
+            assert!(j.resource_index().is_some(), "{} resource", j.id);
+        }
+        // Higher tiers draw from rarer resources.
+        assert_eq!(jobs[0].resource, "loop");
+        assert_eq!(jobs[2].resource, "data");
+        assert_eq!(jobs[4].resource, "algo");
+
         let vulns = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
         assert_eq!(vulns.len(), 3);
 
@@ -236,6 +276,11 @@ mod tests {
         // Duplicate ids are ambiguous on the board.
         assert!(parse_jobs(
             "- id: a\n  payout_cents: 1\n  mood_cost: 1\n  food_cost: 1\n- id: a\n  payout_cents: 2\n  mood_cost: 1\n  food_cost: 1\n"
+        )
+        .is_err());
+        // A unit requirement must name a known resource.
+        assert!(parse_jobs(
+            "- id: a\n  payout_cents: 1\n  mood_cost: 1\n  food_cost: 1\n  units: 3\n  resource: unobtainium\n"
         )
         .is_err());
     }

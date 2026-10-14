@@ -80,6 +80,12 @@ pub enum Verb {
         sy: i32,
         up: bool,
     },
+    /// Manual coding (design/10): write one unit of a resource into your
+    /// rig's stock. Slow — one unit per act, plus a mood cost — so jobs
+    /// push you onto producer programs.
+    Code {
+        res: crate::deck::Res,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,6 +170,9 @@ const DEFAULT_JOBS: [(i64, u8, u8); 5] = [
     (500, 24, 13),
 ];
 const WATCH_COST: i64 = 30;
+/// Manual coding cost (design/10): one unit per act at a small mood price,
+/// so deck producers (free per act) are the real answer for higher tiers.
+const CODE_MOOD_COST: u8 = 2;
 /// Daily rent (design/04: rent is a burn sink). Provisional tuning: one day
 /// is 1440 ticks; medians from human sessions should set the real number.
 const DAY_TICKS: u64 = 1440;
@@ -187,6 +196,11 @@ pub struct World {
     beings: BTreeMap<u64, Being>,
     #[serde(default = "default_jobs")]
     jobs: Vec<(i64, u8, u8)>,
+    /// Per-job resource requirement, parallel to `jobs`: (resource index
+    /// 0 loop / 1 data / 2 algo, units). Default for old saves (design/10
+    /// economy link); a missing entry means the job needs no units.
+    #[serde(default = "default_job_reqs")]
+    job_reqs: Vec<(u8, u32)>,
     #[serde(default)]
     pub ledger: Ledger,
     #[serde(default)]
@@ -226,6 +240,12 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
     DEFAULT_JOBS.to_vec()
 }
 
+/// Default unit requirements, parallel to DEFAULT_JOBS: 4/6 loop,
+/// 5/6 data, 6 algo.
+fn default_job_reqs() -> Vec<(u8, u32)> {
+    vec![(0, 4), (0, 6), (1, 5), (1, 6), (2, 6)]
+}
+
 impl World {
     pub fn new(seed: u64) -> Self {
         Self {
@@ -234,6 +254,7 @@ impl World {
             version: SAVE_VERSION,
             beings: BTreeMap::new(),
             jobs: DEFAULT_JOBS.to_vec(),
+            job_reqs: default_job_reqs(),
             ledger: Ledger::new(),
             accts: BTreeMap::new(),
             shops: Vec::new(),
@@ -257,7 +278,33 @@ impl World {
                 .iter()
                 .map(|d| (d.payout_cents, d.mood_cost, d.food_cost))
                 .collect();
+            self.job_reqs = defs
+                .iter()
+                .map(|d| (d.resource_index().unwrap_or(0), d.units))
+                .collect();
         }
+    }
+
+    /// What job `j` consumes, if anything: (resource, units).
+    pub fn job_requirement(&self, j: usize) -> Option<(crate::deck::Res, u32)> {
+        let (idx, units) = *self.job_reqs.get(j)?;
+        if units == 0 {
+            return None;
+        }
+        Some((crate::deck::Res::from_index(idx), units))
+    }
+
+    /// Units of `res` the owner holds in `host`'s stock (their rig).
+    pub fn units_at(&self, host: HostId, owner: EntityId, res: crate::deck::Res) -> u32 {
+        self.hosts
+            .get(&host.0)
+            .map(|h| h.stock(owner, res))
+            .unwrap_or(0)
+    }
+
+    /// Units of `res` the owner holds on their rig (world host 1).
+    pub fn units(&self, owner: EntityId, res: crate::deck::Res) -> u32 {
+        self.units_at(HostId(1), owner, res)
     }
 
     /// Generate (or fetch) a section, constraining shared-side ports from
@@ -614,6 +661,23 @@ impl World {
         }
         let pay0 = self.jobs.first().map(|j| j.0).unwrap_or(0);
         if b.money < pay0.max(100) {
+            // Unit gate (design/10): the work advice is useless when the
+            // first job's components are short, so name the real blocker
+            // while still pointing at Work.
+            if let Some((res, units)) = self.job_requirement(0) {
+                let have = self.units(id, res);
+                if have < units {
+                    return format!(
+                        "Cash low: Work needs {} {} components ({have}/{units}) — code {} first",
+                        units,
+                        res.name(),
+                        res.name()
+                    );
+                }
+            }
+            return "Cash low: Work a job (Work 0/1)".to_string();
+        }
+        if b.money < pay0.max(100) {
             return "Cash low: Work a job (Work 0/1)".to_string();
         }
         // Firewall objective (M0.5): needs met, so point at the big purchase
@@ -820,6 +884,23 @@ impl World {
                 if b.food == 0 || b.mood == 0 {
                     return Err(SimError::new("job_lockout", "food>0,mood>0", "depleted"));
                 }
+                // Units gate (design/10 economy link): the job consumes
+                // components from your rig's stock before it pays. Check
+                // before charging so a shortfall costs nothing but the act.
+                // Field access (not self.job_requirement) keeps the `beings`
+                // borrow alive, like the Buy arm.
+                if let Some(&(idx, units)) = self.job_reqs.get(j as usize) {
+                    if units > 0 {
+                        let res = crate::deck::Res::from_index(idx);
+                        // Same lazy-rig rule as `Code`: a missing rig is
+                        // just an empty stock, not a separate failure.
+                        let rig = self
+                            .hosts
+                            .entry(1)
+                            .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        rig.consume(intent.actor, res, units)?;
+                    }
+                }
                 b.mood = b.mood.saturating_sub(mood_c);
                 b.food = b.food.saturating_sub(food_c);
                 b.money += pay;
@@ -919,6 +1000,16 @@ impl World {
                     self.power.kill((sx, sy));
                     kind = "power_down";
                 }
+            }
+            Verb::Code { res } => {
+                // Manual coding: one unit onto your rig, at a mood cost.
+                let host = self
+                    .hosts
+                    .entry(1)
+                    .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                host.add_stock(intent.actor, res, 1);
+                b.mood = b.mood.saturating_sub(CODE_MOOD_COST);
+                kind = "coded";
             }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
@@ -1226,6 +1317,9 @@ mod tests {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
         // Starter: 80/70, 200c, 3 rations. Decay applies per act.
+        // Stock the rig so job 0's unit gate is satisfied.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Loop, 4);
         let (_, mood0, m0, _) = w.needs(EntityId(1)).unwrap();
         let _ = w.apply(&Intent {
             actor: EntityId(1),
@@ -1489,6 +1583,9 @@ mod tests {
     fn funnel_tracks_started_job_hack_trace_survived() {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 10);
+        // Job 0 needs loop units; stock the rig first (design/10 gate).
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Loop, 4);
         assert!(w.funnel_line().contains("started=-"));
         w.tick = w.next_at(EntityId(1));
         w.apply(&Intent {
@@ -1806,6 +1903,23 @@ mod tests {
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
         assert!(w2.host(crate::ids::HostId(1)).is_some());
         assert!(w2.host(crate::ids::HostId(9)).is_none());
+    }
+
+    #[test]
+    fn advise_names_unit_shortage_when_cash_is_low() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Cash low + no components: the work advice names the real blocker.
+        w.set_needs(EntityId(1), 80, 70, 10, 3);
+        let line = w.advise(EntityId(1));
+        assert!(
+            line.contains("Work needs 4 loop components (0/4)") && line.contains("code loop"),
+            "{line}"
+        );
+        // Stock the rig: the plain work advice returns.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Loop, 4);
+        assert!(w.advise(EntityId(1)).contains("Cash low: Work a job"));
     }
 
     #[test]
@@ -2241,6 +2355,74 @@ mod tests {
     }
 
     #[test]
+    fn code_feeds_jobs_and_gate_refuses_when_short() {
+        use crate::deck::Res;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Job 0 wants 4 loop; working with an empty rig is refused.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Work(0),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_resource");
+        assert_eq!(w.units(EntityId(1), Res::Loop), 0);
+        // Manual coding yields 1 unit/act at a mood price.
+        let (_, mood0, money0, _) = w.needs(EntityId(1)).unwrap();
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Code { res: Res::Loop },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("coded"));
+        let (_, mood1, money1, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!(w.units(EntityId(1), Res::Loop), 1);
+        // 1 act upkeep + 2 code cost = 3 mood, no cash movement.
+        assert_eq!(mood0 - mood1, 3);
+        assert_eq!(money0, money1);
+        // Three more codes fill the requirement, then the job pays.
+        for _ in 0..3 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Code { res: Res::Loop },
+            })
+            .unwrap();
+        }
+        assert_eq!(w.units(EntityId(1), Res::Loop), 4);
+        let (_, _, m0, _) = w.needs(EntityId(1)).unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Work(0),
+        })
+        .unwrap();
+        assert_eq!(w.units(EntityId(1), Res::Loop), 0, "units consumed");
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, m0 + 60);
+        // Coding the wrong resource does not satisfy the job.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Code { res: Res::Algo },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Work(0),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_resource");
+        assert_eq!(w.units(EntityId(1), Res::Algo), 1, "algo untouched");
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
     fn accounts_open_for_beings_and_npcs() {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
@@ -2257,6 +2439,9 @@ mod tests {
         let mut w = World::new(1);
         w.set_jobs(&defs);
         w.spawn(EntityId(1), pos(8, 8), 1);
+        // Job 1 needs 6 loop; stock the rig so the gate passes.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Loop, 6);
         let (_, _, m0, _) = w.needs(EntityId(1)).unwrap();
         let _ = w.apply(&Intent {
             actor: EntityId(1),
@@ -2264,9 +2449,13 @@ mod tests {
         });
         let (_, _, m1, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!(m1, m0 + 120); // file value, not code constant
-                                  // Old snapshots without a jobs table still load (serde default).
+        assert_eq!(w.units(EntityId(1), crate::deck::Res::Loop), 0); // 6 consumed
+                                                                     // Old snapshots without a jobs table still load (serde default).
         let mut w2 = World::load_json(r#"{"tick":0,"seed":1,"beings":{}}"#).unwrap();
         w2.spawn(EntityId(9), pos(8, 8), 1);
+        // Old save gets the default requirement table too, so stock the rig.
+        w2.ensure_host(HostId(1))
+            .add_stock(EntityId(9), crate::deck::Res::Loop, 4);
         let (_, _, n0, _) = w2.needs(EntityId(9)).unwrap();
         let _ = w2.apply(&Intent {
             actor: EntityId(9),

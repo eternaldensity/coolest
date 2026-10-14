@@ -2,25 +2,40 @@
 # classes": tiered from manual-slow to contract-grade).
 # payout_cents: ledger credit on completion.
 # mood_cost / food_cost: pressure-loop costs (design/10 2024 survival).
+# units/resource: programming components the job consumes, drawn from
+# your stock on your rig (design/10 #4 economy<->combat link: "jobs
+# require N"). Manual code yields 1/act, so higher tiers push you onto
+# producer programs.
 # Tier ladder: payout rises faster than pressure, but higher tiers cost
-# more absolute mood/food, so food/mood lockout bites sooner.
+# more absolute mood/food AND more units, so food/mood lockout bites
+# sooner and the unit gate forces deck use.
 - id: debug-script
   payout_cents: 60
   mood_cost: 5
   food_cost: 2
+  units: 4
+  resource: loop
 - id: driver-patch
   payout_cents: 120
   mood_cost: 9
   food_cost: 4
+  units: 6
+  resource: loop
 - id: firmware-flash
   payout_cents: 200
   mood_cost: 13
   food_cost: 6
+  units: 5
+  resource: data
 - id: kernel-tune
   payout_cents: 320
   mood_cost: 18
   food_cost: 9
+  units: 6
+  resource: data
 - id: contract-build
   payout_cents: 500
   mood_cost: 24
   food_cost: 13
+  units: 6
+  resource: algo
