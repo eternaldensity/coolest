@@ -366,6 +366,15 @@ impl Shell {
 
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.show(ui);
+    }
+}
+
+impl Shell {
+    /// Frame-free UI root: the runner calls this via [`eframe::App::ui`];
+    /// headless tests drive it through `egui::Context::run_ui` with no
+    /// window, GPU, or screenshots (see the accesskit harness below).
+    fn show(&mut self, ui: &mut egui::Ui) {
         if let Some(left) = self.frames_left {
             if left == 0 {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -832,5 +841,248 @@ mod tests {
         })
         .unwrap();
         assert_eq!((w.tick - 1) % 1440, 360);
+    }
+
+    /// Headless egui harness: drives `Shell::show` through
+    /// `egui::Context::run_ui` (no window, GPU, or screenshots) and reads
+    /// the accesskit text tree instead of pixels. Assertion output is
+    /// label lists only, so failing UI tests stay small.
+    mod headless {
+        use super::*;
+        use egui::accesskit::{Node, NodeId, Role};
+
+        struct Harness {
+            shell: Shell,
+            ctx: egui::Context,
+            time: f64,
+            tree: std::collections::HashMap<NodeId, Node>,
+        }
+
+        impl Harness {
+            fn new() -> Self {
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                let mut h = Self {
+                    shell: Shell::new(None),
+                    ctx,
+                    time: 0.0,
+                    tree: Default::default(),
+                };
+                h.pass_with(vec![]);
+                h
+            }
+
+            fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
+                self.time += 0.1;
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    time: Some(self.time),
+                    events,
+                    ..Default::default()
+                }
+            }
+
+            fn pass_with(&mut self, events: Vec<egui::Event>) {
+                let raw = self.input(events);
+                let shell = &mut self.shell;
+                let mut out = self.ctx.run_ui(raw, |ui| shell.show(ui));
+                // No painter headless: draining the font texture delta is
+                // the whole "handling"; pixels never leave the harness.
+                out.textures_delta.clear();
+                if let Some(update) = out.platform_output.accesskit_update {
+                    self.tree = update.nodes.into_iter().collect();
+                }
+            }
+
+            /// (role, text) pairs currently on screen. Buttons expose
+            /// their caption as `label`; static text (`ui.label`,
+            /// headings, log lines) exposes it as `value`.
+            fn text_of(n: &Node) -> String {
+                let label = n.label().unwrap_or_default();
+                if !label.is_empty() {
+                    return label.to_string();
+                }
+                n.value().unwrap_or_default().to_string()
+            }
+
+            /// (role, text) pairs currently on screen, skipping empty
+            /// layout nodes so failure output stays small (no pixels,
+            /// no dumps).
+            fn labels(&self) -> Vec<(String, String)> {
+                let mut out: Vec<(String, String)> = self
+                    .tree
+                    .values()
+                    .map(|n| (format!("{:?}", n.role()), Self::text_of(n)))
+                    .filter(|(_, t)| !t.is_empty())
+                    .collect();
+                out.sort();
+                out
+            }
+
+            fn has(&self, role: Role, label: &str) -> bool {
+                self.tree
+                    .values()
+                    .any(|n| n.role() == role && Self::text_of(n) == label)
+            }
+
+            /// Any rendered text node containing `substr` (log lines,
+            /// headings, counter rows).
+            fn has_text(&self, substr: &str) -> bool {
+                self.tree
+                    .values()
+                    .any(|n| Self::text_of(n).contains(substr))
+            }
+
+            fn button_center(&self, label: &str) -> egui::Pos2 {
+                let node = self
+                    .tree
+                    .values()
+                    .find(|n| n.role() == Role::Button && n.label().unwrap_or_default() == label)
+                    .unwrap_or_else(|| panic!("no Button {label:?}; got {:?}", self.labels()));
+                let b = node
+                    .bounds()
+                    .unwrap_or_else(|| panic!("Button {label:?} has no bounds"));
+                egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+            }
+
+            fn text_input_center(&self) -> egui::Pos2 {
+                let node = self
+                    .tree
+                    .values()
+                    .find(|n| n.role() == Role::TextInput)
+                    .unwrap_or_else(|| panic!("no text input; got {:?}", self.labels()));
+                let b = node.bounds().expect("text input has no bounds");
+                egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+            }
+
+            fn click(&mut self, at: egui::Pos2) {
+                let mods = egui::Modifiers::default();
+                let press = egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: mods,
+                };
+                let release = egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: mods,
+                };
+                self.pass_with(vec![press]);
+                self.pass_with(vec![release]);
+                self.pass_with(vec![]);
+            }
+
+            fn tap_key(&mut self, key: egui::Key) {
+                let mods = egui::Modifiers::default();
+                let down = egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: mods,
+                };
+                let up = egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: mods,
+                };
+                self.pass_with(vec![down]);
+                self.pass_with(vec![up]);
+            }
+        }
+
+        #[test]
+        fn sleep_button_sleeps_through_click() {
+            let mut h = Harness::new();
+            assert!(h.has(Role::Button, "Sleep"), "text: {:?}", h.labels());
+            let at = h.button_center("Sleep");
+            h.click(at);
+            // Home at spawn, 00:00 -> rest to 06:00, status line logged.
+            assert_eq!((h.shell.server.world.tick - 1) % 1440, 360);
+            assert!(
+                h.shell.log.last().is_some_and(|l| l.contains("rations=")),
+                "log tail: {:?}",
+                h.shell.log.iter().rev().take(2).collect::<Vec<_>>()
+            );
+            assert!(
+                h.has_text(h.shell.log.last().unwrap()),
+                "status not rendered; text: {:?}",
+                h.labels()
+            );
+        }
+
+        #[test]
+        fn walk_east_then_shuttered_buy_rejects_with_cause() {
+            let mut h = Harness::new();
+            h.tap_key(egui::Key::ArrowRight);
+            h.tap_key(egui::Key::ArrowRight);
+            assert_eq!(
+                h.shell.server.world.pos_of(EntityId(1)),
+                Some(pos(10, 8)),
+                "two real keypresses should walk spawn (8,8) to the day shop"
+            );
+            // 00:20 game time: the 8-20 counter is shuttered.
+            assert!(
+                h.has_text("Counter — type buy <item> or click:"),
+                "counter panel missing; text: {:?}",
+                h.labels()
+            );
+            let at = h.button_center("Buy");
+            h.click(at);
+            let tail: Vec<&str> = h
+                .shell
+                .log
+                .iter()
+                .rev()
+                .take(2)
+                .map(|s| s.as_str())
+                .collect();
+            assert!(
+                tail.iter().any(|l| l.contains("rejected: shuttered")),
+                "log tail: {tail:?}"
+            );
+            assert!(
+                h.has_text("rejected: shuttered"),
+                "rejection not rendered; text: {:?}",
+                h.labels()
+            );
+        }
+
+        #[test]
+        fn console_sleep_command_runs_through_text_input() {
+            let mut h = Harness::new();
+            let at = h.text_input_center();
+            h.click(at);
+            h.pass_with(vec![egui::Event::Text("sleep".into())]);
+            h.tap_key(egui::Key::Enter);
+            h.pass_with(vec![]);
+            assert_eq!((h.shell.server.world.tick - 1) % 1440, 360);
+        }
+
+        #[test]
+        fn tabs_render_without_panic() {
+            let mut h = Harness::new();
+            // Re-select one by one and assert each heading renders.
+            let at = h.button_center("Net");
+            h.click(at);
+            assert!(
+                h.has_text("Net — world graph (Oldnet/Betanet)"),
+                "text: {:?}",
+                h.labels()
+            );
+            let at = h.button_center("Veil");
+            h.click(at);
+            assert!(h.has_text("Veil — helmet space"), "text: {:?}", h.labels());
+            let at = h.button_center("Deck");
+            h.click(at);
+            assert!(h.has_text("CPU "), "text: {:?}", h.labels());
+        }
     }
 }
