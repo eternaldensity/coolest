@@ -21,6 +21,14 @@ both bars down:
 - **Work** a programming job → earns cash, costs mood + food. Five tiers
   on the board (`debug-script` 60c → `contract-build` 500c): higher tiers
   pay more per mood but drain more pressure per act.
+- **Jobs consume components.** Every job needs 4–6 units of `loop`,
+  `data`, or `algo` from your rig's stock; the button shows
+  `[resource have/need]`. Two ways to get them:
+  - **Code** (Street tab / `code loop|data|algo`) — manual: 1 unit per
+    act, plus a small mood cost. Slow.
+  - **Farm** (Deck tab, on a selected cell) — deploy a producer that
+    yields 3/2/2 units per act, free, but costs rig CPU (2/3/5).
+    Higher tiers are hungrier, so mid/high jobs want producers.
 - **Eat** a ration → +30 food. No rations? Order more (online stores, M1).
 - **Watch** a show → +15 mood, costs $0.30.
 - **Sleep** in your rented room → rests to 06:00, no needs cost beyond
@@ -103,7 +111,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (149 tests)
+cargo test --workspace      # prove the rules hold (156 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
