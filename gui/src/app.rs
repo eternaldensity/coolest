@@ -275,6 +275,9 @@ impl Shell {
             "watch" => self.do_verb(Verb::Watch),
             "work 0" => self.do_verb(Verb::Work(0)),
             "work 1" => self.do_verb(Verb::Work(1)),
+            "work 2" => self.do_verb(Verb::Work(2)),
+            "work 3" => self.do_verb(Verb::Work(3)),
+            "work 4" => self.do_verb(Verb::Work(4)),
             "" => {}
             _ => self.say(format!("unknown: {cmd}")),
         }
@@ -473,7 +476,9 @@ impl Shell {
                     .map(|d| (d.id.clone(), d.payout_cents))
                     .collect();
                 if jobs.is_empty() {
-                    jobs = vec![("job-0".to_string(), 60), ("job-1".to_string(), 120)];
+                    jobs = (0..5)
+                        .map(|i| (format!("job-{i}"), 60 + 60 * i as i64))
+                        .collect();
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Eat").clicked() {
@@ -1185,6 +1190,33 @@ mod tests {
             assert!(h.has_text("ejected (drain"), "text: {:?}", h.labels());
             // Four veil acts went through the server log.
             assert_eq!(h.shell.server.log.len(), 4);
+        }
+
+        #[test]
+        fn job_ladder_renders_and_top_tier_pays_through_clicks() {
+            let mut h = Harness::new();
+            // All five board buttons come from data/jobs.yaml.
+            for (i, id, pay) in [
+                (0, "debug-script", 60),
+                (1, "driver-patch", 120),
+                (2, "firmware-flash", 200),
+                (3, "kernel-tune", 320),
+                (4, "contract-build", 500),
+            ] {
+                let label = format!("Work {i}: {id} {pay}c");
+                assert!(
+                    h.has(Role::Button, &label),
+                    "missing {label:?}; {:?}",
+                    h.labels()
+                );
+            }
+            let (_, _, before, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
+            let at = h.button_center("Work 4: contract-build 500c");
+            h.click(at);
+            let (_, _, after, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
+            assert_eq!(after, before + 500, "top-tier payout");
+            assert_eq!(h.shell.server.log.len(), 1);
+            assert!(h.has_text("worked") || h.shell.log.iter().any(|l| l.contains("rations=")));
         }
 
         #[test]
