@@ -41,6 +41,9 @@ pub enum Verb {
     Deposit(i64),
     /// Move bank money into pocket cash (logged burn).
     Withdraw(i64),
+    /// Sleep in the rented room until 06:00. No needs cost beyond this
+    /// act itself; rent still accrues past midnight.
+    Sleep,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +169,10 @@ pub struct World {
     /// Play-session funnel milestones. Default (all empty) for old saves.
     #[serde(default)]
     funnel: Funnel,
+    /// Rented room tile (design/01: a room above the noodle shop). Sleep
+    /// only works here. Default None for old saves (no room on record).
+    #[serde(default)]
+    home: Option<Pos>,
     /// Wholesale supplier account for shop restocking. Lazily opened on
     /// first restock (reserved system id); default None for old saves.
     #[serde(default)]
@@ -196,6 +203,7 @@ impl World {
             sched: Scheduler::new(),
             funnel: Funnel::default(),
             supplier: None,
+            home: None,
         }
     }
 
@@ -590,6 +598,11 @@ impl World {
             .unwrap_or(self.tick)
     }
 
+    /// Register the rented room. Sleep only works on this tile.
+    pub fn set_home(&mut self, pos: Pos) {
+        self.home = Some(pos);
+    }
+
     /// Report a successful offensive hack (Deck kill/takeover/exploit) for
     /// funnel tracking. The first reporter claims protagonism.
     pub fn mark_hack(&mut self, actor: EntityId) {
@@ -728,6 +741,23 @@ impl World {
                 b.mood = (b.mood + 15).min(100);
                 kind = "watched";
             }
+            Verb::Sleep => {
+                let home = self
+                    .home
+                    .ok_or(SimError::new("no_home", "rented room", "homeless"))?;
+                if pos != home {
+                    return Err(SimError::new("not_home", "your room", "elsewhere"));
+                }
+                // Rest to next 06:00. The slept hours cost nothing beyond
+                // this act; crossing midnight still owes rent next apply.
+                let day_min = self.tick % 1440;
+                self.tick += if day_min < 360 {
+                    360 - day_min
+                } else {
+                    1440 - day_min + 360
+                };
+                kind = "slept";
+            }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
                     return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
@@ -788,6 +818,11 @@ impl World {
                     })
                     .ok_or(SimError::new("no_shop", "shop counter", "none here"))?;
                 let shop = &mut shop.shop;
+                // Shuttered counters don't sell (game hour matches NPC time).
+                let hour = ((self.tick / 60) % 24) as u8;
+                if !shop.is_open(hour) {
+                    return Err(SimError::new("shuttered", "open hours", "closed"));
+                }
                 let acct = self
                     .accts
                     .get(&intent.actor.0)
@@ -1690,6 +1725,76 @@ mod tests {
         w.set_needs(EntityId(1), 80, 70, -200, 3);
         assert!(w.advise(EntityId(1)).contains("In debt"));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn shuttered_counters_refuse_but_morning_serves() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 5000).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("ration", 100, 5, 2, 5, 50);
+        shop.set_hours(8, 20);
+        w.place_shop(8, 8, shop);
+        // 23:00: shuttered, money untouched.
+        w.tick = 23 * 60;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Buy("ration".into()),
+            })
+            .is_err());
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 200);
+        // 09:00: open for business.
+        w.tick = 9 * 60;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("ration".into()),
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().3, 4);
+    }
+
+    #[test]
+    fn sleep_rests_to_morning_without_needs_cost() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 10);
+        // No room on record: homeless.
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Sleep,
+            })
+            .is_err());
+        w.set_home(pos(8, 8));
+        // Away from home: refused.
+        w.beings.get_mut(&1).unwrap().pos = pos(9, 8);
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Sleep,
+            })
+            .is_err());
+        // Home at 16:40: rest to next 06:00. Align the clock first so
+        // frozen-chunk catch-up doesn't confound the slept hours.
+        w.beings.get_mut(&1).unwrap().pos = pos(8, 8);
+        w.set_needs(EntityId(1), 80, 70, 200, 3);
+        w.tick = 16 * 60 + 40;
+        w.beings.get_mut(&1).unwrap().next_at = w.tick;
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Sleep,
+        })
+        .unwrap();
+        assert_eq!((w.tick - 1) % 1440, 360);
+        let (food, mood, _, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!((food, mood), (79, 69));
     }
 
     #[test]

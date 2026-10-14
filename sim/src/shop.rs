@@ -20,6 +20,16 @@ pub struct Stock {
 pub struct Shop {
     pub till: u64,
     pub stock: BTreeMap<String, Stock>,
+    /// Opening hour (inclusive) in game hours. Default 0 for old saves.
+    #[serde(default)]
+    pub open_hour: u8,
+    /// Closing hour (exclusive) in game hours. Default 24 (open all day).
+    #[serde(default = "close_of_day")]
+    pub close_hour: u8,
+}
+
+fn close_of_day() -> u8 {
+    24
 }
 
 impl Shop {
@@ -27,6 +37,8 @@ impl Shop {
         Self {
             till,
             stock: BTreeMap::new(),
+            open_hour: 0,
+            close_hour: close_of_day(),
         }
     }
 
@@ -109,6 +121,26 @@ impl Shop {
         Ok(())
     }
 
+    /// Opening hours in game hours, half-open [open, close) on the
+    /// 24-hour clock. Overnight ranges (close <= open) stay open past
+    /// midnight; 0–24 never shuts.
+    pub fn set_hours(&mut self, open: u8, close: u8) {
+        self.open_hour = open.min(24);
+        self.close_hour = close.min(24);
+    }
+
+    /// True when the counter serves at this game hour.
+    pub fn is_open(&self, hour: u8) -> bool {
+        if self.open_hour == 0 && self.close_hour == 24 {
+            return true;
+        }
+        if self.close_hour <= self.open_hour {
+            hour >= self.open_hour || hour < self.close_hour
+        } else {
+            hour >= self.open_hour && hour < self.close_hour
+        }
+    }
+
     /// Catalogue auto-order: restock every line below threshold that the
     /// till can cover. Returns restocked item ids.
     pub fn auto_order(&mut self, ledger: &mut Ledger, supplier: u64) -> Vec<String> {
@@ -180,6 +212,29 @@ mod tests {
         // Sold out refuses even with exact cash.
         assert!(s.buy_with_cash(&mut l, buyer, 100, "ration").is_err());
         assert_eq!(l.live_sum(), l.audit_sum());
+    }
+
+    #[test]
+    fn opening_hours_gate_service() {
+        let (_, _, _, till, mut s) = setup();
+        // Default construction serves round the clock (legacy behavior).
+        let fresh = Shop::new(till);
+        assert!(fresh.is_open(0) && fresh.is_open(12) && fresh.is_open(23));
+        // Day shop 8-20: boundary hours inclusive start, exclusive end.
+        s.set_hours(8, 20);
+        assert!(!s.is_open(7));
+        assert!(s.is_open(8));
+        assert!(s.is_open(19));
+        assert!(!s.is_open(20));
+        assert!(!s.is_open(0));
+        // Overnight range wraps past midnight.
+        s.set_hours(20, 4);
+        assert!(s.is_open(22));
+        assert!(s.is_open(0));
+        assert!(!s.is_open(10));
+        // Clamp garbage to the 24-hour dial.
+        s.set_hours(30, 99);
+        assert_eq!((s.open_hour, s.close_hour), (24, 24));
     }
 
     #[test]
