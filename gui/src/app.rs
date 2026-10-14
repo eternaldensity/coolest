@@ -721,8 +721,13 @@ impl Shell {
                     }
                 }
                 if ui.button("Damage wire 1-2").clicked() {
-                    match self.server.world.net.damage_wire(HostId(1), HostId(2)) {
-                        Ok(()) => self.say("wire 1-2 damaged".to_string()),
+                    // Server-routed act: logged for replay, refused with
+                    // the link's reason when there is nothing to damage.
+                    match self.server.apply_one(Intent {
+                        actor: self.actor,
+                        verb: Verb::DamageWire(HostId(1), HostId(2)),
+                    }) {
+                        Ok(_) => self.say("wire 1-2 damaged".to_string()),
                         Err(e) => self.say(format!("damage failed: {e}")),
                     }
                 }
@@ -1064,6 +1069,39 @@ mod tests {
             h.tap_key(egui::Key::Enter);
             h.pass_with(vec![]);
             assert_eq!((h.shell.server.world.tick - 1) % 1440, 360);
+        }
+
+        #[test]
+        fn damage_wire_button_damages_through_server() {
+            let mut h = Harness::new();
+            assert!(h.shell.server.world.net.route(HostId(1), HostId(3)).is_ok());
+            let at = h.button_center("Net");
+            h.click(at);
+            let at = h.button_center("Damage wire 1-2");
+            h.click(at);
+            let tail: Vec<&str> = h
+                .shell
+                .log
+                .iter()
+                .rev()
+                .take(2)
+                .map(|s| s.as_str())
+                .collect();
+            assert!(
+                tail.iter().any(|l| l.contains("wire 1-2 damaged")),
+                "log tail: {tail:?}"
+            );
+            assert!(h.has_text("wire 1-2 damaged"), "text: {:?}", h.labels());
+            // Host 1 is isolated through the same world the server owns:
+            // the act was logged, not applied behind the server's back.
+            assert!(h
+                .shell
+                .server
+                .world
+                .net
+                .route(HostId(1), HostId(3))
+                .is_err());
+            assert_eq!(h.shell.server.log.len(), 1);
         }
 
         #[test]
