@@ -44,6 +44,10 @@ pub enum Verb {
     /// Sleep in the rented room until 06:00. No needs cost beyond this
     /// act itself; rent still accrues past midnight.
     Sleep,
+    /// Sabotage a wired link in the world graph (design/04). Routed
+    /// through the server like any act: logged for replay, refused
+    /// with the link's reason when there is nothing to damage.
+    DamageWire(HostId, HostId),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -757,6 +761,10 @@ impl World {
                     1440 - day_min + 360
                 };
                 kind = "slept";
+            }
+            Verb::DamageWire(from, to) => {
+                self.net.damage_wire(from, to)?;
+                kind = "damaged";
             }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
@@ -1795,6 +1803,48 @@ mod tests {
         assert_eq!((w.tick - 1) % 1440, 360);
         let (food, mood, _, _) = w.needs(EntityId(1)).unwrap();
         assert_eq!((food, mood), (79, 69));
+    }
+
+    #[test]
+    fn damage_wire_cuts_route_and_refuses_laser() {
+        use crate::net::{LinkKind, NetKind};
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+        w.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+        w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+        w.net
+            .add_link(
+                HostId(1),
+                HostId(2),
+                LinkKind::Wired { damaged: false },
+                5,
+                0,
+            )
+            .unwrap();
+        w.net
+            .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+            .unwrap();
+        assert!(w.net.route(HostId(1), HostId(3)).is_ok());
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DamageWire(HostId(1), HostId(2)),
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("damaged"));
+        // Host 1 is isolated now; laser links stay untouchable.
+        assert!(w.net.route(HostId(1), HostId(3)).is_err());
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DamageWire(HostId(2), HostId(3)),
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "untouchable");
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
     #[test]
