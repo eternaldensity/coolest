@@ -195,7 +195,18 @@ impl Shell {
         shop.add_line("ration", 100, 5, 2, 5, 200);
         shop.add_line("meds", 400, 2, 1, 3, 900);
         shop.add_line("firewall", 1500, 1, 1, 1, 1200);
+        shop.set_hours(8, 20);
         server.world.place_shop(10, 8, shop);
+        // Night store three doors down: always open, steeper prices for
+        // the graveyard shift. Same till owner, separate account.
+        let night_till = server.world.open_account(EntityId(10), HostId(1)).unwrap();
+        let mut night = sim::Shop::new(night_till);
+        night.add_line("ration", 150, 3, 2, 3, 300);
+        night.add_line("meds", 600, 2, 1, 2, 1200);
+        night.set_hours(0, 24);
+        server.world.place_shop(13, 8, night);
+        // Rented room above the noodle shop (design/01): sleep here.
+        server.world.set_home(pos(8, 8));
         let mut shell = Self {
             server,
             actor,
@@ -231,13 +242,12 @@ impl Shell {
     }
 
     fn do_verb(&mut self, verb: Verb) {
-        self.server.submit(Intent {
+        let intent = Intent {
             actor: self.actor,
             verb,
-        });
-        let out = self.server.step();
-        if out.is_empty() {
-            self.say("rejected (timing/lockout?)".to_string());
+        };
+        if let Err(e) = self.server.apply_one(intent) {
+            self.say(format!("rejected: {e}"));
         }
         self.say_status();
     }
@@ -247,10 +257,11 @@ impl Shell {
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk · deposit/withdraw <c>"
+                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
+            "sleep" => self.do_verb(Verb::Sleep),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             _ if cmd.starts_with("deposit ") => match cmd[8..].trim().parse::<i64>() {
                 Ok(amt) => self.do_verb(Verb::Deposit(amt)),
@@ -469,6 +480,9 @@ impl eframe::App for Shell {
                     }
                     if ui.button("Watch").clicked() {
                         self.do_verb(Verb::Watch);
+                    }
+                    if ui.button("Sleep").clicked() {
+                        self.do_verb(Verb::Sleep);
                     }
                 });
                 ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
@@ -792,5 +806,31 @@ mod tests {
         let mut s2 = Server::new(1);
         assert_eq!(persist_load(&mut s2), "loaded");
         assert_eq!(s2.world.snapshot_hash(), hash);
+    }
+
+    #[test]
+    fn demo_world_has_night_store_home_and_hours() {
+        let mut shell = Shell::new(None);
+        let w = &shell.server.world;
+        // Day shop keeps day hours; night store never shuts, prices steeper.
+        let day = w.shop_at(10, 8).expect("day shop placed");
+        assert!(!day.is_open(3) && day.is_open(10));
+        let night = w.shop_at(13, 8).expect("night store placed");
+        assert!(night.is_open(3) && night.is_open(12));
+        assert!(night.stock["ration"].price_cents > day.stock["ration"].price_cents);
+        assert!(night.stock["meds"].price_cents > day.stock["meds"].price_cents);
+        // Corridor row stays walkable from spawn to the night store.
+        let s = w.section_at(0, 0).expect("spawn section generated");
+        assert!((8..=13).all(|x| s.walkable(x, 8)));
+        // Home room sleeps through to morning.
+        let w = &mut shell.server.world;
+        w.tick = 23 * 60;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Sleep,
+        })
+        .unwrap();
+        assert_eq!((w.tick - 1) % 1440, 360);
     }
 }
