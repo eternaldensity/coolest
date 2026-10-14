@@ -39,13 +39,14 @@ Expected demo tail:
 ```text
 survival: food  99  mood  77  $2.30 rations=2
 deck: CPU 0/100 (0%) killed=true
+warden: guard=true traced=true foothold=true
 net: 1→3 45ms toll $0.10 cap=10 gateway_ok=true trace_thr=8
 ledger: a=700 b=300 audit_ok=true
 mail: inbox=1
 crime: align=Untrusted standing=Fined
 license eligible (dirty record) = false
 veil: present after death = false
-funnel: funnel started=0 job=0 hack=21 traced=- survived=-
+funnel: funnel started=0 job=0 hack=21 traced=21 survived=-
 demo ok, log lines = 2
 ```
 

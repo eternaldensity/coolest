@@ -85,6 +85,21 @@ fn main() {
         ram_total: h.cpu_total,
     }));
 
+    // M2d retaliation: a defended rig hunts intruders and traces them.
+    let mut dh = Host::new(HostId(9), 12, 8, 100);
+    dh.set_owner(Some(Host::WARDEN));
+    dh.set_monitor(true);
+    dh.load(EntityId(70), EntityId(1), CellPos(2, 2), 3, 1)
+        .unwrap();
+    let ward = dh.retaliate();
+    w.mark_traced(EntityId(1));
+    println!(
+        "warden: guard={} traced={} foothold={}",
+        ward.warden,
+        ward.traced,
+        dh.progs.contains_key(&70)
+    );
+
     // M3 net route.
     let mut g = NetGraph::new();
     g.add_node(HostId(1), NetKind::Oldnet, 10, false);

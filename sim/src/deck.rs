@@ -143,6 +143,27 @@ pub struct Host {
     // Installed packet filter (design/04): inbound traces crawl at +1/tick.
     #[serde(default)]
     firewall: bool,
+    // Nominal owner of this rig. A monitored, owned rig retaliates against
+    // programs owned by anyone else; unowned rigs stay quiet (wild boxes).
+    // Defaults to None so old saves and fresh arenas behave as before.
+    #[serde(default)]
+    owner: Option<EntityId>,
+}
+
+/// What one retaliation beat did. Clients use `traced` to mark funnel
+/// milestones and `killed`/`burned` to narrate.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Retaliation {
+    /// A warden stands guard (freshly spawned or already posted).
+    pub warden: bool,
+    /// A trace opened on an intruder this beat.
+    pub traced: bool,
+    /// The warden struck something this beat.
+    pub struck: bool,
+    /// The warden killed a program this beat.
+    pub killed: bool,
+    /// A completed trace burned a program this beat.
+    pub burned: bool,
 }
 
 impl Host {
@@ -165,6 +186,7 @@ impl Host {
             monitor_armed: false,
             flagged: false,
             firewall: false,
+            owner: None,
         }
     }
 
@@ -508,6 +530,164 @@ impl Host {
 
     pub fn set_monitor(&mut self, armed: bool) {
         self.monitor_armed = armed;
+    }
+
+    /// Claim this rig for a defender (or release it with None). Only a
+    /// monitored, owned rig retaliates; see `retaliate`.
+    pub fn set_owner(&mut self, owner: Option<EntityId>) {
+        self.owner = owner;
+    }
+
+    pub fn owner(&self) -> Option<EntityId> {
+        self.owner
+    }
+
+    /// Reserved system identity that owns defended rigs and their wardens.
+    /// Never spawn it: ownership and warden programs address it directly.
+    pub const WARDEN: EntityId = EntityId(u64::MAX - 1);
+
+    /// Inbound-trace threshold retaliation opens on intruders.
+    pub const TRACE_THRESHOLD: u32 = 6;
+
+    /// One AI defense beat for a monitored, owned rig: tick an active trace
+    /// (completion burns the program), open a trace on the first intruder,
+    /// post a warden owned by the defender, and hunt one step (strike an
+    /// adjacent intruder head, else close a BFS step). Unowned or
+    /// unmonitored rigs stay quiet; full or CPU-starved arenas skip the
+    /// warden gracefully. Deterministic: same state, same beat.
+    pub fn retaliate(&mut self) -> Retaliation {
+        let mut out = Retaliation::default();
+        let defender = match self.owner {
+            Some(o) => o,
+            None => return out,
+        };
+        if !self.monitor_armed {
+            return out;
+        }
+        // 1. Advance an active trace; completion burns the program.
+        if self.trace.is_some() && self.tick_trace(false) {
+            if let Some(t) = self.trace.take() {
+                if self.progs.contains_key(&t.target.0) {
+                    self.remove_program(t.target);
+                    out.burned = true;
+                }
+            }
+        }
+        // Intruders: live programs owned by anyone but the defender,
+        // lowest program id first for determinism.
+        let mut targets: Vec<(EntityId, CellPos)> = self
+            .progs
+            .values()
+            .filter(|p| p.owner != defender)
+            .map(|p| (p.id, p.head))
+            .collect();
+        if targets.is_empty() {
+            out.warden = self.progs.values().any(|p| p.owner == defender);
+            return out;
+        }
+        targets.sort_by_key(|(id, _)| id.0);
+        // 2. Open a trace on the first intruder if none running.
+        if self.trace.is_none()
+            && self
+                .start_trace(targets[0].0, Self::TRACE_THRESHOLD)
+                .is_ok()
+        {
+            out.traced = true;
+        }
+        // 3. Ensure the warden stands guard under defender colors.
+        let ward = match self.progs.values().find(|p| p.owner == defender) {
+            Some(p) => p.id,
+            None => {
+                let id = match (1u64..=1024)
+                    .map(EntityId)
+                    .find(|i| !self.progs.contains_key(&i.0))
+                {
+                    Some(id) => id,
+                    None => return out,
+                };
+                let mut spot = None;
+                for y in 0..self.h {
+                    for x in 0..self.w {
+                        if self.free(CellPos(x, y)) {
+                            spot = Some(CellPos(x, y));
+                            break;
+                        }
+                    }
+                    if spot.is_some() {
+                        break;
+                    }
+                }
+                match spot {
+                    Some(at) => {
+                        if self.load(id, defender, at, 2, 1).is_err() {
+                            return out;
+                        }
+                        id
+                    }
+                    None => return out,
+                }
+            }
+        };
+        out.warden = true;
+        // 4. Hunt: strike an adjacent intruder head, else close one step.
+        let Some(hhead) = self.progs.get(&ward.0).map(|p| p.head) else {
+            return out;
+        };
+        let near = |a: CellPos, b: CellPos| {
+            (a.0 as i16 - b.0 as i16).abs() + (a.1 as i16 - b.1 as i16).abs() == 1
+        };
+        if let Some((_, vhead)) = targets.iter().find(|(_, vh)| near(*vh, hhead)) {
+            if let Ok(killed) = self.strike(*vhead) {
+                out.struck = true;
+                out.killed = killed;
+            }
+        } else {
+            let goals: Vec<CellPos> = targets.iter().map(|(_, h)| *h).collect();
+            if let Some(step) = self.hunt_step(hhead, &goals) {
+                let _ = self.step(ward, step);
+            }
+        }
+        out
+    }
+
+    /// One BFS step from `from` over free cells toward adjacency with any
+    /// goal head. None when already adjacent (strike instead) or when no
+    /// reachable adjacent cell exists.
+    fn hunt_step(&self, from: CellPos, goals: &[CellPos]) -> Option<CellPos> {
+        let near = |x: u8, y: u8| {
+            goals
+                .iter()
+                .any(|g| (g.0 as i16 - x as i16).abs() + (g.1 as i16 - y as i16).abs() == 1)
+        };
+        let mut prev: BTreeMap<(u8, u8), (u8, u8)> = BTreeMap::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(from);
+        prev.insert((from.0, from.1), (from.0, from.1));
+        while let Some(CellPos(x, y)) = queue.pop_front() {
+            for (dx, dy) in [(0i16, -1), (0, 1), (1, 0), (-1, 0)] {
+                let (nx, ny) = (x as i16 + dx, y as i16 + dy);
+                if nx < 0 || ny < 0 || nx >= self.w as i16 || ny >= self.h as i16 {
+                    continue;
+                }
+                let (nx, ny) = (nx as u8, ny as u8);
+                if !self.free(CellPos(nx, ny)) || prev.contains_key(&(nx, ny)) {
+                    continue;
+                }
+                prev.insert((nx, ny), (x, y));
+                if near(nx, ny) {
+                    let mut cur = (nx, ny);
+                    while let Some(&p) = prev.get(&cur) {
+                        if p == (from.0, from.1) {
+                            return Some(CellPos(cur.0, cur.1));
+                        }
+                        cur = p;
+                    }
+                    return None;
+                }
+                queue.push_back(CellPos(nx, ny));
+            }
+        }
+        None
     }
 
     // ---- M2b: resources, paired stats, next-turn effects ----
@@ -950,6 +1130,68 @@ mod tests {
         assert_eq!(ticks, 5);
         h.set_firewall(false);
         assert!(!h.firewall());
+    }
+
+    #[test]
+    fn quiet_boxes_dont_retaliate() {
+        // No owner, monitor armed: intruders go unanswered.
+        let mut h = host();
+        h.set_monitor(true);
+        h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1)
+            .unwrap();
+        assert_eq!(h.retaliate(), Retaliation::default());
+        assert!(h.progs.values().all(|p| p.owner == EntityId(1)));
+        // Owned but unmonitored: still quiet (stealth on cold boxes).
+        h.set_owner(Some(EntityId(7)));
+        h.set_monitor(false);
+        assert_eq!(h.retaliate(), Retaliation::default());
+    }
+
+    #[test]
+    fn defended_host_spawns_warden_and_traces() {
+        let mut h = host();
+        h.set_owner(Some(EntityId(7)));
+        h.set_monitor(true);
+        h.load(EntityId(10), EntityId(1), CellPos(5, 5), 3, 1)
+            .unwrap();
+        let r = h.retaliate();
+        assert!(r.warden && r.traced);
+        assert!(!r.killed && !r.burned);
+        // Warden stands guard under defender colors; trace is running.
+        assert!(h.progs.values().any(|p| p.owner == EntityId(7)));
+        // Defender-owned programs are never targets.
+        h.load(EntityId(11), EntityId(7), CellPos(8, 7), 2, 1)
+            .unwrap();
+        let r = h.retaliate();
+        assert!(!r.traced);
+    }
+
+    #[test]
+    fn warden_hunts_to_kill_and_trace_burns() {
+        let mut h = host();
+        h.set_owner(Some(EntityId(7)));
+        h.set_monitor(true);
+        // Near intruder (killed fast) plus far intruder (burned by trace).
+        h.load(EntityId(10), EntityId(1), CellPos(0, 0), 1, 1)
+            .unwrap();
+        h.load(EntityId(11), EntityId(1), CellPos(11, 7), 1, 1)
+            .unwrap();
+        let (mut saw_trace, mut saw_kill, mut saw_burn, mut beats) = (false, false, false, 0);
+        while h.progs.values().any(|p| p.owner == EntityId(1)) && beats < 60 {
+            let r = h.retaliate();
+            saw_trace = saw_trace || r.traced;
+            saw_kill = saw_kill || r.killed;
+            saw_burn = saw_burn || r.burned;
+            beats += 1;
+        }
+        assert!(saw_trace && saw_kill && saw_burn, "beats={beats}");
+        assert!(
+            !h.progs.values().any(|p| p.owner == EntityId(1)),
+            "intruders cleared in {beats} beats"
+        );
+        assert!(beats < 60);
+        // Warden stands guard afterward.
+        assert!(h.progs.values().any(|p| p.owner == EntityId(7)));
     }
 
     #[test]

@@ -39,7 +39,9 @@ both bars down:
    unbreakable but charges per hop. Crossing Oldnet↔Betanet needs a gateway.
 2. **Deck:** load programs onto free cells. Programs have a **head** (moves)
    and **tail** (hit points). Hit the tail to shrink, hit the head to kill.
-   Watch **CPU**: over budget blocks new loads and growth.
+   Watch **CPU**: over budget blocks new loads and growth. World host 1 is
+   defended: your loads draw a **warden** that hunts them and a **trace** —
+   strike fast, and scrub or outrun it.
 3. **Get out clean:** every hop logged you. Go back and **scrub** each log
    (needs one of your programs on that host), or outrun the **trace** —
    scramblers halve its speed.

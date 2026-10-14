@@ -7,7 +7,7 @@ use client_web::status_line;
 use eframe::egui;
 use server::Server;
 use sim::{
-    cop_duty, CellPos, Dir, EntityId, HostId, Intent, LinkKind, NetKind, Pos, Role, Standing,
+    cop_duty, CellPos, Dir, EntityId, Host, HostId, Intent, LinkKind, NetKind, Pos, Role, Standing,
     Timetable, Verb,
 };
 use std::collections::BTreeMap;
@@ -160,6 +160,11 @@ impl Shell {
             .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
             .ok();
         server.world.ensure_host(HostId(1));
+        // World host 1 is a defended range rig: loading foreign programs
+        // draws a warden and a trace (M2 retaliation, always on).
+        let range = server.world.ensure_host(HostId(1));
+        range.set_owner(Some(Host::WARDEN));
+        range.set_monitor(true);
         // Jobs drive both mechanics and button labels (data/jobs.yaml).
         let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap_or_default();
         if !jobs.is_empty() {
@@ -261,6 +266,22 @@ impl Shell {
             "work 1" => self.do_verb(Verb::Work(1)),
             "" => {}
             _ => self.say(format!("unknown: {cmd}")),
+        }
+    }
+
+    /// One defense beat on the range rig after a deck action: the warden
+    /// answers foreign programs, and a fresh trace marks the funnel.
+    fn answer_range(&mut self) {
+        let r = self.server.world.ensure_host(HostId(1)).retaliate();
+        if r.traced {
+            self.server.world.mark_traced(self.actor);
+            self.say("trace started on your program — scrub or outrun it".to_string());
+        }
+        if r.killed {
+            self.say("warden killed one of your programs".to_string());
+        }
+        if r.burned {
+            self.say("trace completed — program burned".to_string());
         }
     }
 
@@ -586,7 +607,7 @@ impl eframe::App for Shell {
             }
             Tab::Deck => {
                 ui.heading("Deck — world host 1");
-                ui.label("H program head (kill it) · o tail (hit points) · click a cell, then Load/Strike");
+                ui.label("H program head (kill it) · o tail (hit points) · click a cell, then Load/Strike · warden defends this rig");
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
                         let msg = match self.sel {
@@ -601,6 +622,7 @@ impl eframe::App for Shell {
                             None => "click a cell first".to_string(),
                         };
                         self.say(msg);
+                        self.answer_range();
                     }
                     if ui.button("Strike selected").clicked() {
                         let msg = match self.sel {
@@ -623,6 +645,7 @@ impl eframe::App for Shell {
                             None => "click a cell first".to_string(),
                         };
                         self.say(msg);
+                        self.answer_range();
                     }
                 });
                 // Snapshot arena state up front: buttons below need &mut self.
