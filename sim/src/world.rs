@@ -86,6 +86,14 @@ pub enum Verb {
     Code {
         res: crate::deck::Res,
     },
+    /// Deploy a producer program on your rig (design/10: creatures
+    /// auto-produce). Loads at the cell, marks it a maker for `res`, and
+    /// then it yields its rate every successful act, free.
+    DeckFarm {
+        x: u8,
+        y: u8,
+        res: crate::deck::Res,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +181,17 @@ const WATCH_COST: i64 = 30;
 /// Manual coding cost (design/10): one unit per act at a small mood price,
 /// so deck producers (free per act) are the real answer for higher tiers.
 const CODE_MOOD_COST: u8 = 2;
+
+/// Producer tier (design/10: "higher tier = faster but hungrier for
+/// CPU/RAM"): (max_len, cpu_per_seg, units per act). A fresh producer is a
+/// single cell, so it costs `1 + cpu_per_seg` CPU: 2 / 3 / 5 respectively.
+fn farm_params(res: crate::deck::Res) -> (u8, u8, u8) {
+    match res {
+        crate::deck::Res::Loop => (2, 1, 3),
+        crate::deck::Res::Data => (3, 2, 2),
+        crate::deck::Res::Algo => (4, 4, 2),
+    }
+}
 /// Daily rent (design/04: rent is a burn sink). Provisional tuning: one day
 /// is 1440 ticks; medians from human sessions should set the real number.
 const DAY_TICKS: u64 = 1440;
@@ -1011,6 +1030,27 @@ impl World {
                 b.mood = b.mood.saturating_sub(CODE_MOOD_COST);
                 kind = "coded";
             }
+            Verb::DeckFarm { x, y, res } => {
+                let (max_len, cpu, rate) = farm_params(res);
+                let id = {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    EntityId(100 + host.progs.len() as u64)
+                };
+                let host = self.hosts.get_mut(&1).unwrap();
+                host.load(id, intent.actor, CellPos(x, y), max_len, cpu)?;
+                host.set_maker(id, vec![res], rate)?;
+                kind = "farmed";
+                extra_kinds = Self::deck_beat(
+                    self.hosts.get_mut(&1).unwrap(),
+                    &mut self.funnel,
+                    self.tick,
+                    intent.actor,
+                    false,
+                );
+            }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
                     return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
@@ -1139,6 +1179,13 @@ impl World {
         };
         b.next_at = self.tick + eff;
         self.sched.schedule(intent.actor, b.next_at);
+        // Passive production (design/10): your rig's makers yield on every
+        // successful act. In-act, so replay reproduces it exactly.
+        if let Some(host) = self.hosts.get_mut(&1) {
+            if !host.tick_makers(intent.actor).is_empty() {
+                extra_kinds.push("produced".to_string());
+            }
+        }
         // Funnel: protagonist claimed on first applied act; job on first Work.
         self.funnel.claim(intent.actor);
         if self.funnel.started.is_none() {
@@ -2351,6 +2398,85 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.bank_balance(EntityId(1)), Some(100));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn farm_makers_produce_free_each_act() {
+        use crate::deck::Res;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let range = w.ensure_host(HostId(1));
+        range.set_owner(Some(crate::deck::Host::WARDEN));
+        range.set_monitor(true);
+        // Farm a loop producer: act kind farmed, and it yields 3/act free.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckFarm {
+                    x: 5,
+                    y: 5,
+                    res: Res::Loop,
+                },
+            })
+            .unwrap();
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds.first(), Some(&"farmed"), "kinds: {kinds:?}");
+        // The farm act itself already ticks the maker once.
+        assert_eq!(w.units(EntityId(1), Res::Loop), 3);
+        // Two more acts (Wait) yield 3 each, with a produced event.
+        for _ in 0..2 {
+            w.tick = w.next_at(EntityId(1));
+            let (_, ev) = w
+                .apply(&Intent {
+                    actor: EntityId(1),
+                    verb: Verb::Wait,
+                })
+                .unwrap();
+            assert!(ev.iter().any(|e| e.kind == "produced"), "{ev:?}");
+        }
+        assert_eq!(w.units(EntityId(1), Res::Loop), 9);
+        // Producer program is on the rig and costs its tier CPU (the
+        // defended host also holds a warden, so count only our own).
+        let h = w.host(HostId(1)).unwrap();
+        let mine: u32 = h
+            .progs
+            .values()
+            .filter(|p| p.owner == EntityId(1))
+            .map(|p| 1 + p.len() as u32 * p.cpu_per_seg as u32)
+            .sum();
+        assert_eq!(mine, 2, "loop maker costs 2 CPU");
+        assert!(h.progs.values().any(|p| p.owner == EntityId(1)));
+        // Refused acts do not tick the maker (Work 4 needs algo we lack).
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Work(4),
+            })
+            .is_err());
+        assert_eq!(w.units(EntityId(1), Res::Loop), 9, "no yield on refusal");
+        // Higher tiers cost more CPU and yield their own rate.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckFarm {
+                x: 6,
+                y: 5,
+                res: Res::Algo,
+            },
+        })
+        .unwrap();
+        assert_eq!(w.units(EntityId(1), Res::Algo), 2);
+        let h = w.host(HostId(1)).unwrap();
+        let mine: u32 = h
+            .progs
+            .values()
+            .filter(|p| p.owner == EntityId(1))
+            .map(|p| 1 + p.len() as u32 * p.cpu_per_seg as u32)
+            .sum();
+        assert_eq!(mine, 2 + 5, "loop 2 + algo 5 CPU");
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 

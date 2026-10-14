@@ -422,6 +422,12 @@ impl Shell {
                     .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
                     .unwrap_or_else(|| "bank —".to_string());
                 ui.label(bank);
+                let units = sim::Res::ALL
+                    .iter()
+                    .map(|r| format!("{} {}", r.name(), self.server.world.units(self.actor, *r)))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                ui.label(format!("components: {units}"));
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 let tick = self.server.world.tick;
                 ui.label(format!(
@@ -724,6 +730,26 @@ impl Shell {
                         self.say(msg);
                         for line in beat {
                             self.say(line);
+                        }
+                    }
+                });
+                // Producers (design/10): deploy a maker on the selected cell.
+                // It then yields free units every act.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Farm @selected:");
+                    for res in sim::Res::ALL {
+                        if ui.button(format!("Farm {}", res.name())).clicked() {
+                            let msg = match self.sel {
+                                Some((x, y)) => match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::DeckFarm { x, y, res },
+                                }) {
+                                    Ok(_) => format!("farmed {} @({x},{y})", res.name()),
+                                    Err(e) => format!("farm failed: {e}"),
+                                },
+                                None => "click a cell first".to_string(),
+                            };
+                            self.say(msg);
                         }
                     }
                 });
@@ -1546,6 +1572,37 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn farm_then_units_accrue_free_and_show() {
+            let mut h = Harness::new();
+            assert!(
+                h.has_text("components: loop 0 · data 0 · algo 0"),
+                "text: {:?}",
+                h.labels()
+            );
+            h.click("Deck");
+            // Select a cell, then farm a loop producer there.
+            h.click_last(".");
+            h.click("Farm loop");
+            assert!(h.has_text("farmed loop"), "text: {:?}", h.labels());
+            assert!(
+                h.has_text("components: loop 3 · data 0 · algo 0"),
+                "text: {:?}",
+                h.labels()
+            );
+            // Any further act yields free units, with no extra clicks.
+            h.click("Street");
+            h.click("Watch");
+            h.click("Watch");
+            assert!(
+                h.has_text("components: loop 9 · data 0 · algo 0"),
+                "text: {:?}",
+                h.labels()
+            );
+            // Farm + two watches are all logged acts.
+            assert_eq!(h.shell.server.log.len(), 3);
         }
 
         #[test]

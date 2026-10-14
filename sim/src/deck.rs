@@ -780,6 +780,31 @@ impl Host {
         *e
     }
 
+    /// Passive production (design/10: "creatures auto-produce faster + free
+    /// player"): every live maker program the owner controls yields its
+    /// declared rate into the owner's stock. Returns the per-resource
+    /// totals produced this beat (sorted for determinism).
+    pub fn tick_makers(&mut self, owner: EntityId) -> Vec<(Res, u32)> {
+        // Snapshot the makers first so the stock mutation below is a
+        // separate borrow (programs can be added/removed between acts).
+        let makers: Vec<(Vec<Res>, u8)> = self
+            .progs
+            .values()
+            .filter(|p| p.owner == owner)
+            .filter_map(|p| self.makers.get(&p.id.0).cloned())
+            .collect();
+        let mut made: BTreeMap<Res, u32> = BTreeMap::new();
+        for (makes, rate) in makers {
+            for r in makes {
+                *made.entry(r).or_insert(0) += rate as u32;
+            }
+        }
+        for (r, n) in &made {
+            self.add_stock(owner, *r, *n);
+        }
+        made.into_iter().collect()
+    }
+
     fn spend(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {
         let e = self
             .stocks
