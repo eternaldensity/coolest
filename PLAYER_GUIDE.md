@@ -1,8 +1,10 @@
 # New Player Guide — FIDOM: Future Internet Domains of Mayhem
 
 > Status: sim + headless client playable via `cargo run -p client-web`;
-> desktop shell via `cargo run -p gui`; web shell via `cd gui && trunk serve`
-> (Street/Deck/Net views browser-verified 2026-10-06).
+> desktop shell via `cargo run -p gui`; web shell via `cd gui && trunk serve`.
+> All four views have server-routed acts and headless UI tests
+> (accesskit, no screenshots); Street/Deck/Net were browser-verified
+> 2026-10-06, Veil arrived after.
 
 ## The pitch
 
@@ -44,14 +46,17 @@ both bars down:
 - **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize hosts,
   `Eject` (light drain). Death ejects instead of killing.
 
-## The four views (Tab to switch, when the GUI lands)
+## The four views (Tab to switch)
 
-| View | What | Verbs |
-|------|------|-------|
-| Street | Tile streets, doors, shops | move / use / talk |
-| Net | Host graph, latency, tolls | scan / connect / route |
-| Deck | Inside one computer: RAM arena + files | load / move / strike / crack / patch |
-| Veil | VR overlay of the same rules | embody / transfer |
+| View | What | Verbs wired today |
+|------|------|-------------------|
+| Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / deposit / withdraw |
+| Net | Host graph, latency, tolls | route (preview) / damage wire |
+| Deck | Inside world host 1: RAM arena | load killer / strike (warden answers) |
+| Veil | Helmet space over the same rules | jack in / move / seize / eject |
+
+Aspirational verbs from the design (scan, connect, crack, patch, embody,
+transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 
 ## Hacking 101
 
@@ -92,10 +97,14 @@ both bars down:
 ## Controls today
 
 ```bash
-cargo run -p client-web   # scripted tour of all systems
-cargo test --workspace     # prove the rules hold (140 tests)
+cargo run -p gui            # desktop shell (eframe)
+cd gui && trunk serve       # browser shell (wasm)
+cargo run -p client-web     # scripted tour of all systems
+cargo test --workspace      # prove the rules hold (140 tests)
 ```
 
-Keys (`hjklyubn`, `>`, `<`, Tab, `Ctrl-K` palette) and the full pane layout
-(console/status/actions/notify/map) arrive with the GUI shell.
-See `design/09-ux-roadmap.md` for what lands in which milestone.
+Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
+console takes `eat | work 0/1 | watch | sleep | buy <item> | deposit/
+withdraw <c> | talk | help`. Panes: status + objective (left), tabs
+(top), console + log (bottom), view (center). Ctrl-K palette and
+`>`/`<` stairs are not wired yet — see `design/09-ux-roadmap.md`.
