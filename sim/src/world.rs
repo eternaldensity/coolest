@@ -1,6 +1,6 @@
 use crate::civic::{cop_duty, role_table, Role};
 use crate::crime::Standing;
-use crate::deck::Host;
+use crate::deck::{CellPos, Host};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 use crate::ledger::Ledger;
@@ -48,6 +48,18 @@ pub enum Verb {
     /// through the server like any act: logged for replay, refused
     /// with the link's reason when there is nothing to damage.
     DamageWire(HostId, HostId),
+    /// Load a killer program at an arena cell of world host 1, then
+    /// run warden retaliation in the same act (design/03).
+    DeckLoad {
+        x: u8,
+        y: u8,
+    },
+    /// Strike an arena cell of world host 1, then run warden
+    /// retaliation in the same act (design/03).
+    DeckStrike {
+        x: u8,
+        y: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -624,6 +636,42 @@ impl World {
         }
     }
 
+    /// Warden retaliation beat after a deck intrusion act (design/03):
+    /// runs the host's retaliation, records funnel marks, and returns
+    /// narrative event kinds for the caller to relay. Takes disjoint
+    /// pieces (not &mut self) so `apply` can call it beside its live
+    /// `beings` borrow.
+    fn deck_beat(
+        host: &mut Host,
+        funnel: &mut Funnel,
+        tick: u64,
+        actor: EntityId,
+        hacked: bool,
+    ) -> Vec<String> {
+        if hacked {
+            funnel.claim(actor);
+            if funnel.for_protagonist(actor) && funnel.hack.is_none() {
+                funnel.hack = Some(tick);
+            }
+        }
+        let r = host.retaliate();
+        let mut kinds = Vec::new();
+        if r.traced {
+            funnel.claim(actor);
+            if funnel.for_protagonist(actor) && funnel.traced.is_none() {
+                funnel.traced = Some(tick);
+            }
+            kinds.push("traced".to_string());
+        }
+        if r.killed {
+            kinds.push("warden_kill".to_string());
+        }
+        if r.burned {
+            kinds.push("trace_burned".to_string());
+        }
+        kinds
+    }
+
     /// One-line funnel report for demos and CLIs. `-` = milestone unreached.
     pub fn funnel_line(&self) -> String {
         let f = &self.funnel;
@@ -668,6 +716,7 @@ impl World {
             b.money -= RENT_CENTS;
         }
         let mut kind = "acted";
+        let mut extra_kinds: Vec<String> = Vec::new();
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -765,6 +814,47 @@ impl World {
             Verb::DamageWire(from, to) => {
                 self.net.damage_wire(from, to)?;
                 kind = "damaged";
+            }
+            Verb::DeckLoad { x, y } => {
+                // Field-disjoint with the live `beings` borrow below,
+                // like the Buy arm: no &mut self calls in this match.
+                let id = {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    EntityId(100 + host.progs.len() as u64)
+                };
+                self.hosts
+                    .get_mut(&1)
+                    .unwrap()
+                    .load(id, intent.actor, CellPos(x, y), 3, 1)?;
+                kind = "loaded";
+                extra_kinds = Self::deck_beat(
+                    self.hosts.get_mut(&1).unwrap(),
+                    &mut self.funnel,
+                    self.tick,
+                    intent.actor,
+                    false,
+                );
+            }
+            Verb::DeckStrike { x, y } => {
+                let killed = self
+                    .hosts
+                    .entry(1)
+                    .or_insert_with(|| Host::new(HostId(1), 12, 8, 100))
+                    .strike(CellPos(x, y))?;
+                if killed {
+                    extra_kinds.push("kill".to_string());
+                }
+                kind = "struck";
+                extra_kinds.extend(Self::deck_beat(
+                    self.hosts.get_mut(&1).unwrap(),
+                    &mut self.funnel,
+                    self.tick,
+                    intent.actor,
+                    killed,
+                ));
             }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
@@ -911,15 +1001,23 @@ impl World {
             }
         }
         self.tick += 1;
+        let mut events = vec![Event {
+            tick: self.tick,
+            actor: intent.actor,
+            kind: kind.into(),
+        }];
+        for k in extra_kinds {
+            events.push(Event {
+                tick: self.tick,
+                actor: intent.actor,
+                kind: k,
+            });
+        }
         Ok((
             Delta {
                 moved: vec![(intent.actor, pos)],
             },
-            vec![Event {
-                tick: self.tick,
-                actor: intent.actor,
-                kind: kind.into(),
-            }],
+            events,
         ))
     }
 
@@ -1844,6 +1942,51 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(err.kind, "untouchable");
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn deck_load_strike_run_retaliation_in_act() {
+        use crate::ids::HostId;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Defended rig like the demo world: warden owner + monitor.
+        let range = w.ensure_host(HostId(1));
+        range.set_owner(Some(crate::deck::Host::WARDEN));
+        range.set_monitor(true);
+        // Empty cell refuses.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckStrike { x: 5, y: 5 },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_target");
+        // Load a killer: act kind loaded, trace opens on the intruder.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckLoad { x: 5, y: 5 },
+            })
+            .unwrap();
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds.first(), Some(&"loaded"));
+        assert!(kinds.contains(&"traced"), "kinds: {kinds:?}");
+        assert!(!w.funnel_line().contains("traced=-"));
+        // Strike the head: kill reported, hack marked, ledger untouched.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckStrike { x: 5, y: 5 },
+            })
+            .unwrap();
+        let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds.first(), Some(&"struck"));
+        assert!(kinds.contains(&"kill"), "kinds: {kinds:?}");
+        assert!(!w.funnel_line().contains("hack=-"));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
