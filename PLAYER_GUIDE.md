@@ -19,9 +19,30 @@ both bars down:
 - **Work** a programming job → earns cash, costs mood + food.
 - **Eat** a ration → +30 food. No rations? Order more (online stores, M1).
 - **Watch** a show → +15 mood, costs $0.30.
+- **Sleep** in your rented room → rests to 06:00, no needs cost beyond
+  the act itself. Away from home (or with no room) it is refused.
 - At **zero food or mood, jobs lock out**; starving doubles how long
   everything takes. This is the whole early game: stay fed and cheerful
   enough to keep earning.
+
+## Shops, hours, and the night store
+
+- Counters serve adjacent tiles (`$`, gold). Day shop (8:00–20:00):
+  ration 100c, meds 400c, firewall 1500c. Shuttered counters refuse
+  with the reason shown — come back in the morning.
+- Night store three doors east stays open 24h at steeper prices
+  (ration 150c, meds 600c) for the graveyard shift.
+- Talk to the shopkeeper: `Trade` routes to the counter, no haggling.
+
+## Deck, Net, and Veil acts
+
+- **Deck:** click a cell, `Load killer` a program, `Strike` heads/tails.
+  The warden defends host 1 — intrusions draw a trace, and kills count
+  toward your record. Every act is logged; replays reproduce the arena.
+- **Net:** `Route 1→3` previews path/tolls; `Damage wire 1-2` sabotage
+  is a logged act (laser links refuse).
+- **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize hosts,
+  `Eject` (light drain). Death ejects instead of killing.
 
 ## The four views (Tab to switch, when the GUI lands)
 
@@ -72,7 +93,7 @@ both bars down:
 
 ```bash
 cargo run -p client-web   # scripted tour of all systems
-cargo test --workspace     # prove the rules hold (134 tests)
+cargo test --workspace     # prove the rules hold (140 tests)
 ```
 
 Keys (`hjklyubn`, `>`, `<`, Tab, `Ctrl-K` palette) and the full pane layout
