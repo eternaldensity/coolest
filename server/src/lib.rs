@@ -43,19 +43,30 @@ impl Server {
     pub fn step(&mut self) -> Vec<(Delta, Vec<Event>)> {
         let mut out = Vec::with_capacity(self.queue.len());
         while let Some(intent) = self.queue.pop_front() {
-            let due = self.world.next_at(intent.actor);
-            if self.world.tick < due {
-                self.world.tick = due;
-            }
-            match self.world.apply(&intent) {
-                Ok(res) => {
-                    self.log.push(intent);
-                    out.push(res);
-                }
-                Err(_) => continue,
+            if let Ok(res) = self.apply_one(intent) {
+                out.push(res);
             }
         }
         out
+    }
+
+    /// Apply one intent now, jumping the clock to its due tick.
+    /// On success the intent is logged; on failure the concrete
+    /// [`sim::SimError`] is returned so callers can explain the
+    /// rejection (shuttered counter, not_home, ...) instead of a
+    /// generic "rejected".
+    pub fn apply_one(&mut self, intent: Intent) -> Result<(Delta, Vec<Event>), sim::SimError> {
+        let due = self.world.next_at(intent.actor);
+        if self.world.tick < due {
+            self.world.tick = due;
+        }
+        match self.world.apply(&intent) {
+            Ok(res) => {
+                self.log.push(intent);
+                Ok(res)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn snapshot(&self) -> String {
@@ -173,6 +184,26 @@ mod tests {
         }); // unknown
         let out = s.step();
         assert_eq!(out.len(), 1);
+        assert_eq!(s.log.len(), 1);
+    }
+
+    #[test]
+    fn apply_one_reports_concrete_rejection() {
+        let mut s = Server::new(9);
+        s.world.spawn(EntityId(1), pos(8, 8), 1);
+        let err = s
+            .apply_one(Intent {
+                actor: EntityId(99),
+                verb: Verb::Wait,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "unknown_actor");
+        assert!(s.log.is_empty());
+        s.apply_one(Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
         assert_eq!(s.log.len(), 1);
     }
 
