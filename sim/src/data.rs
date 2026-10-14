@@ -60,6 +60,14 @@ pub fn parse_jobs(s: &str) -> Result<Vec<JobDef>, SimError> {
     if jobs.is_empty() {
         return Err(SimError::new("data", ">= 1 job", "empty"));
     }
+    // Unique non-empty ids: the shell keys job buttons by index, and a
+    // duplicate name makes the board ambiguous (same rule as vulns).
+    let mut ids: Vec<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() != jobs.len() {
+        return Err(SimError::new("data", "unique job ids", "dup"));
+    }
     for j in &jobs {
         if j.id.is_empty() || j.payout_cents <= 0 {
             return Err(SimError::new(
@@ -134,7 +142,7 @@ mod tests {
     #[test]
     fn repo_files_parse_and_match_code() {
         let jobs = parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
-        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs.len(), 5);
         assert_eq!(
             (jobs[0].payout_cents, jobs[0].mood_cost, jobs[0].food_cost),
             (60, 5, 2)
@@ -143,6 +151,26 @@ mod tests {
             (jobs[1].payout_cents, jobs[1].mood_cost, jobs[1].food_cost),
             (120, 9, 4)
         );
+        // Tiered ladder (design/06, 09): payout strictly rises and each
+        // higher tier costs strictly more mood to work.
+        for w in jobs.windows(2) {
+            assert!(
+                w[1].payout_cents > w[0].payout_cents,
+                "payout ladder broken at {} -> {}",
+                w[0].id,
+                w[1].id
+            );
+            assert!(
+                w[1].mood_cost >= w[0].mood_cost && w[1].food_cost >= w[0].food_cost,
+                "pressure regressed at {} -> {}",
+                w[0].id,
+                w[1].id
+            );
+        }
+        // The best pay-per-mood belongs to a higher tier, so grinding the
+        // entry job is not optimal.
+        let ppm = |j: &JobDef| j.payout_cents as f64 / j.mood_cost as f64;
+        assert!(ppm(&jobs[4]) > ppm(&jobs[0]));
 
         let vulns = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
         assert_eq!(vulns.len(), 3);
@@ -205,5 +233,10 @@ mod tests {
         assert!(parse_districts("[]").is_err());
         assert!(parse_cards("negative: []\npositive: []\nmanipulation: []\n").is_err());
         assert!(parse_jobs("not: [valid").is_err());
+        // Duplicate ids are ambiguous on the board.
+        assert!(parse_jobs(
+            "- id: a\n  payout_cents: 1\n  mood_cost: 1\n  food_cost: 1\n- id: a\n  payout_cents: 2\n  mood_cost: 1\n  food_cost: 1\n"
+        )
+        .is_err());
     }
 }

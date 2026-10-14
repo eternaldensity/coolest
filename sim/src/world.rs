@@ -145,9 +145,16 @@ struct Being {
     last_rent_day: u64,
 }
 
-/// M0.5 jobs: (payout_cents, mood_cost, food_cost). Defaults match
-/// data/jobs.yaml; `set_jobs` overrides from file at runtime.
-const DEFAULT_JOBS: [(i64, u8, u8); 2] = [(60, 5, 2), (120, 9, 4)];
+/// M1 jobs: (payout_cents, mood_cost, food_cost), tiered ladder in
+/// data/jobs.yaml. Defaults match that file; `set_jobs` overrides from
+/// the file at runtime (design/11 rule 4).
+const DEFAULT_JOBS: [(i64, u8, u8); 5] = [
+    (60, 5, 2),
+    (120, 9, 4),
+    (200, 13, 6),
+    (320, 18, 9),
+    (500, 24, 13),
+];
 const WATCH_COST: i64 = 30;
 /// Daily rent (design/04: rent is a burn sink). Provisional tuning: one day
 /// is 1440 ticks; medians from human sessions should set the real number.
