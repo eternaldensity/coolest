@@ -152,6 +152,19 @@ impl Ledger {
         &self.ious
     }
 
+    /// Reconcile outstanding IOUs once the branch is back: each cash advance
+    /// becomes a logged burn against its account, so the book balance again
+    /// equals the audit with no markers left. Returns the total settled.
+    /// Idempotent.
+    pub fn reconcile(&mut self) -> i64 {
+        let mut settled = 0i64;
+        for (acct, amt) in std::mem::take(&mut self.ious) {
+            settled += amt;
+            self.log.push(Tx::Burn { from: acct, amt });
+        }
+        settled
+    }
+
     /// Zombie/spam income for a host on a given day, capped per host/day.
     pub fn credit_spam(
         &mut self,
@@ -248,6 +261,24 @@ mod tests {
                                                               // IOU path skips the log (no burn) but live sum still consistent
                                                               // with mint/burn accounting minus outstanding IOUs.
         assert_eq!(l.live_sum(), l.audit_sum() - 90);
+    }
+
+    #[test]
+    fn reconcile_settles_iou_into_audit() {
+        let (mut l, a, _) = ledger2();
+        l.mint(a, 1000).unwrap();
+        l.withdraw_atm(a, 90, false, 100).unwrap();
+        l.withdraw_atm(a, 60, false, 100).unwrap();
+        assert_eq!(l.ious().len(), 2);
+        assert_eq!(l.live_sum(), l.audit_sum() - 150);
+        // Branch back: advances settle into the log, books balance clean.
+        assert_eq!(l.reconcile(), 150);
+        assert!(l.ious().is_empty());
+        assert_eq!(l.live_sum(), l.audit_sum());
+        assert_eq!(l.balance(a).unwrap(), 850);
+        // Idempotent: nothing left to settle.
+        assert_eq!(l.reconcile(), 0);
+        assert_eq!(l.live_sum(), l.audit_sum());
     }
 
     #[test]
