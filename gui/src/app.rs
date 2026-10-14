@@ -159,6 +159,10 @@ impl Shell {
             .net
             .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
             .ok();
+        // Anchor each host to a section so power kills reroute traffic.
+        server.world.power.anchor(HostId(1), (0, 0));
+        server.world.power.anchor(HostId(2), (1, 0));
+        server.world.power.anchor(HostId(3), (2, 0));
         server.world.ensure_host(HostId(1));
         // World host 1 is a defended range rig: loading foreign programs
         // draws a warden and a trace (M2 retaliation, always on).
@@ -721,9 +725,58 @@ impl Shell {
             }
             Tab::Net => {
                 ui.heading("Net — world graph (Oldnet/Betanet)");
-                ui.label("More hops = safer trace, higher tolls. Laser is fast but tolled.");
+                ui.label("More hops = safer trace, higher tolls. Laser is fast but tolled. Dark sections drop their hosts.");
+                // Graph snapshot: nodes (with net kind + power state) and links.
+                let node_ids = self.server.world.net.node_ids();
+                let mut lines: Vec<String> = Vec::new();
+                for id in &node_ids {
+                    if let Some(n) = self.server.world.net.node(*id) {
+                        let kind = match n.net {
+                            NetKind::Oldnet => "oldnet",
+                            NetKind::Betanet => "betanet",
+                        };
+                        // A host is dark when its anchored section is down.
+                        let dark = self.server.world.power.is_host_dark(*id);
+                        lines.push(format!(
+                            "{:?} {kind} modem{}mb{}{}",
+                            id,
+                            n.modem_mbps,
+                            if n.gateway { " gw" } else { "" },
+                            if dark { " DARK" } else { "" }
+                        ));
+                    }
+                }
+                for l in self.server.world.net.links() {
+                    let k = match l.kind {
+                        LinkKind::Wired { damaged } => {
+                            if damaged {
+                                "wired(damaged)"
+                            } else {
+                                "wired"
+                            }
+                        }
+                        LinkKind::Wireless { range_m } => {
+                            let _ = range_m;
+                            "wireless"
+                        }
+                        LinkKind::Laser => "laser",
+                    };
+                    lines.push(format!(
+                        "{:?}->{:?} {k} {}ms toll{}c",
+                        l.from, l.to, l.latency_ms, l.toll_cents
+                    ));
+                }
+                for line in &lines {
+                    ui.label(line);
+                }
                 if ui.button("Route 1→3").clicked() {
-                    match self.server.world.net.route(HostId(1), HostId(3)) {
+                    // Blackout-aware: routing avoids hosts in dark sections.
+                    match self
+                        .server
+                        .world
+                        .power
+                        .powered_route(&self.server.world.net, HostId(1), HostId(3))
+                    {
                         Ok(r) => self.say(format!(
                             "route {:?} {}ms toll {} cap {} gw={} thr={}",
                             r.path, r.latency_ms, r.toll_cents, r.cap_mbps, r.gateway_ok,
@@ -743,6 +796,28 @@ impl Shell {
                         Err(e) => self.say(format!("damage failed: {e}")),
                     }
                 }
+                ui.horizontal(|ui| {
+                    // Power grid (design/02): dark a section or heal it. Both
+                    // are logged acts, so replays reproduce the reroute.
+                    if ui.button("Cut power sec (1,0)").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::SetPower { sx: 1, sy: 0, up: false },
+                        }) {
+                            Ok(_) => self.say("power cut in section (1,0)".to_string()),
+                            Err(e) => self.say(format!("power cut failed: {e}")),
+                        }
+                    }
+                    if ui.button("Restore power").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::SetPower { sx: 1, sy: 0, up: true },
+                        }) {
+                            Ok(_) => self.say("power restored".to_string()),
+                            Err(e) => self.say(format!("restore failed: {e}")),
+                        }
+                    }
+                });
             }
             Tab::Veil => {
                 ui.heading("Veil — helmet space");
@@ -1278,6 +1353,49 @@ mod tests {
             h.pass_with(vec![]);
             assert!(h.has_text("bank $6.50"), "text: {:?}", h.labels());
             assert_eq!(h.shell.server.log.len(), 1);
+        }
+
+        #[test]
+        fn power_cut_reroutes_and_restores_through_clicks() {
+            let mut h = Harness::new();
+            let at = h.button_center("Net");
+            h.click(at);
+            // Baseline: the direct path transits host 2.
+            let at = h.button_center("Route 1→3");
+            h.click(at);
+            assert!(
+                h.shell
+                    .log
+                    .iter()
+                    .any(|l| l.contains("route") && l.contains("HostId(2)")),
+                "log: {:?}",
+                h.shell.log
+            );
+            // Cut power: host 2 dark, traffic reroutes around it.
+            let at = h.button_center("Cut power sec (1,0)");
+            h.click(at);
+            assert!(
+                h.has_text("power cut in section (1,0)"),
+                "text: {:?}",
+                h.labels()
+            );
+            let at = h.button_center("Route 1→3");
+            h.click(at);
+            let last = h.shell.log.last().cloned().unwrap_or_default();
+            assert!(
+                last.contains("route") && !last.contains("HostId(2)"),
+                "rerouted line: {last:?}"
+            );
+            // Restore heals it.
+            let at = h.button_center("Restore power");
+            h.click(at);
+            let at = h.button_center("Route 1→3");
+            h.click(at);
+            let last = h.shell.log.last().cloned().unwrap_or_default();
+            assert!(last.contains("HostId(2)"), "healed line: {last:?}");
+            // Routing is a read-only query (not an act), so only the cut
+            // and restore are logged.
+            assert_eq!(h.shell.server.log.len(), 2);
         }
 
         #[test]
