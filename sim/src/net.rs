@@ -119,6 +119,21 @@ impl NetGraph {
         self.known.contains(&id.0)
     }
 
+    /// Read-only view of a host node (for client rendering).
+    pub fn node(&self, id: HostId) -> Option<&Node> {
+        self.nodes.get(&id.0)
+    }
+
+    /// Host ids in stable order (for client rendering).
+    pub fn node_ids(&self) -> Vec<HostId> {
+        self.nodes.keys().copied().map(HostId).collect()
+    }
+
+    /// Read-only view of the links (for client rendering).
+    pub fn links(&self) -> &[Link] {
+        &self.links
+    }
+
     pub fn set_up(&mut self, id: HostId, up: bool) -> Result<(), SimError> {
         self.nodes
             .get_mut(&id.0)

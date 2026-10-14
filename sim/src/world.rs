@@ -72,6 +72,14 @@ pub enum Verb {
     VeilSeize,
     /// Clean exit from the veil (light drain).
     VeilEject,
+    /// Cut or restore a street section's power (design/02). Killing a
+    /// section drops its anchored hosts from Net routing; restoring
+    /// heals it. Logged like any act so replays reproduce the reroute.
+    SetPower {
+        sx: i32,
+        sy: i32,
+        up: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -902,6 +910,15 @@ impl World {
             Verb::VeilEject => {
                 self.veil.eject(intent.actor)?;
                 kind = "ejected";
+            }
+            Verb::SetPower { sx, sy, up } => {
+                if up {
+                    self.power.restore((sx, sy));
+                    kind = "power_up";
+                } else {
+                    self.power.kill((sx, sy));
+                    kind = "power_down";
+                }
             }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
@@ -2060,6 +2077,89 @@ mod tests {
             k2.contains(&"warden_kill"),
             "adjacent load should die in-act; kinds: {k2:?}"
         );
+    }
+
+    #[test]
+    fn set_power_reroutes_and_restores_through_apply() {
+        use crate::net::{LinkKind, NetKind};
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Triangle: 1-2-3 direct via 2, plus a longer 1-3 fallback.
+        w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+        w.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+        w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+        w.net
+            .add_link(
+                HostId(1),
+                HostId(2),
+                LinkKind::Wired { damaged: false },
+                5,
+                0,
+            )
+            .unwrap();
+        w.net
+            .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+            .unwrap();
+        w.net
+            .add_link(
+                HostId(1),
+                HostId(3),
+                LinkKind::Wired { damaged: false },
+                100,
+                0,
+            )
+            .unwrap();
+        w.power.anchor(HostId(2), (1, 0));
+        // Direct path uses transit host 2.
+        assert_eq!(
+            w.power
+                .powered_route(&w.net, HostId(1), HostId(3))
+                .unwrap()
+                .path,
+            vec![HostId(1), HostId(2), HostId(3)]
+        );
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SetPower {
+                    sx: 1,
+                    sy: 0,
+                    up: false,
+                },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("power_down"));
+        assert_eq!(w.power.dark_sections(), vec![(1, 0)]);
+        // Host 2 is dark, so the powered route takes the long way round.
+        assert_eq!(
+            w.power
+                .powered_route(&w.net, HostId(1), HostId(3))
+                .unwrap()
+                .path,
+            vec![HostId(1), HostId(3)]
+        );
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SetPower {
+                    sx: 1,
+                    sy: 0,
+                    up: true,
+                },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("power_up"));
+        assert!(w.power.dark_sections().is_empty());
+        assert_eq!(
+            w.power
+                .powered_route(&w.net, HostId(1), HostId(3))
+                .unwrap()
+                .path,
+            vec![HostId(1), HostId(2), HostId(3)]
+        );
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
     #[test]

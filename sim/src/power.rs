@@ -35,6 +35,19 @@ impl PowerGrid {
         !self.dark.contains(&section)
     }
 
+    /// True when the host's anchored section is dark (client rendering).
+    pub fn is_host_dark(&self, host: HostId) -> bool {
+        self.anchors
+            .get(&host.0)
+            .map(|s| self.dark.contains(s))
+            .unwrap_or(false)
+    }
+
+    /// Sections currently dark, in stable order (for client rendering).
+    pub fn dark_sections(&self) -> Vec<(i32, i32)> {
+        self.dark.iter().copied().collect()
+    }
+
     fn dark_hosts(&self) -> BTreeSet<u64> {
         self.anchors
             .iter()
