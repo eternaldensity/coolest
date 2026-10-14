@@ -405,6 +405,13 @@ impl Shell {
             ui.heading("Status");
             if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
                 ui.label(status_line(food, mood, money));
+                let bank = self
+                    .server
+                    .world
+                    .bank_balance(self.actor)
+                    .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
+                    .unwrap_or_else(|| "bank —".to_string());
+                ui.label(bank);
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 let tick = self.server.world.tick;
                 ui.label(format!(
@@ -1256,6 +1263,21 @@ mod tests {
             assert_eq!(after, before + 500, "top-tier payout");
             assert_eq!(h.shell.server.log.len(), 1);
             assert!(h.has_text("worked") || h.shell.log.iter().any(|l| l.contains("rations=")));
+        }
+
+        #[test]
+        fn bank_balance_shows_and_moves_on_deposit_click() {
+            let mut h = Harness::new();
+            // Demo world opens the player's account with $5.00 minted.
+            assert!(h.has_text("bank $5.00"), "text: {:?}", h.labels());
+            // Deposit $1.50 through the console; pocket drops, bank rises.
+            let at = h.text_input_center();
+            h.click(at);
+            h.pass_with(vec![egui::Event::Text("deposit 150".into())]);
+            h.tap_key(egui::Key::Enter);
+            h.pass_with(vec![]);
+            assert!(h.has_text("bank $6.50"), "text: {:?}", h.labels());
+            assert_eq!(h.shell.server.log.len(), 1);
         }
 
         #[test]

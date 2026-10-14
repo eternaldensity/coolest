@@ -340,6 +340,18 @@ impl World {
         Ok(acct)
     }
 
+    /// Ledger account id for a being or NPC, once opened.
+    pub fn account(&self, id: EntityId) -> Option<u64> {
+        self.accts.get(&id.0).copied()
+    }
+
+    /// Bank balance for a being or NPC, once an account exists. Clients
+    /// show this beside pocket cash: deposits move money out of sight
+    /// otherwise (design/04 bank + pocket split).
+    pub fn bank_balance(&self, id: EntityId) -> Option<i64> {
+        self.account(id).and_then(|a| self.ledger.balance(a).ok())
+    }
+
     /// Place a shop on a local tile (counter sale; design/05-06).
     pub fn place_shop(&mut self, x: u8, y: u8, shop: Shop) {
         if let Some(slot) = self.shops.iter_mut().find(|s| s.x == x && s.y == y) {
@@ -2098,6 +2110,34 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(err.kind, "no_exit");
+    }
+
+    #[test]
+    fn bank_balance_visible_and_moves_with_deposit_withdraw() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        assert_eq!(w.bank_balance(EntityId(1)), None); // no account yet
+        let acct = w.open_account(EntityId(1), HostId(2)).unwrap();
+        assert_eq!(w.bank_balance(EntityId(1)), Some(0));
+        let (_, _, pocket0, _) = w.needs(EntityId(1)).unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Deposit(150),
+        })
+        .unwrap();
+        let (_, _, pocket1, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!(pocket0 - pocket1, 150);
+        assert_eq!(w.bank_balance(EntityId(1)), Some(150));
+        assert_eq!(w.account(EntityId(1)), Some(acct));
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Withdraw(50),
+        })
+        .unwrap();
+        assert_eq!(w.bank_balance(EntityId(1)), Some(100));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
     #[test]
