@@ -18,7 +18,9 @@ broke with the cheapest rig and eat, work, and hack your way up.
 You wake with **food 80 / mood 70 / $2.00 / 3 rations**. Every action ticks
 both bars down:
 
-- **Work** a programming job → earns cash, costs mood + food.
+- **Work** a programming job → earns cash, costs mood + food. Five tiers
+  on the board (`debug-script` 60c → `contract-build` 500c): higher tiers
+  pay more per mood but drain more pressure per act.
 - **Eat** a ration → +30 food. No rations? Order more (online stores, M1).
 - **Watch** a show → +15 mood, costs $0.30.
 - **Sleep** in your rented room → rests to 06:00, no needs cost beyond
@@ -100,11 +102,11 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (140 tests)
+cargo test --workspace      # prove the rules hold (142 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
-console takes `eat | work 0/1 | watch | sleep | buy <item> | deposit/
+console takes `eat | work 0-4 | watch | sleep | buy <item> | deposit/
 withdraw <c> | talk | help`. Panes: status + objective (left), tabs
 (top), console + log (bottom), view (center). Ctrl-K palette and
 `>`/`<` stairs are not wired yet — see `design/09-ux-roadmap.md`.
