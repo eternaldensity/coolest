@@ -7,7 +7,7 @@ use client_web::status_line;
 use eframe::egui;
 use server::Server;
 use sim::{
-    cop_duty, CellPos, Dir, EntityId, Host, HostId, Intent, LinkKind, NetKind, Pos, Role, Standing,
+    cop_duty, Dir, EntityId, Host, HostId, Intent, LinkKind, NetKind, Pos, Role, Standing,
     Timetable, Verb,
 };
 use std::collections::BTreeMap;
@@ -282,18 +282,20 @@ impl Shell {
 
     /// One defense beat on the range rig after a deck action: the warden
     /// answers foreign programs, and a fresh trace marks the funnel.
-    fn answer_range(&mut self) {
-        let r = self.server.world.ensure_host(HostId(1)).retaliate();
-        if r.traced {
-            self.server.world.mark_traced(self.actor);
-            self.say("trace started on your program — scrub or outrun it".to_string());
+    /// Relay lines for a deck retaliation beat carried on apply events.
+    fn beat_lines(events: &[sim::Event]) -> Vec<String> {
+        let mut out = Vec::new();
+        for e in events {
+            match e.kind.as_str() {
+                "traced" => {
+                    out.push("trace started on your program — scrub or outrun it".to_string())
+                }
+                "warden_kill" => out.push("warden killed one of your programs".to_string()),
+                "trace_burned" => out.push("trace completed — program burned".to_string()),
+                _ => {}
+            }
         }
-        if r.killed {
-            self.say("warden killed one of your programs".to_string());
-        }
-        if r.burned {
-            self.say("trace completed — program burned".to_string());
-        }
+        out
     }
 
     /// NPCs on the actor's tile or adjacent (same section).
@@ -633,42 +635,45 @@ impl Shell {
                 ui.label("H program head (kill it) · o tail (hit points) · click a cell, then Load/Strike · warden defends this rig");
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
-                        let msg = match self.sel {
-                            Some((x, y)) => {
-                                let host = self.server.world.ensure_host(HostId(1));
-                                let id = EntityId(100 + host.progs.len() as u64);
-                                match host.load(id, EntityId(1), CellPos(x, y), 3, 1) {
-                                    Ok(()) => format!("loaded killer {id:?}"),
-                                    Err(e) => format!("load failed: {e}"),
-                                }
-                            }
-                            None => "click a cell first".to_string(),
+                        let (msg, beat) = match self.sel {
+                            Some((x, y)) => match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckLoad { x, y },
+                            }) {
+                                Ok((_, events)) => (
+                                    format!("loaded killer @({x},{y})"),
+                                    Self::beat_lines(&events),
+                                ),
+                                Err(e) => (format!("load failed: {e}"), vec![]),
+                            },
+                            None => ("click a cell first".to_string(), vec![]),
                         };
                         self.say(msg);
-                        self.answer_range();
+                        for line in beat {
+                            self.say(line);
+                        }
                     }
                     if ui.button("Strike selected").clicked() {
-                        let msg = match self.sel {
-                            Some((x, y)) => {
-                                let result = self
-                                    .server
-                                    .world
-                                    .ensure_host(HostId(1))
-                                    .strike(CellPos(x, y));
-                                match result {
-                                    Ok(killed) => {
-                                        if killed {
-                                            self.server.world.mark_hack(self.actor);
-                                        }
-                                        format!("strike: killed={killed}")
-                                    }
-                                    Err(e) => format!("strike failed: {e}"),
+                        let (msg, beat) = match self.sel {
+                            Some((x, y)) => match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckStrike { x, y },
+                            }) {
+                                Ok((_, events)) => {
+                                    let killed = events.iter().any(|e| e.kind == "kill");
+                                    (
+                                        format!("strike: killed={killed}"),
+                                        Self::beat_lines(&events),
+                                    )
                                 }
-                            }
-                            None => "click a cell first".to_string(),
+                                Err(e) => (format!("strike failed: {e}"), vec![]),
+                            },
+                            None => ("click a cell first".to_string(), vec![]),
                         };
                         self.say(msg);
-                        self.answer_range();
+                        for line in beat {
+                            self.say(line);
+                        }
                     }
                 });
                 // Snapshot arena state up front: buttons below need &mut self.
@@ -1102,6 +1107,37 @@ mod tests {
                 .route(HostId(1), HostId(3))
                 .is_err());
             assert_eq!(h.shell.server.log.len(), 1);
+        }
+
+        #[test]
+        fn deck_load_then_strike_through_clicks() {
+            let mut h = Harness::new();
+            let at = h.button_center("Deck");
+            h.click(at);
+            // Fresh arena: every cell is free. Pick the first one.
+            let at = h.button_center(".");
+            h.click(at);
+            let at = h.button_center("Load killer @selected");
+            h.click(at);
+            let log: Vec<&str> = h.shell.log.iter().map(|s| s.as_str()).collect();
+            assert!(
+                log.iter().any(|l| l.contains("loaded killer")),
+                "log: {log:?}"
+            );
+            assert!(
+                log.iter().any(|l| l.contains("trace started")),
+                "warden should answer the intrusion; log: {log:?}"
+            );
+            assert!(h.has_text("loaded killer"), "text: {:?}", h.labels());
+            let at = h.button_center("Strike selected");
+            h.click(at);
+            let log: Vec<&str> = h.shell.log.iter().map(|s| s.as_str()).collect();
+            assert!(
+                log.iter().any(|l| l.contains("strike: killed=true")),
+                "log: {log:?}"
+            );
+            // All through the server log: load + strike replay cleanly.
+            assert_eq!(h.shell.server.log.len(), 2);
         }
 
         #[test]
