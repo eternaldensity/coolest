@@ -960,15 +960,52 @@ mod tests {
             }
 
             fn button_center(&self, label: &str) -> egui::Pos2 {
-                let node = self
+                let mut cands = self.button_centers(label);
+                assert!(
+                    !cands.is_empty(),
+                    "no Button {label:?}; got {:?}",
+                    self.labels()
+                );
+                cands.remove(0)
+            }
+
+            /// Last match in reading order (bottom-right-most). The accesskit
+            /// tree is a HashMap, so callers that need a *specific* widget
+            /// among identical labels must pick by position, not iteration.
+            fn button_center_last(&self, label: &str) -> egui::Pos2 {
+                let mut cands = self.button_centers(label);
+                assert!(
+                    !cands.is_empty(),
+                    "no Button {label:?}; got {:?}",
+                    self.labels()
+                );
+                cands.pop().unwrap()
+            }
+
+            /// Centers of every button with this label, sorted by geometry
+            /// (top-left to bottom-right) so results are run-stable.
+            fn button_centers(&self, label: &str) -> Vec<egui::Pos2> {
+                let mut out: Vec<(f64, f64, egui::Pos2)> = self
                     .tree
                     .values()
-                    .find(|n| n.role() == Role::Button && n.label().unwrap_or_default() == label)
-                    .unwrap_or_else(|| panic!("no Button {label:?}; got {:?}", self.labels()));
-                let b = node
-                    .bounds()
-                    .unwrap_or_else(|| panic!("Button {label:?} has no bounds"));
-                egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+                    .filter(|n| n.role() == Role::Button && n.label().unwrap_or_default() == label)
+                    .filter_map(|n| n.bounds())
+                    .map(|b| {
+                        let y = b.y0;
+                        let x = b.x0;
+                        (
+                            y,
+                            x,
+                            egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+                        )
+                    })
+                    .collect();
+                out.sort_by(|a, b| {
+                    a.0.partial_cmp(&b.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                });
+                out.into_iter().map(|(_, _, p)| p).collect()
             }
 
             fn text_input_center(&self) -> egui::Pos2 {
@@ -1127,8 +1164,10 @@ mod tests {
             let mut h = Harness::new();
             let at = h.button_center("Deck");
             h.click(at);
-            // Fresh arena: every cell is free. Pick the first one.
-            let at = h.button_center(".");
+            // Pick the bottom-right free cell so the killer starts far from
+            // the warden's top-left spawn; an adjacent cell would let the
+            // warden kill it in the same beat and change the outcome.
+            let at = h.button_center_last(".");
             h.click(at);
             let at = h.button_center("Load killer @selected");
             h.click(at);

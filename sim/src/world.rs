@@ -2028,6 +2028,26 @@ mod tests {
         assert!(kinds.contains(&"kill"), "kinds: {kinds:?}");
         assert!(!w.funnel_line().contains("hack=-"));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+
+        // Retaliation runs inside the load act: a program dropped next to
+        // the warden's spawn (first free cell) is killed the same beat.
+        let mut w2 = World::new(3);
+        w2.spawn(EntityId(1), pos(8, 8), 1);
+        let r2 = w2.ensure_host(HostId(1));
+        r2.set_owner(Some(crate::deck::Host::WARDEN));
+        r2.set_monitor(true);
+        w2.tick = w2.next_at(EntityId(1));
+        let (_, ev2) = w2
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckLoad { x: 1, y: 0 },
+            })
+            .unwrap();
+        let k2: Vec<&str> = ev2.iter().map(|e| e.kind.as_str()).collect();
+        assert!(
+            k2.contains(&"warden_kill"),
+            "adjacent load should die in-act; kinds: {k2:?}"
+        );
     }
 
     #[test]
