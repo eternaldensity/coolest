@@ -261,7 +261,7 @@ impl Shell {
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
+                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
@@ -277,6 +277,12 @@ impl Shell {
             },
             "talk" => self.start_talk(),
             "watch" => self.do_verb(Verb::Watch),
+            _ if cmd.starts_with("code ") => match cmd[5..].trim() {
+                "loop" => self.do_verb(Verb::Code { res: sim::Res::Loop }),
+                "data" => self.do_verb(Verb::Code { res: sim::Res::Data }),
+                "algo" => self.do_verb(Verb::Code { res: sim::Res::Algo }),
+                other => self.say(format!("unknown resource: {other}")),
+            },
             "work 0" => self.do_verb(Verb::Work(0)),
             "work 1" => self.do_verb(Verb::Work(1)),
             "work 2" => self.do_verb(Verb::Work(2)),
@@ -481,30 +487,64 @@ impl Shell {
                 // choice means something; indices feed Verb::Work like before.
                 // Fallback labels keep verbs available if the file is corrupt
                 // (data tests pin the file, so this is belt-and-braces).
-                let mut jobs: Vec<(String, i64)> = self
+                // (id, pay, (resource, need, have)) when the job is gated.
+                type JobRow = (String, i64, Option<(sim::Res, u32, u32)>);
+                let mut jobs: Vec<JobRow> = self
                     .jobs
                     .iter()
-                    .map(|d| (d.id.clone(), d.payout_cents))
+                    .enumerate()
+                    .map(|(i, d)| {
+                        let req = self.server.world.job_requirement(i).map(|(res, need)| {
+                            (res, need, self.server.world.units(self.actor, res))
+                        });
+                        (d.id.clone(), d.payout_cents, req)
+                    })
                     .collect();
                 if jobs.is_empty() {
                     jobs = (0..5)
-                        .map(|i| (format!("job-{i}"), 60 + 60 * i as i64))
+                        .map(|i| (format!("job-{i}"), 60 + 60 * i as i64, None))
                         .collect();
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Eat").clicked() {
                         self.do_verb(Verb::Eat);
                     }
-                    for (i, (id, pay)) in jobs.iter().enumerate() {
-                        if ui.button(format!("Work {i}: {id} {pay}c")).clicked() {
-                            self.do_verb(Verb::Work(i as u8));
-                        }
-                    }
                     if ui.button("Watch").clicked() {
                         self.do_verb(Verb::Watch);
                     }
                     if ui.button("Sleep").clicked() {
                         self.do_verb(Verb::Sleep);
+                    }
+                });
+                // Manual coding (design/10): one unit per click, at a mood
+                // cost. Producers come later; this is the slow path.
+                ui.horizontal(|ui| {
+                    ui.label("Code:");
+                    for res in sim::Res::ALL {
+                        let have = self.server.world.units(self.actor, res);
+                        if ui
+                            .button(format!("Code {} ({have})", res.name()))
+                            .clicked()
+                        {
+                            self.do_verb(Verb::Code { res });
+                        }
+                    }
+                });
+                // Job board on its own wrapped row: five long labels with
+                // live counts overflow a single row and push later controls
+                // outside the clip rect (their clicks are then ignored).
+                ui.horizontal_wrapped(|ui| {
+                    for (i, (id, pay, req)) in jobs.iter().enumerate() {
+                        let label = match req {
+                            Some((res, need, have)) => format!(
+                                "Work {i}: {id} {pay}c [{} {have}/{need}]",
+                                res.name()
+                            ),
+                            None => format!("Work {i}: {id} {pay}c"),
+                        };
+                        if ui.button(label).clicked() {
+                            self.do_verb(Verb::Work(i as u8));
+                        }
                     }
                 });
                 ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
@@ -1100,7 +1140,8 @@ mod tests {
                 egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
             }
 
-            fn click(&mut self, at: egui::Pos2) {
+            /// Press+release on a raw position (used for grid cells).
+            fn click_at(&mut self, at: egui::Pos2) {
                 let mods = egui::Modifiers::default();
                 let press = egui::Event::PointerButton {
                     pos: at,
@@ -1116,6 +1157,101 @@ mod tests {
                 };
                 self.pass_with(vec![press]);
                 self.pass_with(vec![release]);
+                self.pass_with(vec![]);
+            }
+
+            /// Click the button with this (unique) label. The centre is
+            /// re-resolved before the release pass: a click that adds a log
+            /// line shifts the layout, and a stale coordinate would land on
+            /// whatever moved under it.
+            fn click(&mut self, label: &str) {
+                let at = self.button_center(label);
+                let mods = egui::Modifiers::default();
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: mods,
+                }]);
+                let at = self.button_center(label);
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: mods,
+                }]);
+                self.pass_with(vec![]);
+            }
+
+            /// Click the bottom-right-most button with this label (for grids
+            /// of identical labels like map cells).
+            fn click_last(&mut self, label: &str) {
+                let at = self.button_center_last(label);
+                let mods = egui::Modifiers::default();
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: mods,
+                }]);
+                let at = self.button_center_last(label);
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: mods,
+                }]);
+                self.pass_with(vec![]);
+            }
+
+            /// Click the first button (reading order) whose label starts with
+            /// `prefix`. Needed when labels carry live counts that change
+            /// after each click.
+            fn click_prefix(&mut self, prefix: &str) {
+                let mods = egui::Modifiers::default();
+                let find = |tree: &std::collections::HashMap<NodeId, Node>| -> egui::Pos2 {
+                    let mut cands: Vec<(f64, f64, egui::Pos2)> = tree
+                        .values()
+                        .filter(|n| {
+                            n.role() == Role::Button
+                                && n.label().unwrap_or_default().starts_with(prefix)
+                        })
+                        .filter_map(|n| n.bounds())
+                        .map(|b| {
+                            (
+                                b.y0,
+                                b.x0,
+                                egui::pos2(
+                                    ((b.x0 + b.x1) / 2.0) as f32,
+                                    ((b.y0 + b.y1) / 2.0) as f32,
+                                ),
+                            )
+                        })
+                        .collect();
+                    cands.sort_by(|a, b| {
+                        a.0.partial_cmp(&b.0)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    });
+                    cands
+                        .first()
+                        .map(|(_, _, p)| *p)
+                        .unwrap_or_else(|| panic!("no Button starting with {prefix:?}"))
+                };
+                let at = find(&self.tree);
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: mods,
+                }]);
+                let at = find(&self.tree);
+                self.pass_with(vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: mods,
+                }]);
                 self.pass_with(vec![]);
             }
 
@@ -1144,8 +1280,7 @@ mod tests {
         fn sleep_button_sleeps_through_click() {
             let mut h = Harness::new();
             assert!(h.has(Role::Button, "Sleep"), "text: {:?}", h.labels());
-            let at = h.button_center("Sleep");
-            h.click(at);
+            h.click("Sleep");
             // Home at spawn, 00:00 -> rest to 06:00, status line logged.
             assert_eq!((h.shell.server.world.tick - 1) % 1440, 360);
             assert!(
@@ -1176,8 +1311,7 @@ mod tests {
                 "counter panel missing; text: {:?}",
                 h.labels()
             );
-            let at = h.button_center("Buy");
-            h.click(at);
+            h.click("Buy");
             let tail: Vec<&str> = h
                 .shell
                 .log
@@ -1201,7 +1335,7 @@ mod tests {
         fn console_sleep_command_runs_through_text_input() {
             let mut h = Harness::new();
             let at = h.text_input_center();
-            h.click(at);
+            h.click_at(at);
             h.pass_with(vec![egui::Event::Text("sleep".into())]);
             h.tap_key(egui::Key::Enter);
             h.pass_with(vec![]);
@@ -1212,10 +1346,8 @@ mod tests {
         fn damage_wire_button_damages_through_server() {
             let mut h = Harness::new();
             assert!(h.shell.server.world.net.route(HostId(1), HostId(3)).is_ok());
-            let at = h.button_center("Net");
-            h.click(at);
-            let at = h.button_center("Damage wire 1-2");
-            h.click(at);
+            h.click("Net");
+            h.click("Damage wire 1-2");
             let tail: Vec<&str> = h
                 .shell
                 .log
@@ -1244,15 +1376,12 @@ mod tests {
         #[test]
         fn deck_load_then_strike_through_clicks() {
             let mut h = Harness::new();
-            let at = h.button_center("Deck");
-            h.click(at);
+            h.click("Deck");
             // Pick the bottom-right free cell so the killer starts far from
             // the warden's top-left spawn; an adjacent cell would let the
             // warden kill it in the same beat and change the outcome.
-            let at = h.button_center_last(".");
-            h.click(at);
-            let at = h.button_center("Load killer @selected");
-            h.click(at);
+            h.click_last(".");
+            h.click("Load killer @selected");
             let log: Vec<&str> = h.shell.log.iter().map(|s| s.as_str()).collect();
             assert!(
                 log.iter().any(|l| l.contains("loaded killer")),
@@ -1263,8 +1392,7 @@ mod tests {
                 "warden should answer the intrusion; log: {log:?}"
             );
             assert!(h.has_text("loaded killer"), "text: {:?}", h.labels());
-            let at = h.button_center("Strike selected");
-            h.click(at);
+            h.click("Strike selected");
             let log: Vec<&str> = h.shell.log.iter().map(|s| s.as_str()).collect();
             assert!(
                 log.iter().any(|l| l.contains("strike: killed=true")),
@@ -1277,32 +1405,27 @@ mod tests {
         #[test]
         fn veil_full_flow_through_clicks() {
             let mut h = Harness::new();
-            let at = h.button_center("Veil");
-            h.click(at);
+            h.click("Veil");
             // mp slider defaults to 8: jack in, walk to ops, seize, eject.
-            let at = h.button_center("Jack in @lobby");
-            h.click(at);
+            h.click("Jack in @lobby");
             assert!(
                 h.shell.log.iter().any(|l| l.contains("jacked in (mp 8)")),
                 "log: {:?}",
                 h.shell.log
             );
-            let at = h.button_center("→ ops");
-            h.click(at);
+            h.click("→ ops");
             assert!(
                 h.shell.log.iter().any(|l| l.contains("moved to ops")),
                 "log: {:?}",
                 h.shell.log
             );
-            let at = h.button_center("Seize demo host (mp 3)");
-            h.click(at);
+            h.click("Seize demo host (mp 3)");
             assert!(
                 h.shell.log.iter().any(|l| l.contains("host 70 seized")),
                 "log: {:?}",
                 h.shell.log
             );
-            let at = h.button_center("Eject");
-            h.click(at);
+            h.click("Eject");
             assert!(
                 h.shell.log.iter().any(|l| l.contains("ejected (drain")),
                 "log: {:?}",
@@ -1316,28 +1439,61 @@ mod tests {
         #[test]
         fn job_ladder_renders_and_top_tier_pays_through_clicks() {
             let mut h = Harness::new();
-            // All five board buttons come from data/jobs.yaml.
-            for (i, id, pay) in [
-                (0, "debug-script", 60),
-                (1, "driver-patch", 120),
-                (2, "firmware-flash", 200),
-                (3, "kernel-tune", 320),
-                (4, "contract-build", 500),
+            // All five board buttons come from data/jobs.yaml, each showing
+            // its resource requirement.
+            for (i, id, pay, req) in [
+                (0, "debug-script", 60, "[loop 0/4]"),
+                (1, "driver-patch", 120, "[loop 0/6]"),
+                (2, "firmware-flash", 200, "[data 0/5]"),
+                (3, "kernel-tune", 320, "[data 0/6]"),
+                (4, "contract-build", 500, "[algo 0/6]"),
             ] {
-                let label = format!("Work {i}: {id} {pay}c");
+                let label = format!("Work {i}: {id} {pay}c {req}");
                 assert!(
                     h.has(Role::Button, &label),
                     "missing {label:?}; {:?}",
                     h.labels()
                 );
             }
+            // Stock the top tier by coding 6 algo, then work it.
+            for _ in 0..6 {
+                h.click_prefix("Code algo (");
+            }
             let (_, _, before, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
-            let at = h.button_center("Work 4: contract-build 500c");
-            h.click(at);
+            h.click_prefix("Work 4: contract-build");
             let (_, _, after, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
             assert_eq!(after, before + 500, "top-tier payout");
-            assert_eq!(h.shell.server.log.len(), 1);
-            assert!(h.has_text("worked") || h.shell.log.iter().any(|l| l.contains("rations=")));
+            assert_eq!(h.shell.server.world.units(EntityId(1), sim::Res::Algo), 0);
+        }
+
+        #[test]
+        fn code_then_work_cycle_through_clicks() {
+            let mut h = Harness::new();
+            // Job 0 (debug-script) needs 4 loop units; the button shows it.
+            assert!(
+                h.has(Role::Button, "Work 0: debug-script 60c [loop 0/4]"),
+                "labels: {:?}",
+                h.labels()
+            );
+            // Working short is refused with the cause rendered.
+            h.click_prefix("Work 0: debug-script");
+            assert!(
+                h.has_text("rejected: no_resource"),
+                "text: {:?}",
+                h.labels()
+            );
+            // Four Code clicks fill the requirement.
+            for _ in 0..4 {
+                h.click_prefix("Code loop (");
+            }
+            assert!(h.has_text("Code loop (4)"), "text: {:?}", h.labels());
+            let (_, _, before, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
+            h.click_prefix("Work 0: debug-script");
+            let (_, _, after, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
+            assert_eq!(after, before + 60, "job paid once units were stocked");
+            assert_eq!(h.shell.server.world.units(EntityId(1), sim::Res::Loop), 0);
+            // 1 refusal + 4 codes + 1 work all logged.
+            assert_eq!(h.shell.server.log.len(), 6);
         }
 
         #[test]
@@ -1347,7 +1503,7 @@ mod tests {
             assert!(h.has_text("bank $5.00"), "text: {:?}", h.labels());
             // Deposit $1.50 through the console; pocket drops, bank rises.
             let at = h.text_input_center();
-            h.click(at);
+            h.click_at(at);
             h.pass_with(vec![egui::Event::Text("deposit 150".into())]);
             h.tap_key(egui::Key::Enter);
             h.pass_with(vec![]);
@@ -1358,11 +1514,9 @@ mod tests {
         #[test]
         fn power_cut_reroutes_and_restores_through_clicks() {
             let mut h = Harness::new();
-            let at = h.button_center("Net");
-            h.click(at);
+            h.click("Net");
             // Baseline: the direct path transits host 2.
-            let at = h.button_center("Route 1→3");
-            h.click(at);
+            h.click("Route 1→3");
             assert!(
                 h.shell
                     .log
@@ -1372,25 +1526,21 @@ mod tests {
                 h.shell.log
             );
             // Cut power: host 2 dark, traffic reroutes around it.
-            let at = h.button_center("Cut power sec (1,0)");
-            h.click(at);
+            h.click("Cut power sec (1,0)");
             assert!(
                 h.has_text("power cut in section (1,0)"),
                 "text: {:?}",
                 h.labels()
             );
-            let at = h.button_center("Route 1→3");
-            h.click(at);
+            h.click("Route 1→3");
             let last = h.shell.log.last().cloned().unwrap_or_default();
             assert!(
                 last.contains("route") && !last.contains("HostId(2)"),
                 "rerouted line: {last:?}"
             );
             // Restore heals it.
-            let at = h.button_center("Restore power");
-            h.click(at);
-            let at = h.button_center("Route 1→3");
-            h.click(at);
+            h.click("Restore power");
+            h.click("Route 1→3");
             let last = h.shell.log.last().cloned().unwrap_or_default();
             assert!(last.contains("HostId(2)"), "healed line: {last:?}");
             // Routing is a read-only query (not an act), so only the cut
@@ -1402,18 +1552,15 @@ mod tests {
         fn tabs_render_without_panic() {
             let mut h = Harness::new();
             // Re-select one by one and assert each heading renders.
-            let at = h.button_center("Net");
-            h.click(at);
+            h.click("Net");
             assert!(
                 h.has_text("Net — world graph (Oldnet/Betanet)"),
                 "text: {:?}",
                 h.labels()
             );
-            let at = h.button_center("Veil");
-            h.click(at);
+            h.click("Veil");
             assert!(h.has_text("Veil — helmet space"), "text: {:?}", h.labels());
-            let at = h.button_center("Deck");
-            h.click(at);
+            h.click("Deck");
             assert!(h.has_text("CPU "), "text: {:?}", h.labels());
         }
     }
