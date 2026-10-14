@@ -60,6 +60,18 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
+    /// Jack into the veil lobby with the given mindpower (design/05).
+    VeilEnter {
+        mp: u8,
+    },
+    /// Move between veil areas along exit links.
+    VeilMove {
+        area: u64,
+    },
+    /// Seize the demo host through an active veil token.
+    VeilSeize,
+    /// Clean exit from the veil (light drain).
+    VeilEject,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -856,6 +868,22 @@ impl World {
                     killed,
                 ));
             }
+            Verb::VeilEnter { mp } => {
+                self.veil.enter_at(intent.actor, mp, 1)?;
+                kind = "entered";
+            }
+            Verb::VeilMove { area } => {
+                self.veil.move_to(intent.actor, area)?;
+                kind = "moved";
+            }
+            Verb::VeilSeize => {
+                self.veil.transfer(intent.actor, EntityId(70), 3, true)?;
+                kind = "seized";
+            }
+            Verb::VeilEject => {
+                self.veil.eject(intent.actor)?;
+                kind = "ejected";
+            }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
                     return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
@@ -1001,6 +1029,11 @@ impl World {
             }
         }
         self.tick += 1;
+        // NPC timetables advance on game time, in the act: per-frame calls
+        // at an unchanged tick are no-ops, and this keeps intent replay
+        // (which has no frames) on the same NPC tracks as live play.
+        let hour = ((self.tick / 60) % 24) as u8;
+        self.step_npcs(hour, &BTreeMap::new());
         let mut events = vec![Event {
             tick: self.tick,
             actor: intent.actor,
@@ -1988,6 +2021,56 @@ mod tests {
         assert!(kinds.contains(&"kill"), "kinds: {kinds:?}");
         assert!(!w.funnel_line().contains("hack=-"));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn veil_enter_move_seize_eject_flow() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.veil.add_area(1, "lobby", vec![2], false);
+        w.veil.add_area(2, "ops", vec![1, 3], false);
+        w.veil.add_area(3, "roof", vec![2], true);
+        // Weak mind refused.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::VeilEnter { mp: 2 },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "weak_mind");
+        // Jack in, walk an exit link, seize, eject.
+        for (verb, kind) in [
+            (Verb::VeilEnter { mp: 8 }, "entered"),
+            (Verb::VeilMove { area: 2 }, "moved"),
+            (Verb::VeilSeize, "seized"),
+            (Verb::VeilEject, "ejected"),
+        ] {
+            w.tick = w.next_at(EntityId(1));
+            let (_, events) = w
+                .apply(&Intent {
+                    actor: EntityId(1),
+                    verb,
+                })
+                .unwrap();
+            assert_eq!(events.first().map(|e| e.kind.as_str()), Some(kind));
+        }
+        assert_eq!(w.veil.area_of(EntityId(1)), None);
+        // Unlinked jump refused (fresh token first).
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::VeilEnter { mp: 8 },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::VeilMove { area: 3 },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_exit");
     }
 
     #[test]
