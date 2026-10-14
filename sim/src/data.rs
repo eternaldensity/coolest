@@ -169,6 +169,30 @@ mod tests {
     }
 
     #[test]
+    fn shopkeeper_trade_routes_to_counter_without_dup_leave() {
+        let ds = parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap();
+        let shop = ds.iter().find(|d| d.id == "shopkeeper").unwrap();
+        // One Leave only (the shell's): no node lists its own.
+        for (state, node) in &shop.states {
+            assert!(
+                !node.options.iter().any(|c| c.label == "Leave."),
+                "duplicate Leave source in {state}"
+            );
+        }
+        // Both Trade choices lead to the browse state, which loops back.
+        for st in ["hi", "work"] {
+            let trade = shop.states[st]
+                .options
+                .iter()
+                .find(|c| c.label == "Trade.")
+                .unwrap_or_else(|| panic!("no Trade in {st}"));
+            assert_eq!(trade.next.as_deref(), Some("browse"));
+        }
+        let browse = &shop.states["browse"];
+        assert!(browse.options.iter().any(|c| c.label == "Back."));
+    }
+
+    #[test]
     fn rejects_bad_content() {
         assert!(parse_jobs("[]").is_err());
         assert!(

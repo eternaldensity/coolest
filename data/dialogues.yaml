@@ -8,6 +8,7 @@
       options:
         - label: "Trade."
           effect: trade
+          next: browse
         - label: "Any work around here?"
           next: work
         - label: "Just looking."
@@ -17,6 +18,12 @@
       options:
         - label: "Trade."
           effect: trade
+          next: browse
+    browse:
+      text: "Take a look at the counter — click Buy or type buy <item>."
+      options:
+        - label: "Back."
+          next: hi
     bye:
       text: "Mind the door on your way out."
       options: []

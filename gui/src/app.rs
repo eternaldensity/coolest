@@ -33,11 +33,12 @@ fn pos(x: u8, y: u8) -> Pos {
 }
 
 /// One-line effect blurb for stocked items whose benefit is otherwise
-/// unstated. No entry means no promised effect (e.g. meds, pending).
+/// unstated. No entry means no promised effect.
 fn item_blurb(item: &str) -> &'static str {
     match item {
         "firewall" => " · slows inbound traces",
         "ration" => " · +30 food",
+        "meds" => " · +25 mood, +5 food",
         _ => "",
     }
 }
@@ -241,11 +242,19 @@ impl Shell {
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk"
+                "move arrows/hjkl(vi-keys) · eat · work 0/1 · watch · buy <item> · talk · deposit/withdraw <c>"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
+            _ if cmd.starts_with("deposit ") => match cmd[8..].trim().parse::<i64>() {
+                Ok(amt) => self.do_verb(Verb::Deposit(amt)),
+                Err(_) => self.say(format!("unknown: {cmd}")),
+            },
+            _ if cmd.starts_with("withdraw ") => match cmd[9..].trim().parse::<i64>() {
+                Ok(amt) => self.do_verb(Verb::Withdraw(amt)),
+                Err(_) => self.say(format!("unknown: {cmd}")),
+            },
             "talk" => self.start_talk(),
             "watch" => self.do_verb(Verb::Watch),
             "work 0" => self.do_verb(Verb::Work(0)),
@@ -503,10 +512,12 @@ impl eframe::App for Shell {
                             };
                             match outcome {
                                 Ok((fx, end, text)) => {
-                                    if let Some(fx) = fx {
-                                        self.say(format!("* {fx} *"));
-                                    }
+                                    // Narrate raw effect tags only when the exchange
+                                    // ends on them; transitions speak for themselves.
                                     if end {
+                                        if let Some(fx) = fx {
+                                            self.say(format!("* {fx} *"));
+                                        }
                                         self.talking = None;
                                     } else {
                                         self.say(text);

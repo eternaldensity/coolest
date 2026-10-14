@@ -12,7 +12,7 @@ use crate::shop::Shop;
 use crate::street::{gen_section, gen_section_weighted, Ports, Section};
 use crate::veil::Veil;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir {
@@ -37,6 +37,10 @@ pub enum Verb {
     Watch,
     /// Buy an item from the shop at the actor's tile (ledgered).
     Buy(String),
+    /// Move pocket cash into the bank ledger (logged mint).
+    Deposit(i64),
+    /// Move bank money into pocket cash (logged burn).
+    Withdraw(i64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,6 +340,19 @@ impl World {
         leisure: (u8, u8),
         speed: u64,
     ) {
+        // NPCs need ground like PCs: ensure their section (spawn does the
+        // same for beings; without it navigation has nothing to route on).
+        self.ensure_section(0, 0);
+        // Anchor tiles (home/work/leisure) stay walkable like the generator's
+        // kept cells: timetables address exact tiles, and collision would
+        // otherwise strand NPCs outside unreachable homes.
+        if let Some(s) = self.sections.iter_mut().find(|s| s.sx == 0 && s.sy == 0) {
+            for (ax, ay) in [home, work, leisure] {
+                if ax < 16 && ay < 16 {
+                    s.walk[ay as usize * 16 + ax as usize] = true;
+                }
+            }
+        }
         self.npcs.insert(
             id.0,
             Npc {
@@ -378,6 +395,46 @@ impl World {
     /// Advance NPCs whose turn is due. hour drives timetables; wanted maps
     /// being-id -> standing for cop pursuit (nearest Wanted target).
     /// NPC moves are free within the tick (M1 LOD, noted in design/05).
+    /// One BFS step from `from` toward `to` inside a section (None when
+    /// arrived or unreachable). NPC navigation shares the PC collision
+    /// rules: borders clamp to 1..=14 and walls route around, never through.
+    fn bfs_step(s: &Section, from: (u8, u8), to: (u8, u8)) -> Option<(u8, u8)> {
+        if from == to || !s.walkable(to.0, to.1) {
+            return None;
+        }
+        let idx = |x: u8, y: u8| y as usize * 16 + x as usize;
+        let mut prev: Vec<Option<(u8, u8)>> = vec![None; 256];
+        let mut queue = VecDeque::new();
+        queue.push_back(from);
+        prev[idx(from.0, from.1)] = Some(from);
+        while let Some((x, y)) = queue.pop_front() {
+            if (x, y) == to {
+                break;
+            }
+            for (dx, dy) in [(0i16, -1), (0, 1), (1, 0), (-1, 0)] {
+                let (nx, ny) = (x as i16 + dx, y as i16 + dy);
+                if !(1..=14).contains(&nx) || !(1..=14).contains(&ny) {
+                    continue;
+                }
+                let (nx, ny) = (nx as u8, ny as u8);
+                if !s.walkable(nx, ny) || prev[idx(nx, ny)].is_some() {
+                    continue;
+                }
+                prev[idx(nx, ny)] = Some((x, y));
+                queue.push_back((nx, ny));
+            }
+        }
+        prev[idx(to.0, to.1)]?;
+        let mut cur = to;
+        while let Some(p) = prev[idx(cur.0, cur.1)] {
+            if p == from {
+                return Some(cur);
+            }
+            cur = p;
+        }
+        None
+    }
+
     pub fn step_npcs(&mut self, hour: u8, wanted: &BTreeMap<u64, Standing>) {
         let ids: Vec<u64> = self.npcs.keys().copied().collect();
         for id in ids {
@@ -387,20 +444,19 @@ impl World {
             }
             let table = role_table(self.npcs[&id].role);
             let target = self.npc_target(id, &table, hour, wanted);
+            // BFS one step toward the timetable spot so NPCs route around
+            // the same walls that block PCs; unreachable targets wait out
+            // the tick instead of phasing through.
+            let cur = self.npcs[&id].pos;
+            let step = self
+                .sections
+                .iter()
+                .find(|s| s.sx == cur.sx && s.sy == cur.sy)
+                .and_then(|s| Self::bfs_step(s, (cur.x, cur.y), target));
             let n = self.npcs.get_mut(&id).unwrap();
-            let (dx, dy) = (
-                target.0 as i16 - n.pos.x as i16,
-                target.1 as i16 - n.pos.y as i16,
-            );
-            // Step along the farther axis (4-dir, border-clamped like PCs).
-            let (nx, ny) = if dx.abs() >= dy.abs() {
-                (n.pos.x as i16 + dx.signum(), n.pos.y as i16)
-            } else {
-                (n.pos.x as i16, n.pos.y as i16 + dy.signum())
-            };
-            if (1..=14).contains(&nx) && (1..=14).contains(&ny) {
-                n.pos.x = nx as u8;
-                n.pos.y = ny as u8;
+            if let Some((nx, ny)) = step {
+                n.pos.x = nx;
+                n.pos.y = ny;
             }
             n.next_at = self.tick + n.speed.max(1);
         }
@@ -653,6 +709,42 @@ impl World {
                 b.mood = (b.mood + 15).min(100);
                 kind = "watched";
             }
+            Verb::Deposit(amt) => {
+                if amt <= 0 {
+                    return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
+                }
+                let acct = self
+                    .accts
+                    .get(&intent.actor.0)
+                    .copied()
+                    .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
+                if b.money < amt {
+                    return Err(SimError::new("overdraw", "pocket funds", "short"));
+                }
+                // Verify the account before debiting pocket: mint itself
+                // cannot fail afterward, so either everything moves or nothing.
+                self.ledger.balance(acct)?;
+                b.money -= amt;
+                self.ledger.mint(acct, amt)?;
+                kind = "deposited";
+            }
+            Verb::Withdraw(amt) => {
+                if amt <= 0 {
+                    return Err(SimError::new("neg_amt", "amt > 0", "non-positive"));
+                }
+                let acct = self
+                    .accts
+                    .get(&intent.actor.0)
+                    .copied()
+                    .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
+                let bal = self.ledger.balance(acct)?;
+                if bal < amt {
+                    return Err(SimError::new("overdraw", "bank funds", "short"));
+                }
+                self.ledger.burn(acct, amt)?;
+                b.money += amt;
+                kind = "withdrew";
+            }
             Verb::Buy(ref item) => {
                 // Firewall installs on world host 1 (the starter rig's arena);
                 // check before charging so a duplicate costs nothing.
@@ -712,6 +804,12 @@ impl World {
                 // M1 food shops sell rations that go straight to the pack.
                 if item == "ration" {
                     b.rations = b.rations.saturating_add(1);
+                }
+                // Meds are fast, pricey triage: big mood restore plus a
+                // little food (design/10: order food/meds, shows prop mood).
+                if item == "meds" {
+                    b.mood = (b.mood + 25).min(100);
+                    b.food = (b.food + 5).min(100);
                 }
                 // Packet filter for the starter rig's arena (design/04).
                 // Same defaults as ensure_host; field access keeps the
@@ -1071,6 +1169,91 @@ mod tests {
         assert_eq!(v.ledger.balance(acct).unwrap(), 50);
         assert_eq!(v.shop_at(8, 8).unwrap().stock["meds"].qty, 2);
         assert_eq!(v.ledger.live_sum(), v.ledger.audit_sum());
+    }
+
+    #[test]
+    fn meds_restore_mood_and_a_little_food() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 5000).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("meds", 400, 2, 1, 3, 900);
+        w.place_shop(8, 8, shop);
+        w.set_needs(EntityId(1), 40, 50, 5000, 3);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("meds".into()),
+        })
+        .unwrap();
+        // Pricey triage: +25 mood, +5 food, ledger stays closed.
+        let (food, mood, _, _) = w.needs(EntityId(1)).unwrap();
+        assert_eq!((food, mood), (44, 74));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn pocket_bank_bridge_moves_both_ways() {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 1000).unwrap();
+        // Pocket 200 → bank: audit grows by the deposit.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Deposit(150),
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 50);
+        assert_eq!(w.ledger.balance(acct).unwrap(), 1150);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+        // Bank → pocket: burn logged, pocket credited.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Withdraw(200),
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 250);
+        assert_eq!(w.ledger.balance(acct).unwrap(), 950);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+        // Overdraw, non-positive, and unbanked: refused, nothing moves.
+        for verb in [
+            Verb::Deposit(99999),
+            Verb::Withdraw(99999),
+            Verb::Deposit(0),
+            Verb::Deposit(-5),
+            Verb::Withdraw(0),
+            Verb::Withdraw(-5),
+        ] {
+            w.tick = w.next_at(EntityId(1));
+            assert!(w
+                .apply(&Intent {
+                    actor: EntityId(1),
+                    verb
+                })
+                .is_err());
+        }
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 250);
+        assert_eq!(w.ledger.balance(acct).unwrap(), 950);
+        w.spawn(EntityId(2), pos(8, 8), 1);
+        w.tick = w.next_at(EntityId(2));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(2),
+                verb: Verb::Deposit(10),
+            })
+            .is_err());
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(2),
+                verb: Verb::Withdraw(10),
+            })
+            .is_err());
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
     #[test]
