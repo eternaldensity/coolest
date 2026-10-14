@@ -109,12 +109,19 @@ struct Being {
     mood: u8,   // 0-100
     money: i64, // cents
     rations: u8,
+    /// Last game day rent was charged. Default 0 for old saves.
+    #[serde(default)]
+    last_rent_day: u64,
 }
 
 /// M0.5 jobs: (payout_cents, mood_cost, food_cost). Defaults match
 /// data/jobs.yaml; `set_jobs` overrides from file at runtime.
 const DEFAULT_JOBS: [(i64, u8, u8); 2] = [(60, 5, 2), (120, 9, 4)];
 const WATCH_COST: i64 = 30;
+/// Daily rent (design/04: rent is a burn sink). Provisional tuning: one day
+/// is 1440 ticks; medians from human sessions should set the real number.
+const DAY_TICKS: u64 = 1440;
+const RENT_CENTS: i64 = 200;
 
 /// Save format version. v1 = legacy version-less saves (identical schema);
 /// v2 = stamped. Loaders migrate v1 forward and refuse anything newer.
@@ -273,6 +280,8 @@ impl World {
                 mood: 70,
                 money: 200,
                 rations: 3,
+                // Move-in costs nothing: rent starts accruing tomorrow.
+                last_rent_day: self.tick / DAY_TICKS,
             },
         );
         self.sched.schedule(id, 0);
@@ -537,6 +546,9 @@ impl World {
         if b.mood < 30 {
             return "Mood low: Watch a show (-$0.30)".to_string();
         }
+        if b.money < 0 {
+            return "In debt: work to climb out".to_string();
+        }
         let pay0 = self.jobs.first().map(|j| j.0).unwrap_or(0);
         if b.money < pay0.max(100) {
             return "Cash low: Work a job (Work 0/1)".to_string();
@@ -630,6 +642,13 @@ impl World {
             let catch = (missed / 60).min(100) as u8;
             b.food = b.food.saturating_sub(catch);
             b.mood = b.mood.saturating_sub(catch);
+        }
+        // Daily rent (design/04 economy sink): at most one day's charge per
+        // act, never back-billed. May drive pocket money negative (debt).
+        let day = self.tick / DAY_TICKS;
+        if day > b.last_rent_day {
+            b.last_rent_day = day;
+            b.money -= RENT_CENTS;
         }
         let mut kind = "acted";
         match intent.verb {
@@ -1629,6 +1648,48 @@ mod tests {
         // Installed: goal retires back to settled.
         w.ensure_host(crate::ids::HostId(1)).set_firewall(true);
         assert!(w.advise(EntityId(1)).starts_with("Settled"));
+    }
+
+    #[test]
+    fn rent_charges_once_per_day_and_allows_debt() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 10);
+        // Day 0: acts cost no rent.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 200);
+        // Day 1 boundary: exactly one charge across several acts.
+        w.tick = DAY_TICKS;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 0);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 0);
+        // Day 2 with thin pocket: debt allowed, advise names it.
+        w.tick = DAY_TICKS * 2;
+        w.tick = w.next_at(EntityId(1)).max(w.tick);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, -200);
+        w.set_needs(EntityId(1), 80, 70, -200, 3);
+        assert!(w.advise(EntityId(1)).contains("In debt"));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
     #[test]
