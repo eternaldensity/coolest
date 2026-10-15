@@ -838,6 +838,25 @@ impl Shell {
                         }
                     }
                 });
+                // Get out clean (design/03): scrub your trail on the rig.
+                ui.horizontal(|ui| {
+                    let logs = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .map(|h| h.logs_visible(self.actor).len())
+                        .unwrap_or(0);
+                    ui.label(format!("your trail on this rig: {logs}"));
+                    if ui.button("Scrub log").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::ScrubLog,
+                        }) {
+                            Ok(_) => self.say("log scrubbed".to_string()),
+                            Err(e) => self.say(format!("scrub failed: {e}")),
+                        }
+                    }
+                });
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
@@ -1007,8 +1026,7 @@ impl Shell {
                 ui.horizontal(|ui| {
                     // Power grid (design/02): dark a section or heal it. Both
                     // are logged acts, so replays reproduce the reroute.
-                    if ui.button("Cut power sec (1,0)").clicked() {
-                        match self.server.apply_one(Intent {
+                    if ui.button("Cut power sec (1,0)").clicked() {                        match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::SetPower { sx: 1, sy: 0, up: false },
                         }) {
@@ -1023,6 +1041,35 @@ impl Shell {
                         }) {
                             Ok(_) => self.say("power restored".to_string()),
                             Err(e) => self.say(format!("restore failed: {e}")),
+                        }
+                    }
+                });
+                // Firewall filter (design/04): host 2 blocking host 1
+                // partitions the 1->3 route. A logged act.
+                ui.horizontal(|ui| {
+                    let blocked = self.server.world.net.firewall_blocks(HostId(2), HostId(1));
+                    ui.label(if blocked {
+                        "firewall: host 2 blocks host 1"
+                    } else {
+                        "firewall: open"
+                    });
+                    if ui
+                        .button(if blocked { "Unblock" } else { "Block 1 on 2" })
+                        .clicked()
+                    {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::SetFirewall {
+                                host: HostId(2),
+                                source: HostId(1),
+                                on: !blocked,
+                            },
+                        }) {
+                            Ok(_) => self.say(format!(
+                                "firewall {}",
+                                if blocked { "cleared" } else { "set" }
+                            )),
+                            Err(e) => self.say(format!("firewall failed: {e}")),
                         }
                     }
                 });
@@ -1714,6 +1761,64 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn firewall_toggle_and_scrub_through_clicks() {
+            let mut h = Harness::new();
+            // Net tab: blocking host 1 on host 2 partitions the 1->3 route.
+            h.click("Net");
+            h.click("Route 1→3");
+            assert!(
+                h.shell.log.last().is_some_and(|l| l.contains("HostId(2)")),
+                "log: {:?}",
+                h.shell.log
+            );
+            h.click("Block 1 on 2");
+            assert!(
+                h.has_text("firewall: host 2 blocks host 1"),
+                "text: {:?}",
+                h.labels()
+            );
+            h.click("Route 1→3");
+            assert!(
+                h.shell.log.last().is_some_and(|l| l.contains("no route")),
+                "log: {:?}",
+                h.shell.log
+            );
+            h.click("Unblock");
+            h.click("Route 1→3");
+            assert!(
+                h.shell.log.last().is_some_and(|l| l.contains("HostId(2)")),
+                "log: {:?}",
+                h.shell.log
+            );
+            // Deck tab: the scrub control reports the trail. With no
+            // program on the rig and no privilege, scrubbing is refused
+            // with its cause; deploying a program enables it.
+            h.click("Deck");
+            assert!(
+                h.has_text("your trail on this rig: 0"),
+                "text: {:?}",
+                h.labels()
+            );
+            h.click("Scrub log");
+            assert!(
+                h.shell
+                    .log
+                    .iter()
+                    .any(|l| l.contains("scrub failed: no_access")),
+                "log: {:?}",
+                h.shell.log
+            );
+            h.click_last(".");
+            h.click("Farm loop");
+            h.click("Scrub log");
+            assert!(
+                h.shell.log.iter().any(|l| l == "log scrubbed"),
+                "log: {:?}",
+                h.shell.log
+            );
         }
 
         #[test]
