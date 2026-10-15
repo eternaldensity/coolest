@@ -132,6 +132,10 @@ pub enum Verb {
         y: u8,
         card: String,
     },
+    /// Apply for a license to hack (design/05): 3 threat kills + a clean
+    /// record. Once held, entering honest machines to fight intruders is
+    /// legal — but hitting a defender revokes it with a fresh charge.
+    ApplyLicense,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -640,6 +644,15 @@ impl World {
         });
     }
 
+    /// A host is a sanctioned practice range when the warden sentinel owns
+    /// it: intrusions there are training, not trespass.
+    fn is_range(&self, host: HostId) -> bool {
+        self.hosts
+            .get(&host.0)
+            .map(|h| h.owner() == Some(Host::WARDEN))
+            .unwrap_or(false)
+    }
+
     /// A host is foreign to `actor` when someone else owns it and it is not
     /// a range (unowned wild boxes stay quiet).
     fn is_foreign(&self, actor: EntityId, host: HostId) -> bool {
@@ -1063,6 +1076,7 @@ impl World {
         // Deck acts land on world host 1; computed before the being borrow
         // because it reads host ownership.
         let deck_foreign = self.is_foreign(intent.actor, HostId(1));
+        let deck_range = self.is_range(HostId(1));
         let b = self.beings.get_mut(&intent.actor.0).ok_or(SimError::new(
             "unknown_actor",
             "spawned entity",
@@ -1235,7 +1249,9 @@ impl World {
                     .load(id, intent.actor, CellPos(x, y), 3, 1)?;
                 kind = "loaded";
                 // Loading onto a foreign, non-range rig is trespass.
-                if deck_foreign {
+                // A licensed hacker may enter honest machines to fight
+                // intruders, so that entry is not trespass (design/05).
+                if deck_foreign && !self.license.granted {
                     crimes.push((Act::Trespass, Some(HostId(1)), None, true));
                 }
                 extra_kinds = Self::deck_beat(
@@ -1254,9 +1270,22 @@ impl World {
                     .strike(CellPos(x, y))?;
                 if killed {
                     extra_kinds.push("kill".to_string());
-                    // Destroying someone else's program on a foreign rig.
-                    if deck_foreign {
-                        crimes.push((Act::Attack, Some(HostId(1)), None, true));
+                }
+                // License bookkeeping (design/05): killing a range warden
+                // is a sanctioned threat kill; killing a defender on a
+                // foreign rig while licensed is abuse (which supersedes the
+                // plain attack charge); anything else on a foreign rig is
+                // an attack.
+                if killed {
+                    if deck_range {
+                        self.license.add_kill();
+                    } else if deck_foreign {
+                        if self.license.granted {
+                            let tick = self.tick;
+                            self.license.abuse(&mut self.record, tick);
+                        } else {
+                            crimes.push((Act::Attack, Some(HostId(1)), None, true));
+                        }
                     }
                 }
                 kind = "struck";
@@ -1497,6 +1526,10 @@ impl World {
                         true,
                     );
                 }
+            }
+            Verb::ApplyLicense => {
+                self.license.apply(&self.record)?;
+                kind = "licensed";
             }
             Verb::DeckMod { x, y, ref card } => {
                 // Install a persistent mod on your program (design/03):
@@ -3327,6 +3360,77 @@ mod tests {
             .unwrap()
             .logs_visible(EntityId(1))
             .is_empty());
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn license_arc_threat_kills_then_abuse_revokes() {
+        // Range rig (warden-owned) so kills count as threat kills.
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let rig = w.ensure_host(HostId(1));
+        rig.set_owner(Some(Host::WARDEN));
+        // Three warden programs posted at distinct cells to kill.
+        for i in 0..crate::crime::LICENSE_KILLS {
+            let x = 2 + (i as u8) * 3;
+            rig.load(EntityId(70 + i as u64), Host::WARDEN, CellPos(x, 2), 1, 1)
+                .unwrap();
+        }
+        for i in 0..crate::crime::LICENSE_KILLS {
+            let x = 2 + (i as u8) * 3;
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckStrike { x, y: 2 },
+            })
+            .unwrap();
+        }
+        assert_eq!(w.license().threat_kills, crate::crime::LICENSE_KILLS);
+        assert!(w.license().eligible(w.record()));
+        // Apply: granted.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::ApplyLicense,
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("licensed"));
+        assert!(w.license().granted);
+        // Re-applying is refused.
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::ApplyLicense,
+            })
+            .is_err());
+
+        // A licensed hacker entering a foreign rig is not trespassing.
+        let mut w2 = World::new(1);
+        w2.spawn(EntityId(1), pos(8, 8), 1);
+        w2.license.granted = true;
+        w2.ensure_host(HostId(1)).set_owner(Some(EntityId(11)));
+        w2.tick = w2.next_at(EntityId(1));
+        w2.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoad { x: 0, y: 0 },
+        })
+        .unwrap();
+        assert_eq!(w2.record().len(), 0, "licensed entry is legal");
+        // Hitting a defender while licensed is abuse: revoked + charged.
+        w2.ensure_host(HostId(1))
+            .load(EntityId(50), EntityId(11), CellPos(5, 5), 1, 1)
+            .unwrap();
+        w2.tick = w2.next_at(EntityId(1));
+        w2.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckStrike { x: 5, y: 5 },
+        })
+        .unwrap();
+        assert!(w2.license().revoked && !w2.license().granted);
+        assert_eq!(w2.record_mass(), 4.0, "abuse files a full Attack");
+        assert!(!w2.license().eligible(w2.record()));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 

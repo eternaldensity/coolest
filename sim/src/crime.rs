@@ -218,6 +218,10 @@ pub const LICENSE_KILLS: u32 = 3;
 pub struct License {
     pub threat_kills: u32,
     pub revoked: bool,
+    /// Granted once applied for while eligible (design/05). Default false
+    /// for old saves.
+    #[serde(default)]
+    pub granted: bool,
 }
 
 impl License {
@@ -233,10 +237,28 @@ impl License {
         !self.revoked && self.threat_kills >= LICENSE_KILLS && record.mass() == 0.0
     }
 
+    /// Grant the license if the holder qualifies. Refuses when ineligible
+    /// or already held.
+    pub fn apply(&mut self, record: &Record) -> Result<(), SimError> {
+        if self.granted {
+            return Err(SimError::new("already_licensed", "no license", "held"));
+        }
+        if !self.eligible(record) {
+            return Err(SimError::new(
+                "ineligible",
+                "3 threat kills + clean record",
+                "short",
+            ));
+        }
+        self.granted = true;
+        Ok(())
+    }
+
     /// Abuse: attack on a defender while licensed. Revokes + files Attack
     /// at full evidence (the heavy penalty).
     pub fn abuse(&mut self, record: &mut Record, tick: u64) {
         self.revoked = true;
+        self.granted = false;
         record.report(Crime {
             act: Act::Attack,
             at_host: None,
