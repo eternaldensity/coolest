@@ -528,6 +528,22 @@ impl Shell {
                         Err(e) => self.say(format!("license refused: {e}")),
                     }
                 }
+                // Clan (design/05 M4b): dues + initiation, lifetime enemies.
+                let in_clan = self.server.world.clans().is_member(1, self.actor);
+                ui.label(if in_clan {
+                    "clan: member of 1"
+                } else {
+                    "clan: none"
+                });
+                if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
+                    match self.server.apply_one(Intent {
+                        actor: self.actor,
+                        verb: Verb::JoinClan { clan: 1 },
+                    }) {
+                        Ok(_) => self.say("joined clan 1".to_string()),
+                        Err(e) => self.say(format!("join refused: {e}")),
+                    }
+                }
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 let tick = self.server.world.tick;
                 ui.label(format!(
