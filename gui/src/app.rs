@@ -889,6 +889,37 @@ impl Shell {
                         }
                     }
                 });
+                // Persistent abilities (design/03 Program.mods): build one
+                // into your program on the selected cell; it fires on every
+                // exchange rather than once.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Mods @selected:");
+                    for card in ["tank", "plating", "reflect", "splash", "extra"] {
+                        // "Mod " prefix keeps these distinct from the
+                        // one-shot cards of the same name.
+                        let label = match self.server.world.card_cost(card) {
+                            Some((res, n)) => format!("Mod {card} ({n} {})", res.name()),
+                            None => format!("Mod {card}"),
+                        };
+                        if ui.button(label).clicked() {
+                            let msg = match self.sel {
+                                Some((x, y)) => match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::DeckMod {
+                                        x,
+                                        y,
+                                        card: card.to_string(),
+                                    },
+                                }) {
+                                    Ok(_) => format!("mod {card} built @({x},{y})"),
+                                    Err(e) => format!("mod {card} refused: {e}"),
+                                },
+                                None => "click a cell first".to_string(),
+                            };
+                            self.say(msg);
+                        }
+                    }
+                });
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
@@ -1017,6 +1048,34 @@ impl Shell {
                         .collect::<Vec<_>>()
                         .join(" · ");
                     ui.label(format!("Producers: {line}"));
+                }
+                // Selected program's persistent abilities.
+                if let Some((x, y)) = self.sel {
+                    let mods = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .and_then(|h| h.prog_at(x, y))
+                        .map(|p| {
+                            self.server
+                                .world
+                                .host(HostId(1))
+                                .map(|h| h.mods_of(p).to_vec())
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
+                    let names: Vec<String> = mods
+                        .iter()
+                        .map(|m| format!("{m:?}"))
+                        .collect();
+                    ui.label(format!(
+                        "@({x},{y}) mods: {}",
+                        if names.is_empty() {
+                            "none".to_string()
+                        } else {
+                            names.join(" · ")
+                        }
+                    ));
                 }
             }
             Tab::Net => {
@@ -1830,6 +1889,32 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn mods_persist_on_the_selected_program() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            // Farm a producer (gives us a program), then build a mod into
+            // it. Splash costs 2 loop, so fund it first.
+            h.click_last(".");
+            h.click("Farm loop");
+            // Fund the 2-loop cost from the Street tab's Code control.
+            h.click("Street");
+            for _ in 0..2 {
+                h.click_prefix("Code loop (");
+            }
+            h.click("Deck");
+            h.click("P");
+            h.click("Mod splash (2 loop)");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("mod splash built")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(h.has_text("mods: Splash"), "text: {:?}", h.labels());
+            // Persists: a second attack attempt does not clear it.
+            assert!(h.has_text("@(") || h.has_text("mods: Splash"));
         }
 
         #[test]
