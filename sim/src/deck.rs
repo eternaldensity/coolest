@@ -87,13 +87,32 @@ impl DeckStats {
     }
 }
 
-/// M2b next-turn-only effects. Full 2024 table lands incrementally; v1 covers
-/// skip (Distract), shield (tank/avoid), DoT (Freakout→Stability poison).
+/// M2b next-turn-only effects (design/03 closed table). Dice affect crits,
+/// not baseline segment damage, so basic-strike TTK stays deterministic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Fx {
     SkipNext,
     ShieldNext(u8),
     DotNext(u8),
+    /// The victim's next attack roll is reduced by N (floor 1).
+    RollMinus(u8),
+    /// The victim's next attack cannot crit on this face (treated as one
+    /// lower, so a 6 becomes 5).
+    BanDie(u8),
+    /// The next attack on this program is absorbed entirely (decoy zero).
+    DecoyNext,
+    /// This program's next attack deals half damage (floor 1).
+    DowngradeNext,
+    /// Return the next incoming damage to the attacker.
+    ReflectNext,
+    /// This program's next attack also deals 1 to orthogonally adjacent
+    /// program cells.
+    SplashNext,
+    /// Roll twice on the next attack and keep the higher face.
+    ExtraRollNext,
+    /// The next attack retargets to a random occupied cell (design/03
+    /// "random-target").
+    RandomTargetNext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +199,16 @@ pub struct Host {
     // Defaults to None so old saves and fresh arenas behave as before.
     #[serde(default)]
     owner: Option<EntityId>,
+    /// Deterministic dice state (design/03: resolution uses dice). Advanced
+    /// once per roll, serialized so save/replay reproduce the same faces.
+    /// Default is a nonzero constant so old saves still roll.
+    #[serde(default = "default_rng")]
+    rng: u64,
+}
+
+/// Nonzero xorshift seed for hosts without a serialized rng state.
+fn default_rng() -> u64 {
+    0x9E37_79B9_7F4A_7C15
 }
 
 /// What one retaliation beat did. Clients use `traced` to mark funnel
@@ -196,6 +225,19 @@ pub struct Retaliation {
     pub killed: bool,
     /// A completed trace burned a program this beat.
     pub burned: bool,
+}
+
+/// What one card attack did (design/03 resolution): for narration/tests.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct AttackOutcome {
+    pub killed: bool,
+    pub damage: u32,
+    pub face: u8,
+    pub crit: bool,
+    pub reflected: bool,
+    pub splashed: Vec<EntityId>,
+    pub retargeted: bool,
+    pub absorbed: bool,
 }
 
 impl Host {
@@ -219,7 +261,22 @@ impl Host {
             flagged: false,
             firewall: false,
             owner: None,
+            // Seed from the host id so distinct rigs roll differently, and
+            // never zero (xorshift would stick).
+            rng: default_rng() ^ (id.0.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1),
         }
+    }
+
+    /// Advance the dice state and return a face in `1..=sides`.
+    pub fn roll(&mut self, sides: u8) -> u8 {
+        // xorshift64
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.rng = x;
+        let sides = sides.max(1) as u64;
+        ((x % sides) + 1) as u8
     }
 
     pub fn cpu_load(&self) -> u32 {
@@ -457,7 +514,29 @@ impl Host {
     /// cross-check test fails on drift in either direction.
     pub fn implemented_cards() -> Vec<&'static str> {
         vec![
-            "distract", "freakout", "tank", "patch", "spike", "overload", "farm", "copy",
+            // negative
+            "distract",
+            "freakout",
+            "stun",
+            "jam",
+            "hex",
+            "decoy",
+            "downgrade",
+            "shuffle",
+            // positive
+            "tank",
+            "plating",
+            "patch",
+            "spike",
+            "overload",
+            "reflect",
+            "splash",
+            "extra",
+            // manipulation
+            "farm",
+            "copy",
+            "load",
+            "upgrade",
         ]
     }
 
@@ -813,6 +892,31 @@ impl Host {
         self.makers.get(&prog.0).cloned()
     }
 
+    /// Program occupying a cell, if any (client/card targeting).
+    pub fn prog_at(&self, x: u8, y: u8) -> Option<EntityId> {
+        self.cell_get(x, y).map(|s| s.prog)
+    }
+
+    /// Farm card: one production tick for the owner's makers, immediately.
+    /// Returns the per-resource totals (sorted).
+    pub fn farm_once(&mut self, owner: EntityId) -> Vec<(Res, u32)> {
+        let makers: Vec<(EntityId, Vec<Res>)> = self
+            .progs
+            .values()
+            .filter(|p| p.owner == owner)
+            .filter_map(|p| self.makers.get(&p.id.0).map(|(m, _)| (p.id, m.clone())))
+            .collect();
+        let mut out: std::collections::BTreeMap<Res, u32> = Default::default();
+        for (id, makes) in makers {
+            for r in makes {
+                if let Ok(n) = self.produce(id, r, 1) {
+                    *out.entry(r).or_insert(0) += n;
+                }
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// First free arena cell in reading order (client convenience: deploy a
     /// producer without making the player pick a cell).
     pub fn free_cell(&self) -> Option<CellPos> {
@@ -894,6 +998,116 @@ impl Host {
             dmg += pile;
         }
         self.deal_damage(target, dmg)
+    }
+
+    /// Card attack (design/03: paired stats + dice + resources). Baseline
+    /// segment damage matches `card_strike`; the d6 only decides a crit
+    /// (+1) so plain-strike TTK stays deterministic. Both sides' next-turn
+    /// effects modify the roll and the outcome.
+    pub fn card_attack(
+        &mut self,
+        owner: EntityId,
+        attacker: EntityId,
+        target: CellPos,
+        consume: Option<(Res, u32)>,
+        consume_all: Option<Res>,
+    ) -> Result<AttackOutcome, SimError> {
+        let mut out = AttackOutcome::default();
+        // 1. Base damage from resources (spent up front; a refused spend
+        //    leaves everything untouched).
+        let mut dmg: u32 = 1;
+        if let Some((res, n)) = consume {
+            self.spend(owner, res, n)?;
+            dmg += n;
+        }
+        if let Some(res) = consume_all {
+            let pile = self.stock(owner, res);
+            self.spend(owner, res, pile)?;
+            dmg += pile;
+        }
+        // 2. Random-target: retarget to a random occupied cell.
+        let target = if self.take_fx(attacker, |f| matches!(f, Fx::RandomTargetNext)) {
+            let cells: Vec<CellPos> = self.cells.iter().map(|c| CellPos(c.x, c.y)).collect();
+            if cells.is_empty() {
+                return Err(SimError::new("no_target", "occupied cell", "empty"));
+            }
+            let i = (self.roll(cells.len() as u8) - 1) as usize;
+            out.retargeted = true;
+            cells[i]
+        } else {
+            target
+        };
+        let seg = self.cell_get(target.0, target.1).ok_or(SimError::new(
+            "no_target",
+            "program cell",
+            "empty",
+        ))?;
+        let victim = seg.prog;
+        // 3. Roll the attack die, honouring both sides' modifiers.
+        let mut face = self.roll(6);
+        if self.take_fx(attacker, |f| matches!(f, Fx::ExtraRollNext)) {
+            face = face.max(self.roll(6));
+        }
+        if let Some(Fx::BanDie(b)) = self.fx_of(victim, |f| matches!(f, Fx::BanDie(_))) {
+            if face == b {
+                face = face.saturating_sub(1).max(1);
+                self.take_fx(victim, |f| matches!(f, Fx::BanDie(_)));
+            }
+        }
+        if let Some(Fx::RollMinus(m)) = self.fx_of(victim, |f| matches!(f, Fx::RollMinus(_))) {
+            face = face.saturating_sub(m).max(1);
+            self.take_fx(victim, |f| matches!(f, Fx::RollMinus(_)));
+        }
+        out.face = face;
+        if face >= 5 {
+            out.crit = true;
+            dmg += 1;
+        }
+        // Downgrade: this attacker's next hit lands at half strength.
+        if self.take_fx(attacker, |f| matches!(f, Fx::DowngradeNext)) {
+            dmg = (dmg / 2).max(1);
+        }
+        // Decoy: the victim absorbs the hit entirely.
+        if self.take_fx(victim, |f| matches!(f, Fx::DecoyNext)) {
+            out.absorbed = true;
+            out.damage = 0;
+            return Ok(out);
+        }
+        // Reflect: the damage lands on the attacker's body instead (a
+        // headshot would make reflect unconditionally lethal).
+        if self.take_fx(victim, |f| matches!(f, Fx::ReflectNext)) {
+            out.reflected = true;
+            out.damage = dmg;
+            let body = self
+                .progs
+                .get(&attacker.0)
+                .and_then(|p| p.tail.back().copied().or(Some(p.head)));
+            if let Some(b) = body {
+                if self.deal_damage(b, dmg)? {
+                    out.killed = true;
+                }
+            }
+            return Ok(out);
+        }
+        out.damage = dmg;
+        out.killed = self.deal_damage(target, dmg)?;
+        // Splash: 1 damage to orthogonally adjacent program cells.
+        if self.take_fx(attacker, |f| matches!(f, Fx::SplashNext)) {
+            let neighbours = [
+                (target.0.wrapping_sub(1), target.1),
+                (target.0.wrapping_add(1), target.1),
+                (target.0, target.1.wrapping_sub(1)),
+                (target.0, target.1.wrapping_add(1)),
+            ];
+            for (x, y) in neighbours {
+                if let Some(seg) = self.cell_get(x, y) {
+                    let v = seg.prog;
+                    let _ = self.deal_damage(CellPos(x, y), 1)?;
+                    out.splashed.push(v);
+                }
+            }
+        }
+        Ok(out)
     }
 
     fn deal_damage(&mut self, target: CellPos, mut dmg: u32) -> Result<bool, SimError> {
@@ -1010,6 +1224,67 @@ impl Host {
         *v = (*v + n).min(20);
         Ok(name)
     }
+
+    // ---- M2 card table (design/03 closed effect set) ----
+
+    /// True when the program carries an effect matching `pred`.
+    pub fn has_fx(&self, prog: EntityId, pred: impl Fn(&Fx) -> bool) -> bool {
+        self.effects
+            .get(&prog.0)
+            .is_some_and(|v| v.iter().any(&pred))
+    }
+
+    /// Read the first matching effect (for its payload).
+    pub fn fx_of(&self, prog: EntityId, pred: impl Fn(&Fx) -> bool) -> Option<Fx> {
+        self.effects
+            .get(&prog.0)
+            .and_then(|v| v.iter().find(|f| pred(f)).copied())
+    }
+
+    /// Consume (remove) one matching effect; true when one was present.
+    fn take_fx(&mut self, prog: EntityId, pred: impl Fn(&Fx) -> bool) -> bool {
+        if let Some(v) = self.effects.get_mut(&prog.0) {
+            if let Some(i) = v.iter().position(&pred) {
+                v.remove(i);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Load card: append one tail segment adjacent to the program's tail
+    /// end (or head when it has no tail). `blocked` when no free cell
+    /// touches the body.
+    pub fn grow(&mut self, prog: EntityId) -> Result<CellPos, SimError> {
+        let p =
+            self.progs
+                .get(&prog.0)
+                .ok_or(SimError::new("no_prog", "live program", "missing"))?;
+        let anchor = p.tail.back().copied().unwrap_or(p.head);
+        let cand = [
+            CellPos(anchor.0.wrapping_sub(1), anchor.1),
+            CellPos(anchor.0.wrapping_add(1), anchor.1),
+            CellPos(anchor.0, anchor.1.wrapping_sub(1)),
+            CellPos(anchor.0, anchor.1.wrapping_add(1)),
+        ]
+        .into_iter()
+        .find(|c| self.free(*c));
+        let at = cand.ok_or(SimError::new("blocked", "free adjacent cell", "cramped"))?;
+        self.cell_put(at.0, at.1, prog, false);
+        self.progs.get_mut(&prog.0).unwrap().tail.push_back(at);
+        Ok(at)
+    }
+
+    /// Upgrade card: raise the program's growth cap by `n`.
+    pub fn upgrade_max(&mut self, prog: EntityId, n: u8) -> Result<u8, SimError> {
+        let p = self.progs.get_mut(&prog.0).ok_or(SimError::new(
+            "no_prog",
+            "live program",
+            "missing",
+        ))?;
+        p.max_len = p.max_len.saturating_add(n);
+        Ok(p.max_len)
+    }
 }
 
 #[cfg(test)]
@@ -1099,6 +1374,229 @@ mod tests {
             want.insert(c.id.as_str());
         }
         assert_eq!(have, want);
+        // design/09 M2: the closed table is 8 negative / 8 positive /
+        // 4 manipulation.
+        assert_eq!(t.negative.len(), 8, "negative cards");
+        assert_eq!(t.positive.len(), 8, "positive cards");
+        assert_eq!(t.manipulation.len(), 4, "manipulation cards");
+        // Every negative card names an effect this build resolves.
+        for c in &t.negative {
+            assert!(!c.effect.is_empty(), "negative {} has no effect", c.id);
+        }
+    }
+
+    /// A program grown to `len` cells starting at (x,y), moving east.
+    fn grown(h: &mut Host, id: EntityId, owner: EntityId, x: u8, y: u8, len: u8) -> CellPos {
+        h.load(id, owner, CellPos(x, y), len, 1).unwrap();
+        for i in 1..len {
+            h.step(id, CellPos(x + i, y)).unwrap();
+        }
+        CellPos(x + len - 1, y)
+    }
+
+    /// A body cell to strike (rear tail) so attacks measure damage instead
+    /// of taking a headshot; falls back to the head for single-cell programs.
+    fn body(h: &Host, id: u64) -> CellPos {
+        let p = &h.progs[&id];
+        p.tail.back().copied().unwrap_or(p.head)
+    }
+
+    /// Standard arena: attacker (10) row 0, victim (20) row 3 from x=4,
+    /// neighbour (30) at (4,4) beside the victim's head.
+    fn arena() -> Host {
+        let mut h = host();
+        grown(&mut h, EntityId(10), EntityId(1), 0, 0, 11);
+        grown(&mut h, EntityId(20), EntityId(2), 1, 3, 11);
+        grown(&mut h, EntityId(30), EntityId(2), 10, 4, 2);
+        h
+    }
+
+    #[test]
+    fn card_attack_crit_maps_to_face_and_keeps_baseline_ttk() {
+        let mut h = arena();
+        // Base damage 1; a face of 5-6 crits for +1. Relationship is exact
+        // and seed-independent.
+        for _ in 0..4 {
+            let out = h
+                .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+                .unwrap();
+            assert_eq!(out.crit, out.face >= 5, "face {}", out.face);
+            assert_eq!(out.damage, if out.crit { 2 } else { 1 });
+            assert!((1..=6).contains(&out.face));
+        }
+    }
+
+    #[test]
+    fn roll_minus_and_ban_die_weaken_the_attacker() {
+        let mut h = arena();
+        // RollMinus(3): the attacker's face can never exceed 3, so no crit.
+        h.apply_fx(EntityId(20), Fx::RollMinus(3)).unwrap();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+            .unwrap();
+        assert!(out.face <= 3, "face {} not reduced", out.face);
+        assert!(!out.crit);
+        assert!(!h.has_fx(EntityId(20), |f| matches!(f, Fx::RollMinus(_))));
+        // BanDie(6): a six is demoted, so the face is never 6.
+        h.apply_fx(EntityId(20), Fx::BanDie(6)).unwrap();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+            .unwrap();
+        assert_ne!(out.face, 6, "banned face still rolled");
+    }
+
+    #[test]
+    fn extra_roll_keeps_the_higher_face() {
+        let mut h = arena();
+        // Over many extra-roll attacks at least one crit must appear (a max
+        // of two d6 beats a single die); deterministic per seed.
+        let mut crits = 0;
+        for _ in 0..12 {
+            if !h.progs.contains_key(&20) {
+                grown(&mut h, EntityId(20), EntityId(2), 1, 3, 11);
+            }
+            h.apply_fx(EntityId(10), Fx::ExtraRollNext).unwrap();
+            let out = h
+                .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+                .unwrap();
+            if out.crit {
+                crits += 1;
+            }
+        }
+        assert!(crits > 0, "extra roll never produced a crit");
+    }
+
+    #[test]
+    fn decoy_absorbs_reflect_returns_splash_hits_neighbours() {
+        let mut h = arena();
+        // Decoy: the hit is absorbed, victim untouched, effect consumed.
+        h.apply_fx(EntityId(20), Fx::DecoyNext).unwrap();
+        let before = h.progs[&20].len();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+            .unwrap();
+        assert!(out.absorbed && out.damage == 0);
+        assert_eq!(h.progs[&20].len(), before);
+        // Reflect: damage lands on the attacker's body instead.
+        h.apply_fx(EntityId(20), Fx::ReflectNext).unwrap();
+        let atk_before = h.progs[&10].len();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+            .unwrap();
+        assert!(out.reflected);
+        assert!(h.progs[&10].len() < atk_before, "attacker took the hit");
+        // Splash: the neighbour beside the victim head takes 1.
+        h.apply_fx(EntityId(10), Fx::SplashNext).unwrap();
+        let nb_before = h.progs[&30].len();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), h.progs[&20].head, None, None)
+            .unwrap();
+        assert!(out.splashed.contains(&EntityId(30)), "{:?}", out.splashed);
+        // Splash lands on a cell, so it can even headshot: 30 either shrank
+        // or died, but it was definitely hit.
+        let nb_after = h.progs.get(&30).map(|p| p.len()).unwrap_or(0);
+        assert!(
+            nb_after < nb_before,
+            "neighbour splashed: {nb_after} vs {nb_before}"
+        );
+    }
+
+    #[test]
+    fn downgrade_halves_and_random_target_retargets() {
+        let mut h = arena();
+        // Downgrade with resources: 1 + 3 = 4 base (+crit), halved.
+        h.add_stock(EntityId(2), Res::Loop, 3);
+        h.apply_fx(EntityId(10), Fx::DowngradeNext).unwrap();
+        let out = h
+            .card_attack(
+                EntityId(2),
+                EntityId(10),
+                body(&h, 20),
+                Some((Res::Loop, 3)),
+                None,
+            )
+            .unwrap();
+        assert!(out.damage <= 2, "not halved: {}", out.damage);
+        // Random target: the attack is retargeted to some occupied cell.
+        h.apply_fx(EntityId(10), Fx::RandomTargetNext).unwrap();
+        let out = h
+            .card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+            .unwrap();
+        assert!(out.retargeted);
+        assert!(!h.has_fx(EntityId(10), |f| matches!(f, Fx::RandomTargetNext)));
+    }
+
+    #[test]
+    fn grow_and_upgrade_reshape_a_program() {
+        let mut h = host();
+        grown(&mut h, EntityId(10), EntityId(1), 0, 0, 2);
+        assert_eq!(h.progs[&10].len(), 2);
+        // Grow extends the body at the rear with a free neighbour.
+        let at = h.grow(EntityId(10)).unwrap();
+        assert_eq!(h.progs[&10].len(), 3);
+        assert!(h.cell_get(at.0, at.1).is_some());
+        // Upgrade raises the growth cap, so a further step keeps the length
+        // instead of sliding back down.
+        let cap = h.upgrade_max(EntityId(10), 1).unwrap();
+        assert_eq!(cap, 3);
+        h.step(EntityId(10), CellPos(2, 0)).unwrap();
+        assert_eq!(h.progs[&10].len(), 3, "kept length under the new cap");
+        // grow/upgrade on a missing program refuse.
+        assert!(h.grow(EntityId(99)).is_err());
+        assert!(h.upgrade_max(EntityId(99), 1).is_err());
+    }
+
+    #[test]
+    fn card_attack_ttk_stays_bounded() {
+        // design/03: the table is "small enough to balance TTK 3-4 hits".
+        // A plain card attack (no resources) takes 2-3 hits on a len-3
+        // body; a funded spike clears it in one. Deterministic per seed.
+        let mut h = host();
+        grown(&mut h, EntityId(10), EntityId(1), 0, 0, 3);
+        grown(&mut h, EntityId(20), EntityId(2), 4, 3, 3);
+        let mut hits = 0;
+        while h.progs.contains_key(&20) {
+            h.card_attack(EntityId(2), EntityId(10), body(&h, 20), None, None)
+                .unwrap();
+            hits += 1;
+            assert!(hits <= 4, "plain card attack TTK {hits} exceeded 4");
+        }
+        assert!((2..=4).contains(&hits), "plain TTK {hits} outside 2-4");
+        // Funded spike (consume 3) finishes a len-3 body in a single hit.
+        grown(&mut h, EntityId(21), EntityId(2), 4, 6, 3);
+        h.add_stock(EntityId(2), Res::Loop, 3);
+        let out = h
+            .card_attack(
+                EntityId(2),
+                EntityId(10),
+                body(&h, 21),
+                Some((Res::Loop, 3)),
+                None,
+            )
+            .unwrap();
+        assert!(out.damage >= 4, "funded hit only {} ", out.damage);
+        // 4 damage strips both tail segments; the head alone remains, so
+        // the body is reduced to a single cell rather than destroyed.
+        assert_eq!(h.progs[&21].len(), 1, "funded spike stripped the body");
+    }
+
+    #[test]
+    fn rolls_are_deterministic_in_range_and_seeded_per_host() {
+        let mut a = host();
+        let mut b = host();
+        // Same seed, same sequence.
+        let sa: Vec<u8> = (0..8).map(|_| a.roll(6)).collect();
+        let sb: Vec<u8> = (0..8).map(|_| b.roll(6)).collect();
+        assert_eq!(sa, sb);
+        assert!(sa.iter().all(|f| (1..=6).contains(f)), "faces: {sa:?}");
+        // Not constant (a stuck RNG would be a bug).
+        assert!(sa.iter().collect::<std::collections::BTreeSet<_>>().len() > 1);
+        // Distinct hosts roll differently.
+        let mut c = Host::new(HostId(7), 12, 8, 100);
+        let sc: Vec<u8> = (0..8).map(|_| c.roll(6)).collect();
+        assert_ne!(sa, sc);
+        // sides is clamped to at least 1.
+        assert_eq!(a.roll(0), 1);
     }
 
     #[test]
