@@ -1,22 +1,69 @@
-# M2b card/effect table v1 (see sim/src/deck.rs Fx + card_strike).
-# next-turn-only unless noted. Full 2024 table lands incrementally.
+# M2b card/effect table (see sim/src/deck.rs Fx + card_attack).
+# next-turn-only unless noted. Targets the negative pole per design/03.
+# The yaml ids must match Host::implemented_cards() exactly (cross-check
+# test), and the split is pinned at 8 negative / 8 positive / 4 manipulation.
 negative:
+  # skip: victim loses its next act.
   - id: distract
     effect: SkipNext
+  # stability poison: one tail segment per turn.
   - id: freakout
     effect: DotNext(1)
     targets: stability
+  # stronger stability poison.
+  - id: stun
+    effect: DotNext(2)
+    targets: stability
+  # the victim's next attack roll is reduced by 2.
+  - id: jam
+    effect: RollMinus(2)
+  # the victim cannot crit on a 6 next attack.
+  - id: hex
+    effect: BanDie(6)
+  # the next attack on the victim is absorbed entirely.
+  - id: decoy
+    effect: DecoyNext
+  # the victim's next attack lands at half damage.
+  - id: downgrade
+    effect: DowngradeNext
+  # the victim's next attack retargets to a random occupied cell.
+  - id: shuffle
+    effect: RandomTargetNext
 positive:
+  # absorb one segment.
   - id: tank
     effect: ShieldNext(1)
+  # absorb two segments.
+  - id: plating
+    effect: ShieldNext(2)
+  # heal the lowest paired stat.
   - id: patch
     effect: heal-lowest
+  # spend N of one resource for +N damage.
   - id: spike
     effect: consume-to-damage
+  # spend the whole pile of one resource for +pile damage.
   - id: overload
     effect: consume-all-to-damage
+  # return the next incoming hit to the attacker's body.
+  - id: reflect
+    effect: ReflectNext
+  # the next attack also deals 1 to adjacent program cells.
+  - id: splash
+    effect: SplashNext
+  # roll twice on the next attack and keep the higher face.
+  - id: extra
+    effect: ExtraRollNext
 manipulation:
+  # producers fill stock (see set_maker).
   - id: farm
     effect: produce
+  # clone a segment onto a free adjacent cell.
   - id: copy
     effect: clone-segment
+  # grow the body by one segment.
+  - id: load
+    effect: grow
+  # raise the growth cap.
+  - id: upgrade
+    effect: upgrade-max
