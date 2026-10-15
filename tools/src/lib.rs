@@ -400,7 +400,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(150) {
+    match rng.below(157) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -459,7 +459,7 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
                 .to_string(),
         },
         137..=140 => Verb::SendTrojan {
-            host: HostId(1 + rng.below(2) as u64),
+            to: EntityId(1 + rng.below(11) as u64),
         },
         141 => Verb::PayFine,
         142..=146 => Verb::DeckMod {
@@ -470,7 +470,15 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
         },
         147 => Verb::ApplyLicense,
         148 => Verb::JoinClan { clan: 1 },
-        _ => Verb::ScrubLog,
+        149 => Verb::CraftMailerPlus,
+        150..=152 => Verb::SendMail {
+            to: EntityId(1 + rng.below(11) as u64),
+            body: "hi".to_string(),
+        },
+        153..=155 => Verb::SendTrojan {
+            to: EntityId(1 + rng.below(11) as u64),
+        },
+        _ => Verb::OpenMail { index: 0 },
     }
 }
 
