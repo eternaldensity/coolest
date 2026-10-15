@@ -400,7 +400,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(143) {
+    match rng.below(148) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -462,6 +462,12 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
             host: HostId(1 + rng.below(2) as u64),
         },
         141 => Verb::PayFine,
+        142..=146 => Verb::DeckMod {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+            card: ["tank", "plating", "reflect", "splash", "extra"][rng.below(5) as usize]
+                .to_string(),
+        },
         _ => Verb::ScrubLog,
     }
 }
