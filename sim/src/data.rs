@@ -68,6 +68,27 @@ pub struct CardDef {
     pub id: String,
     pub effect: String,
     pub targets: Option<String>,
+    /// Resource the card spends when played (design/03: "some consume to
+    /// fire"). Absent/blank when the card is free (attacks fund their own
+    /// damage; farm is a producer action).
+    #[serde(default)]
+    pub cost_resource: String,
+    /// Units of `cost_resource` spent per play. 0 = free.
+    #[serde(default)]
+    pub cost_units: u32,
+}
+
+impl CardDef {
+    /// Resource index for the cost (0 loop / 1 data / 2 algo), or None when
+    /// the card is free.
+    pub fn cost_index(&self) -> Option<u8> {
+        match self.cost_resource.as_str() {
+            "loop" => Some(0),
+            "data" => Some(1),
+            "algo" => Some(2),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,6 +217,16 @@ pub fn parse_cards(s: &str) -> Result<CardTable, SimError> {
     if n == 0 {
         return Err(SimError::new("data", ">= 1 card", "empty"));
     }
+    // A card with a cost must name a known resource.
+    for c in t.negative.iter().chain(&t.positive).chain(&t.manipulation) {
+        if c.cost_units > 0 && c.cost_index().is_none() {
+            return Err(SimError::new(
+                "data",
+                "card cost_resource loop|data|algo when cost_units > 0",
+                "unknown resource",
+            ));
+        }
+    }
     Ok(t)
 }
 
@@ -267,6 +298,33 @@ mod tests {
         let cards = parse_cards(include_str!("../../data/cards.yaml")).unwrap();
         assert!(cards.negative.iter().any(|c| c.id == "freakout"));
         assert!(cards.positive.iter().any(|c| c.id == "overload"));
+        // Cards consume resources to fire (design/03), and the code
+        // defaults must match the file (World::set_cards uses the file).
+        let file: std::collections::BTreeMap<String, (u8, u32)> = cards
+            .negative
+            .iter()
+            .chain(&cards.positive)
+            .chain(&cards.manipulation)
+            .filter(|c| c.cost_units > 0)
+            .map(|c| (c.id.clone(), (c.cost_index().unwrap(), c.cost_units)))
+            .collect();
+        let mut w = crate::world::World::new(1);
+        assert_eq!(w.card_cost("distract"), Some((crate::deck::Res::Loop, 1)));
+        assert_eq!(w.card_cost("upgrade"), Some((crate::deck::Res::Data, 2)));
+        // Attacks fund their own damage and farm produces: free.
+        assert_eq!(w.card_cost("spike"), None);
+        assert_eq!(w.card_cost("overload"), None);
+        assert_eq!(w.card_cost("farm"), None);
+        w.set_cards(&cards);
+        let after: std::collections::BTreeMap<String, (u8, u32)> =
+            crate::deck::Host::implemented_cards()
+                .into_iter()
+                .filter_map(|id| {
+                    w.card_cost(id)
+                        .map(|(r, n)| (id.to_string(), (r.as_index(), n)))
+                })
+                .collect();
+        assert_eq!(after, file, "code defaults must match data/cards.yaml");
     }
 
     #[test]

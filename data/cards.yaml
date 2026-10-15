@@ -5,39 +5,61 @@
 negative:
   # skip: victim loses its next act.
   - id: distract
+    cost_resource: loop
+    cost_units: 1
     effect: SkipNext
   # stability poison: one tail segment per turn.
   - id: freakout
+    cost_resource: loop
+    cost_units: 1
     effect: DotNext(1)
     targets: stability
   # stronger stability poison.
   - id: stun
+    cost_resource: loop
+    cost_units: 2
     effect: DotNext(2)
     targets: stability
   # the victim's next attack roll is reduced by 2.
   - id: jam
+    cost_resource: loop
+    cost_units: 1
     effect: RollMinus(2)
   # the victim cannot crit on a 6 next attack.
   - id: hex
+    cost_resource: loop
+    cost_units: 1
     effect: BanDie(6)
   # the next attack on the victim is absorbed entirely.
   - id: decoy
+    cost_resource: loop
+    cost_units: 1
     effect: DecoyNext
   # the victim's next attack lands at half damage.
   - id: downgrade
+    cost_resource: loop
+    cost_units: 1
     effect: DowngradeNext
   # the victim's next attack retargets to a random occupied cell.
   - id: shuffle
+    cost_resource: data
+    cost_units: 1
     effect: RandomTargetNext
 positive:
   # absorb one segment.
   - id: tank
+    cost_resource: loop
+    cost_units: 1
     effect: ShieldNext(1)
   # absorb two segments.
   - id: plating
+    cost_resource: loop
+    cost_units: 2
     effect: ShieldNext(2)
   # heal the lowest paired stat.
   - id: patch
+    cost_resource: data
+    cost_units: 1
     effect: heal-lowest
   # spend N of one resource for +N damage.
   - id: spike
@@ -47,12 +69,18 @@ positive:
     effect: consume-all-to-damage
   # return the next incoming hit to the attacker's body.
   - id: reflect
+    cost_resource: loop
+    cost_units: 2
     effect: ReflectNext
   # the next attack also deals 1 to adjacent program cells.
   - id: splash
+    cost_resource: loop
+    cost_units: 2
     effect: SplashNext
   # roll twice on the next attack and keep the higher face.
   - id: extra
+    cost_resource: data
+    cost_units: 1
     effect: ExtraRollNext
 manipulation:
   # producers fill stock (see set_maker).
@@ -63,7 +91,11 @@ manipulation:
     effect: clone-segment
   # grow the body by one segment.
   - id: load
+    cost_resource: data
+    cost_units: 1
     effect: grow
   # raise the growth cap.
   - id: upgrade
+    cost_resource: data
+    cost_units: 2
     effect: upgrade-max

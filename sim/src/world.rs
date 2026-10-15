@@ -310,6 +310,39 @@ pub struct World {
     /// system id); default None for old saves.
     #[serde(default)]
     city: Option<u64>,
+    /// Card play costs: card id -> (resource index, units). Defaults mirror
+    /// data/cards.yaml; `set_cards` overrides from the file. Default empty
+    /// table would make cards free, so old saves get the code defaults.
+    #[serde(default = "default_card_costs")]
+    card_costs: BTreeMap<String, (u8, u32)>,
+}
+
+/// Card costs matching data/cards.yaml (design/03: cards consume to fire).
+/// Attacks (spike/overload) fund their own damage and farm produces, so
+/// those are free; everything else costs 1-2 units.
+fn default_card_costs() -> BTreeMap<String, (u8, u32)> {
+    // resource index: 0 loop, 1 data, 2 algo
+    let rows: [(&str, u8, u32); 16] = [
+        ("distract", 0, 1),
+        ("freakout", 0, 1),
+        ("stun", 0, 2),
+        ("jam", 0, 1),
+        ("hex", 0, 1),
+        ("decoy", 0, 1),
+        ("downgrade", 0, 1),
+        ("shuffle", 1, 1),
+        ("tank", 0, 1),
+        ("plating", 0, 2),
+        ("patch", 1, 1),
+        ("reflect", 0, 2),
+        ("splash", 0, 2),
+        ("extra", 1, 1),
+        ("load", 1, 1),
+        ("upgrade", 1, 2),
+    ];
+    rows.iter()
+        .map(|(id, r, n)| (id.to_string(), (*r, *n)))
+        .collect()
 }
 
 fn default_jobs() -> Vec<(i64, u8, u8)> {
@@ -350,6 +383,7 @@ impl World {
             clans: Clans::new(),
             license: License::new(),
             city: None,
+            card_costs: default_card_costs(),
         }
     }
 
@@ -374,6 +408,32 @@ impl World {
             return None;
         }
         Some((crate::deck::Res::from_index(idx), units))
+    }
+
+    /// Override the card cost table from data/cards.yaml (design/11 rule 4).
+    /// Cards with no cost (attacks, farm) stay free.
+    pub fn set_cards(&mut self, table: &crate::data::CardTable) {
+        let mut m = BTreeMap::new();
+        for c in table
+            .negative
+            .iter()
+            .chain(&table.positive)
+            .chain(&table.manipulation)
+        {
+            if c.cost_units > 0 {
+                if let Some(idx) = c.cost_index() {
+                    m.insert(c.id.clone(), (idx, c.cost_units));
+                }
+            }
+        }
+        self.card_costs = m;
+    }
+
+    /// What playing card `id` costs, if anything: (resource, units).
+    pub fn card_cost(&self, id: &str) -> Option<(crate::deck::Res, u32)> {
+        self.card_costs
+            .get(id)
+            .map(|(idx, n)| (crate::deck::Res::from_index(*idx), *n))
     }
 
     /// Units of `res` the owner holds in `host`'s stock (their rig).
@@ -1326,6 +1386,14 @@ impl World {
                 use crate::deck::Fx;
                 let actor = intent.actor;
                 let hostile;
+                // Card cost (design/03: cards consume to fire). Peek first,
+                // apply the effect, then spend — so a refused effect never
+                // charges the player. Field access (not self.card_cost)
+                // keeps the `beings` borrow alive, like the Buy arm.
+                let cost = self
+                    .card_costs
+                    .get(card.as_str())
+                    .map(|(idx, n)| (crate::deck::Res::from_index(*idx), *n));
                 {
                     let host = self
                         .hosts
@@ -1334,6 +1402,12 @@ impl World {
                     let target = CellPos(x, y);
                     let victim = host.prog_at(x, y);
                     let need = || SimError::new("no_target", "program cell", "empty");
+                    // Affordability check before any mutation.
+                    if let Some((res, units)) = cost {
+                        if host.stock(actor, res) < units {
+                            return Err(SimError::new("no_resource", "card cost", "short"));
+                        }
+                    }
                     hostile = victim.is_some_and(|v| v != actor)
                         || matches!(card.as_str(), "spike" | "overload");
                     match card.as_str() {
@@ -1399,6 +1473,11 @@ impl World {
                             host.farm_once(actor);
                         }
                         _ => return Err(SimError::new("no_card", "known card", "unknown")),
+                    }
+                    // Effect landed: now charge the cost (the peek above
+                    // guarantees this succeeds).
+                    if let Some((res, units)) = cost {
+                        host.consume(actor, res, units)?;
                     }
                 }
                 kind = "card";
@@ -3210,6 +3289,64 @@ mod tests {
     }
 
     #[test]
+    fn cards_charge_their_resource_cost_and_refuse_when_short() {
+        use crate::deck::Res;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let rig = w.ensure_host(HostId(1));
+        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 6, 1)
+            .unwrap();
+        // `tank` costs 1 loop; with an empty stock it is refused and the
+        // effect is not applied.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckCard {
+                    card: "tank".into(),
+                    x: 0,
+                    y: 0,
+                },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_resource");
+        assert!(!w
+            .host(HostId(1))
+            .unwrap()
+            .has_fx(EntityId(10), |f| matches!(
+                f,
+                crate::deck::Fx::ShieldNext(_)
+            )));
+        // Fund it: the card lands and spends exactly one loop.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), Res::Loop, 3);
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckCard {
+                    card: "tank".into(),
+                    x: 0,
+                    y: 0,
+                },
+            })
+            .unwrap();
+        assert_eq!(events.first().map(|e| e.kind.as_str()), Some("card"));
+        assert_eq!(w.units(EntityId(1), Res::Loop), 2, "one loop spent");
+        assert!(w
+            .host(HostId(1))
+            .unwrap()
+            .has_fx(EntityId(10), |f| matches!(
+                f,
+                crate::deck::Fx::ShieldNext(_)
+            )));
+        // Free cards (attacks fund their own damage) never charge the cost
+        // table; `farm` is free and produces.
+        assert_eq!(w.card_cost("farm"), None);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
     fn every_card_id_resolves_through_apply() {
         use crate::deck::Res;
         // One program of ours and one enemy on the rig, so both self-buff
@@ -3257,8 +3394,10 @@ mod tests {
                     .load(EntityId(10), EntityId(1), CellPos(0, 0), 6, 1)
                     .unwrap();
             }
-            w.ensure_host(HostId(1))
-                .add_stock(EntityId(1), Res::Loop, 4);
+            // Fund every resource so each card's cost can be met.
+            for res in Res::ALL {
+                w.ensure_host(HostId(1)).add_stock(EntityId(1), res, 4);
+            }
             w.tick = w.next_at(EntityId(1));
             let (_, events) = w
                 .apply(&Intent {
