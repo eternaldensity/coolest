@@ -511,6 +511,23 @@ impl Shell {
                         }
                     }
                 }
+                // License to hack (design/05): 3 threat kills + clean record.
+                let lic = self.server.world.license();
+                ui.label(format!(
+                    "license: {} kills{}{}",
+                    lic.threat_kills,
+                    if lic.granted { " · HELD" } else { "" },
+                    if lic.revoked { " · revoked" } else { "" }
+                ));
+                if !lic.granted && ui.button("Apply license").clicked() {
+                    match self.server.apply_one(Intent {
+                        actor: self.actor,
+                        verb: Verb::ApplyLicense,
+                    }) {
+                        Ok(_) => self.say("license granted".to_string()),
+                        Err(e) => self.say(format!("license refused: {e}")),
+                    }
+                }
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 let tick = self.server.world.tick;
                 ui.label(format!(
@@ -1915,6 +1932,22 @@ mod tests {
             assert!(h.has_text("mods: Splash"), "text: {:?}", h.labels());
             // Persists: a second attack attempt does not clear it.
             assert!(h.has_text("@(") || h.has_text("mods: Splash"));
+        }
+
+        #[test]
+        fn license_shows_and_applying_requires_eligibility() {
+            let mut h = Harness::new();
+            // No kills yet: shown, and applying is refused with its cause.
+            assert!(h.has_text("license: 0 kills"), "text: {:?}", h.labels());
+            h.click("Apply license");
+            assert!(
+                h.shell
+                    .log
+                    .iter()
+                    .any(|l| l.contains("license refused: ineligible")),
+                "log: {:?}",
+                h.shell.log
+            );
         }
 
         #[test]
