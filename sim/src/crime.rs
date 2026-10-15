@@ -132,6 +132,14 @@ impl Record {
         self.entries.retain(|c| c.evidence >= floor);
         before - self.entries.len()
     }
+
+    /// Settle the whole record (paying a fine / a full pardon). Returns
+    /// how many entries were cleared.
+    pub fn pardon_all(&mut self) -> usize {
+        let n = self.entries.len();
+        self.entries.clear();
+        n
+    }
 }
 
 // ---- M4b: clans + license to hack ----
