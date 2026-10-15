@@ -3,7 +3,7 @@ use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record
 use crate::deck::{CellPos, Host};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
-use crate::ledger::Ledger;
+use crate::ledger::{Ledger, Mail, Mailbox};
 use crate::net::NetGraph;
 use crate::pos::Pos;
 use crate::power::PowerGrid;
@@ -116,11 +116,24 @@ pub enum Verb {
     Exploit {
         vuln: String,
     },
-    /// Send an email trojan to a host you have already breached
-    /// (design/03): it joins your zombie net and spams for capped income
-    /// each game day.
+    /// Send an email trojan to a being (design/03): it is an attachment
+    /// that runs when the victim opens it, so no breach is needed — but
+    /// crafting one requires a Mailer+.
     SendTrojan {
-        host: HostId,
+        to: EntityId,
+    },
+    /// Send plain mail to a being (design/04).
+    SendMail {
+        to: EntityId,
+        body: String,
+    },
+    /// Craft a hack-enabled Mailer+ (design/03), needed to attach trojans.
+    /// Costs algo components from your rig.
+    CraftMailerPlus,
+    /// Open the mail at `index` in your inbox. A trojan attachment runs on
+    /// open, enslaving the reader's hosts for the planter.
+    OpenMail {
+        index: usize,
     },
     /// Settle with the city (design/05): pay a fine proportional to the
     /// record's evidence mass and clear it, ending any pursuit.
@@ -231,6 +244,8 @@ const WITNESS_RANGE: i32 = 5;
 const FINE_PER_MASS: i64 = 100;
 /// Clan dues + initiation (design/05 M4b).
 const CLAN_FEE: i64 = 500;
+/// Algo units to craft a Mailer+ (design/03: trojans need one to craft).
+const MAILER_PLUS_COST_ALGO: u32 = 3;
 /// Manual coding cost (design/10): one unit per act at a small mood price,
 /// so deck producers (free per act) are the real answer for higher tiers.
 const CODE_MOOD_COST: u8 = 2;
@@ -333,6 +348,14 @@ pub struct World {
     /// table would make cards free, so old saves get the code defaults.
     #[serde(default = "default_card_costs")]
     card_costs: BTreeMap<String, (u8, u32)>,
+    /// Per-entity mailboxes (design/04: inbox/outbox capped at 20). Default
+    /// empty for old saves.
+    #[serde(default)]
+    mailboxes: BTreeMap<u64, Mailbox>,
+    /// The player holds a hack-enabled Mailer+ (design/03), required to
+    /// attach a trojan to mail. Default false.
+    #[serde(default)]
+    mailer_plus: bool,
 }
 
 /// Card costs matching data/cards.yaml (design/03: cards consume to fire).
@@ -402,6 +425,8 @@ impl World {
             license: License::new(),
             city: None,
             card_costs: default_card_costs(),
+            mailboxes: BTreeMap::new(),
+            mailer_plus: false,
         }
     }
 
@@ -669,6 +694,88 @@ impl World {
         }
     }
 
+    // ---- M3c mail (design/03 trojans, design/04 mailboxes) ----
+
+    /// The mailbox for a being or NPC (empty when none exists yet).
+    pub fn mailbox(&self, id: EntityId) -> Option<&Mailbox> {
+        self.mailboxes.get(&id.0)
+    }
+
+    /// The inbox for a being, cloned for clients.
+    pub fn inbox(&self, id: EntityId) -> Vec<Mail> {
+        self.mailboxes
+            .get(&id.0)
+            .map(|b| b.inbox.clone())
+            .unwrap_or_default()
+    }
+
+    /// True when the player has crafted a Mailer+ (trojan crafting).
+    pub fn has_mailer_plus(&self) -> bool {
+        self.mailer_plus
+    }
+
+    /// True when `host` has been enslaved into some zombie net (design/03).
+    pub fn is_zombie_host(&self, host: HostId) -> bool {
+        self.zombies.is_zombie(host)
+    }
+
+    /// Deliver mail from `from` to `to`: a copy in the sender's outbox and
+    /// the recipient's inbox (both capped at 20). `trojan` marks an
+    /// attachment that runs on open.
+    fn send_mail(
+        &mut self,
+        from: EntityId,
+        to: EntityId,
+        body: String,
+        trojan: bool,
+    ) -> Result<(), SimError> {
+        if !self.beings.contains_key(&from.0) && !self.npcs.contains_key(&from.0) {
+            return Err(SimError::new("unknown_actor", "sender", "missing"));
+        }
+        let m = Mail {
+            from,
+            to,
+            body,
+            tick: self.tick,
+            trojan,
+        };
+        let outbox = self.mailboxes.entry(from.0).or_default();
+        if outbox.outbox.len() >= crate::ledger::MAIL_CAP {
+            return Err(SimError::new("outbox_full", "cap 20", "full"));
+        }
+        let inbox = self.mailboxes.entry(to.0).or_default();
+        if inbox.inbox.len() >= crate::ledger::MAIL_CAP {
+            return Err(SimError::new("mailbox_full", "cap 20", "full"));
+        }
+        self.mailboxes
+            .entry(from.0)
+            .or_default()
+            .record_sent(m.clone())?;
+        self.mailboxes.entry(to.0).or_default().deliver(m)?;
+        Ok(())
+    }
+
+    /// NPCs read their mail when their turn comes up (design/04). A trojan
+    /// attachment runs then, enslaving the reader's hosts for the planter.
+    fn npc_open_mail(&mut self, npc: u64) {
+        let Some(m) = self.mailboxes.get_mut(&npc).and_then(|b| b.open(0)) else {
+            return;
+        };
+        if !m.trojan {
+            return;
+        }
+        let reader = EntityId(npc);
+        let hosts: Vec<u64> = self
+            .hosts
+            .iter()
+            .filter(|(_, h)| h.owner() == Some(reader))
+            .map(|(id, _)| *id)
+            .collect();
+        for h in hosts {
+            self.zombies.enslave(HostId(h), m.from);
+        }
+    }
+
     /// Being-id -> standing for cop pursuit: only the protagonist is
     /// tracked, and only once Wanted.
     fn wanted_map(&self) -> BTreeMap<u64, Standing> {
@@ -860,6 +967,9 @@ impl World {
                 n.pos.y = ny;
             }
             n.next_at = self.tick + n.speed.max(1);
+            // Reading mail is part of an NPC's turn (design/04): a trojan
+            // attachment runs here, enslaving the reader's hosts.
+            self.npc_open_mail(id);
         }
     }
 
@@ -1123,6 +1233,9 @@ impl World {
         // Crimes committed this act, filed after the match: `report_crime`
         // borrows the whole world, which the live `beings` borrow forbids.
         let mut crimes: Vec<(Act, Option<HostId>, Option<EntityId>, bool)> = Vec::new();
+        // Mail sent this act, delivered after the match for the same
+        // borrow reason as crimes.
+        let mut mails: Vec<(EntityId, String, bool)> = Vec::new();
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -1371,16 +1484,82 @@ impl World {
                 host.exploit(prog, vuln)?;
                 kind = "exploited";
             }
-            Verb::SendTrojan { host } => {
-                // Requires a breach on that host (you are already inside).
-                let breached = self.hosts.get(&host.0).map(|h| h.breached).unwrap_or(false);
-                if !breached {
-                    return Err(SimError::new("not_breached", "breached host", "sealed"));
+            Verb::SendMail { ref to, ref body } => {
+                // Peek capacity now (field access keeps the `beings` borrow);
+                // the actual delivery happens after the match.
+                let cap_ok = self
+                    .mailboxes
+                    .get(&intent.actor.0)
+                    .map(|b| b.outbox.len() < crate::ledger::MAIL_CAP)
+                    .unwrap_or(true)
+                    && self
+                        .mailboxes
+                        .get(&to.0)
+                        .map(|b| b.inbox.len() < crate::ledger::MAIL_CAP)
+                        .unwrap_or(true);
+                if !cap_ok {
+                    return Err(SimError::new("mailbox_full", "cap 20", "full"));
                 }
-                self.zombies.enslave(host, intent.actor);
-                kind = "trojan";
-                // Spamming a rig for profit is theft (design/05).
-                crimes.push((Act::Theft, Some(host), None, true));
+                mails.push((*to, body.clone(), false));
+                kind = "mailed";
+            }
+            Verb::SendTrojan { to } => {
+                // Trojans are email attachments and need a Mailer+ to
+                // craft (design/03). No breach required: the victim runs it
+                // when they open the mail.
+                if !self.mailer_plus {
+                    return Err(SimError::new("no_mailer_plus", "Mailer+", "stock mailer"));
+                }
+                let cap_ok = self
+                    .mailboxes
+                    .get(&intent.actor.0)
+                    .map(|b| b.outbox.len() < crate::ledger::MAIL_CAP)
+                    .unwrap_or(true)
+                    && self
+                        .mailboxes
+                        .get(&to.0)
+                        .map(|b| b.inbox.len() < crate::ledger::MAIL_CAP)
+                        .unwrap_or(true);
+                if !cap_ok {
+                    return Err(SimError::new("mailbox_full", "cap 20", "full"));
+                }
+                mails.push((to, "invoice attached — open to review".to_string(), true));
+                kind = "trojan_sent";
+            }
+            Verb::CraftMailerPlus => {
+                // Crafting the hack-enabled mailer costs algo components.
+                let host = self
+                    .hosts
+                    .entry(1)
+                    .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                host.consume(intent.actor, crate::deck::Res::Algo, MAILER_PLUS_COST_ALGO)?;
+                self.mailer_plus = true;
+                kind = "mailer_plus";
+            }
+            Verb::OpenMail { index } => {
+                let mail = self
+                    .mailboxes
+                    .entry(intent.actor.0)
+                    .or_default()
+                    .open(index)
+                    .ok_or(SimError::new("no_mail", "inbox entry", "empty"))?;
+                if mail.trojan {
+                    // The attachment runs: the reader's hosts join the
+                    // planter's zombie net (design/03).
+                    let reader = intent.actor.0;
+                    let hosts: Vec<u64> = self
+                        .hosts
+                        .iter()
+                        .filter(|(_, h)| h.owner() == Some(EntityId(reader)))
+                        .map(|(id, _)| *id)
+                        .collect();
+                    for h in hosts {
+                        self.zombies.enslave(HostId(h), mail.from);
+                    }
+                    kind = "trojan_opened";
+                } else {
+                    kind = "opened_mail";
+                }
             }
             Verb::PayFine => {
                 // Settle with the city: cost scales with evidence mass.
@@ -1761,6 +1940,10 @@ impl World {
         // is released (the witness lookup reads NPC positions).
         for (act, host, victim, live_chain) in crimes {
             self.report_crime(intent.actor, act, host, victim, live_chain);
+        }
+        // Deliver mail queued above (capacity was checked before mutating).
+        for (to, body, trojan) in mails {
+            let _ = self.send_mail(intent.actor, to, body, trojan);
         }
         // Passive production (design/10): your rig's makers yield on every
         // successful act. In-act, so replay reproduces it exactly.
@@ -3221,69 +3404,135 @@ mod tests {
     }
 
     #[test]
-    fn exploit_breaches_then_trojan_pays_capped_daily_income() {
-        use crate::data::parse_vulns;
-        let defs = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
+    fn trojan_mail_lands_when_the_recipient_opens_it() {
+        // An NPC shopkeeper who owns a rig, and the player with a Mailer+.
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
         let acct = w.open_account(EntityId(1), HostId(1)).unwrap();
         w.ledger.mint(acct, 0).unwrap();
-        // OfficeWS rig with its archetype holes, plus our delivery program.
-        let rig = w.ensure_host(HostId(1));
-        assert_eq!(rig.set_arch(crate::deck::HostArch::OfficeWS, &defs), 2);
-        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
-            .unwrap();
-        // Exploit needs a program of ours on the host.
+        w.spawn_npc(EntityId(11), Role::Shopkeeper, (3, 3), (3, 3), (3, 3), 20);
+        w.ensure_host(HostId(2)).set_owner(Some(EntityId(11)));
+        // Crafting a Mailer+ costs 3 algo.
+        w.tick = w.next_at(EntityId(1));
+        assert_eq!(
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::CraftMailerPlus,
+            })
+            .unwrap_err()
+            .kind,
+            "no_resource"
+        );
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Algo, 3);
         w.tick = w.next_at(EntityId(1));
         let (_, events) = w
             .apply(&Intent {
                 actor: EntityId(1),
-                verb: Verb::Exploit {
-                    vuln: "cve-2006-0005".into(),
-                }, // privilege
+                verb: Verb::CraftMailerPlus,
             })
             .unwrap();
-        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("exploited"));
-        assert!(w.host(HostId(1)).unwrap().breached);
-        assert!(w.host(HostId(1)).unwrap().privileged());
-        // A sealed host refuses a trojan; the breached one accepts it.
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("mailer_plus"));
+        assert!(w.has_mailer_plus());
+        assert_eq!(w.units(EntityId(1), crate::deck::Res::Algo), 0);
+
+        // Plain mail: delivered to the recipient's inbox, copied to ours.
         w.tick = w.next_at(EntityId(1));
-        assert!(w
-            .apply(&Intent {
-                actor: EntityId(1),
-                verb: Verb::SendTrojan { host: HostId(9) },
-            })
-            .is_err());
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::SendMail {
+                to: EntityId(11),
+                body: "hello".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.inbox(EntityId(11)).len(), 1);
+        assert_eq!(w.inbox(EntityId(11))[0].body, "hello");
+        assert!(!w.inbox(EntityId(11))[0].trojan);
+
+        // Trojan: delivered as an attachment, no breach needed. The
+        // recipient's host is untouched until they open it.
         w.tick = w.next_at(EntityId(1));
-        let (_, events) = w
-            .apply(&Intent {
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::SendTrojan { to: EntityId(11) },
+        })
+        .unwrap();
+        assert!(w.inbox(EntityId(11)).iter().any(|m| m.trojan));
+        assert!(!w.is_zombie_host(HostId(2)), "not yet opened");
+
+        // The NPC opens its mail on its turn: the trojan runs and its rig
+        // joins the planter's zombie net.
+        for _ in 0..80 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent {
                 actor: EntityId(1),
-                verb: Verb::SendTrojan { host: HostId(1) },
+                verb: Verb::Wait,
             })
             .unwrap();
-        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("trojan"));
-        // Daily spam income lands in the owner's account, capped per day.
+            if w.is_zombie_host(HostId(2)) {
+                break;
+            }
+        }
+        assert!(w.is_zombie_host(HostId(2)), "NPC never opened the trojan");
+
+        // Daily spam income lands in the planter's account, capped per day.
         let bank = |w: &World| w.bank_balance(EntityId(1)).unwrap_or(0);
         let before = bank(&w);
-        // Cross into day 1.
         w.tick = w.next_at(EntityId(1)).max(crate::world::DAY_TICKS);
         w.apply(&Intent {
             actor: EntityId(1),
             verb: Verb::Wait,
         })
         .unwrap();
-        let after = bank(&w);
-        assert!(after > before, "no trojan income: {before} -> {after}");
-        assert_eq!(after - before, 400, "one zombie host pays 400/day");
-        // Same-day acts do not pay again.
-        w.tick = w.next_at(EntityId(1));
-        w.apply(&Intent {
-            actor: EntityId(1),
-            verb: Verb::Wait,
-        })
-        .unwrap();
-        assert_eq!(bank(&w), after, "double payout");
+        assert_eq!(bank(&w) - before, 400, "one zombie host pays 400/day");
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn opening_a_trojan_mail_enslaves_your_own_hosts() {
+        // The player owns a rig; a hostile trojan arrives and the player
+        // opens it, so their rig spams for the sender.
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1)).set_owner(Some(EntityId(1)));
+        // Hostile sender with a Mailer+ of their own (delivered directly).
+        w.mailboxes
+            .entry(1)
+            .or_default()
+            .deliver(Mail {
+                from: EntityId(9),
+                to: EntityId(1),
+                body: "free credits!".into(),
+                tick: 0,
+                trojan: true,
+            })
+            .unwrap();
+        assert_eq!(w.inbox(EntityId(1)).len(), 1);
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::OpenMail { index: 0 },
+            })
+            .unwrap();
+        assert_eq!(
+            events.last().map(|e| e.kind.as_str()),
+            Some("trojan_opened")
+        );
+        assert!(w.is_zombie_host(HostId(1)), "victim's rig enslaved");
+        assert!(w.inbox(EntityId(1)).is_empty(), "mail consumed on open");
+        // Opening an empty inbox is refused.
+        w.tick = w.next_at(EntityId(1));
+        assert_eq!(
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::OpenMail { index: 0 },
+            })
+            .unwrap_err()
+            .kind,
+            "no_mail"
+        );
     }
 
     #[test]
