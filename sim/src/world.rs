@@ -1042,14 +1042,11 @@ impl World {
                 let host = self.hosts.get_mut(&1).unwrap();
                 host.load(id, intent.actor, CellPos(x, y), max_len, cpu)?;
                 host.set_maker(id, vec![res], rate)?;
+                // Farming is a build action on your own rig, not an
+                // intrusion, so it draws no retaliation beat. Producers
+                // are also skipped by the warden (see retaliate), so they
+                // survive later DeckLoad/DeckStrike beats too.
                 kind = "farmed";
-                extra_kinds = Self::deck_beat(
-                    self.hosts.get_mut(&1).unwrap(),
-                    &mut self.funnel,
-                    self.tick,
-                    intent.actor,
-                    false,
-                );
             }
             Verb::Deposit(amt) => {
                 if amt <= 0 {
@@ -2423,6 +2420,8 @@ mod tests {
             .unwrap();
         let kinds: Vec<&str> = events.iter().map(|e| e.kind.as_str()).collect();
         assert_eq!(kinds.first(), Some(&"farmed"), "kinds: {kinds:?}");
+        // Farming draws no retaliation beat: no trace opened on the farm.
+        assert!(!kinds.contains(&"traced"), "kinds: {kinds:?}");
         // The farm act itself already ticks the maker once.
         assert_eq!(w.units(EntityId(1), Res::Loop), 3);
         // Two more acts (Wait) yield 3 each, with a produced event.
@@ -2478,6 +2477,60 @@ mod tests {
             .sum();
         assert_eq!(mine, 2 + 5, "loop 2 + algo 5 CPU");
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn warden_ignores_producers_and_farm_is_safe() {
+        use crate::deck::Res;
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let range = w.ensure_host(HostId(1));
+        range.set_owner(Some(crate::deck::Host::WARDEN));
+        range.set_monitor(true);
+        // Farm a producer: it survives its own beat and yields.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckFarm {
+                x: 0,
+                y: 0,
+                res: Res::Loop,
+            },
+        })
+        .unwrap();
+        assert_eq!(w.units(EntityId(1), Res::Loop), 3);
+        // Now load a killer, which does trigger the warden. The warden
+        // targets the killer, never the passive producer.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoad { x: 11, y: 7 },
+        })
+        .unwrap();
+        let h = w.host(HostId(1)).unwrap();
+        assert!(
+            h.progs.values().any(|p| h.maker_info(p.id).is_some()),
+            "producer survived the retaliation beat"
+        );
+        // Still yielding: the DeckLoad act ticked it once more (3 -> 6).
+        assert_eq!(
+            w.units(EntityId(1), Res::Loop),
+            6,
+            "producer still yielding"
+        );
+        // Repeated beats eventually kill the killer but spare the maker.
+        for _ in 0..40 {
+            w.tick = w.next_at(EntityId(1));
+            let _ = w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckStrike { x: 11, y: 7 },
+            });
+        }
+        let h = w.host(HostId(1)).unwrap();
+        assert!(
+            h.progs.values().any(|p| h.maker_info(p.id).is_some()),
+            "producer still alive after repeated warden beats"
+        );
     }
 
     #[test]

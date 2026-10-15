@@ -606,11 +606,13 @@ impl Host {
             }
         }
         // Intruders: live programs owned by anyone but the defender,
-        // lowest program id first for determinism.
+        // lowest program id first for determinism. Passive producers
+        // (makers) are not intruders — the warden hunts offensive
+        // programs — so resource creatures survive on a defended rig.
         let mut targets: Vec<(EntityId, CellPos)> = self
             .progs
             .values()
-            .filter(|p| p.owner != defender)
+            .filter(|p| p.owner != defender && !self.makers.contains_key(&p.id.0))
             .map(|p| (p.id, p.head))
             .collect();
         if targets.is_empty() {
@@ -803,6 +805,58 @@ impl Host {
             self.add_stock(owner, *r, *n);
         }
         made.into_iter().collect()
+    }
+
+    /// Producer info for one program: the resources it makes and its rate,
+    /// if it is a maker (client rendering: mark producer cells).
+    pub fn maker_info(&self, prog: EntityId) -> Option<(Vec<Res>, u8)> {
+        self.makers.get(&prog.0).cloned()
+    }
+
+    /// First free arena cell in reading order (client convenience: deploy a
+    /// producer without making the player pick a cell).
+    pub fn free_cell(&self) -> Option<CellPos> {
+        (0..self.h).find_map(|y| (0..self.w).map(|x| CellPos(x, y)).find(|c| self.free(*c)))
+    }
+
+    /// First free cell with no orthogonally adjacent program owned by
+    /// someone else — a safer auto-pick for deploying a producer, since a
+    /// hostile warden strikes an adjacent program on the same beat. Falls
+    /// back to any free cell when the arena offers no breathing room.
+    pub fn free_cell_for(&self, owner: EntityId) -> Option<CellPos> {
+        let adjacent = |x: u8, y: u8| {
+            let touches = |p: &Program| {
+                let near =
+                    |c: CellPos| (x as i16 - c.0 as i16).abs() + (y as i16 - c.1 as i16).abs() == 1;
+                near(p.head) || p.tail.iter().any(|t| near(*t))
+            };
+            self.progs
+                .values()
+                .filter(|p| p.owner != owner)
+                .any(touches)
+        };
+        let safe = (0..self.h).find_map(|y| {
+            (0..self.w)
+                .map(|x| CellPos(x, y))
+                .find(|c| self.free(*c) && !adjacent(c.0, c.1))
+        });
+        safe.or_else(|| self.free_cell())
+    }
+
+    /// Per-resource yield the owner's producers will deliver each act,
+    /// with a count of producers per type (client summary line).
+    pub fn producer_summary(&self, owner: EntityId) -> Vec<(Res, u32, u32)> {
+        let mut out: BTreeMap<Res, (u32, u32)> = BTreeMap::new();
+        for p in self.progs.values().filter(|p| p.owner == owner) {
+            if let Some((makes, rate)) = self.makers.get(&p.id.0) {
+                for r in makes {
+                    let e = out.entry(*r).or_insert((0, 0));
+                    e.0 += *rate as u32; // total yield per act
+                    e.1 += 1; // producer count
+                }
+            }
+        }
+        out.into_iter().map(|(r, (y, c))| (r, y, c)).collect()
     }
 
     fn spend(&mut self, owner: EntityId, res: Res, n: u32) -> Result<(), SimError> {
@@ -1045,6 +1099,49 @@ mod tests {
             want.insert(c.id.as_str());
         }
         assert_eq!(have, want);
+    }
+
+    #[test]
+    fn free_cell_for_avoids_hostile_neighbours() {
+        let mut h = host();
+        // Hostile program at (0,0): the safe pick skips its neighbours.
+        h.load(EntityId(70), EntityId(9), CellPos(0, 0), 2, 1)
+            .unwrap();
+        let c = h.free_cell_for(EntityId(1)).unwrap();
+        let adjacent = |c: CellPos| (c.0 as i16 + c.1 as i16) == 1;
+        assert!(!adjacent(c), "picked a cell next to the hostile: {c:?}");
+        // It is still a genuinely free cell.
+        assert!(h.free(c));
+        // With the arena crowded by one owner, the fallback still returns.
+        let mut h2 = host();
+        h2.load(EntityId(70), EntityId(9), CellPos(0, 0), 2, 1)
+            .unwrap();
+        assert!(h2.free_cell_for(EntityId(1)).is_some());
+    }
+
+    #[test]
+    fn producer_summary_counts_yield_and_makers() {
+        let mut h = host();
+        h.load(EntityId(50), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        h.set_maker(EntityId(50), vec![Res::Loop], 3).unwrap();
+        h.load(EntityId(51), EntityId(1), CellPos(1, 0), 2, 1)
+            .unwrap();
+        h.set_maker(EntityId(51), vec![Res::Loop, Res::Data], 2)
+            .unwrap();
+        // A non-maker program contributes nothing.
+        h.load(EntityId(52), EntityId(1), CellPos(2, 0), 2, 1)
+            .unwrap();
+        // Another owner's maker is not counted.
+        h.load(EntityId(53), EntityId(9), CellPos(3, 0), 2, 1)
+            .unwrap();
+        h.set_maker(EntityId(53), vec![Res::Algo], 5).unwrap();
+
+        let s = h.producer_summary(EntityId(1));
+        assert_eq!(s, vec![(Res::Loop, 5, 2), (Res::Data, 2, 1)]);
+        assert_eq!(h.producer_summary(EntityId(9)), vec![(Res::Algo, 5, 1)]);
+        assert_eq!(h.maker_info(EntityId(50)), Some((vec![Res::Loop], 3)));
+        assert_eq!(h.maker_info(EntityId(52)), None);
     }
 
     #[test]
