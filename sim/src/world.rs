@@ -125,6 +125,13 @@ pub enum Verb {
     /// Settle with the city (design/05): pay a fine proportional to the
     /// record's evidence mass and clear it, ending any pursuit.
     PayFine,
+    /// Build a persistent ability into the program at a cell (design/03
+    /// `Program.mods`), paying the card's resource cost.
+    DeckMod {
+        x: u8,
+        y: u8,
+        card: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1490,6 +1497,41 @@ impl World {
                         true,
                     );
                 }
+            }
+            Verb::DeckMod { x, y, ref card } => {
+                // Install a persistent mod on your program (design/03):
+                // check the target and affordability, install, then pay.
+                let m = crate::deck::Mod::from_card(card).ok_or(SimError::new(
+                    "no_mod",
+                    "moddable card",
+                    "not a mod",
+                ))?;
+                let cost = self
+                    .card_costs
+                    .get(card.as_str())
+                    .map(|(idx, n)| (crate::deck::Res::from_index(*idx), *n));
+                let host = self
+                    .hosts
+                    .entry(1)
+                    .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                let prog = host.prog_at(x, y).ok_or(SimError::new(
+                    "no_target",
+                    "program cell",
+                    "empty",
+                ))?;
+                if host.owner_of(prog) != Some(intent.actor) {
+                    return Err(SimError::new("not_yours", "your program", "foreign"));
+                }
+                if let Some((res, units)) = cost {
+                    if host.stock(intent.actor, res) < units {
+                        return Err(SimError::new("no_resource", "mod cost", "short"));
+                    }
+                }
+                host.add_mod(prog, m)?;
+                if let Some((res, units)) = cost {
+                    host.consume(intent.actor, res, units)?;
+                }
+                kind = "modded";
             }
             Verb::DeckFarm { x, y, res } => {
                 let (max_len, cpu, rate) = farm_params(res);
@@ -3285,6 +3327,114 @@ mod tests {
             .unwrap()
             .logs_visible(EntityId(1))
             .is_empty());
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn mods_are_persistent_and_cost_resources() {
+        use crate::deck::{Mod, Res};
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Our len-6 program and a hostile len-8 one.
+        let rig = w.ensure_host(HostId(1));
+        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 6, 1)
+            .unwrap();
+        for i in 1..6 {
+            rig.step(EntityId(10), CellPos(i, 0)).unwrap();
+        }
+        rig.load(EntityId(20), EntityId(9), CellPos(5, 5), 6, 1)
+            .unwrap();
+        for i in 1..6 {
+            rig.step(EntityId(20), CellPos(5 + i, 5)).unwrap();
+        }
+        // Splash costs 2 loop; short stock refuses without installing.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckMod {
+                    x: 0,
+                    y: 0,
+                    card: "splash".into(),
+                },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_resource");
+        assert!(w.host(HostId(1)).unwrap().mods_of(EntityId(10)).is_empty());
+        // Funded: installs, charges 2 loop.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), Res::Loop, 5);
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckMod {
+                    x: 0,
+                    y: 0,
+                    card: "splash".into(),
+                },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("modded"));
+        assert_eq!(w.units(EntityId(1), Res::Loop), 3, "2 loop spent");
+        assert_eq!(
+            w.host(HostId(1)).unwrap().mods_of(EntityId(10)),
+            &[Mod::Splash]
+        );
+        // A mod is not a one-shot effect: it survives repeated attacks.
+        for _ in 0..3 {
+            let target = {
+                let h = w.host(HostId(1)).unwrap();
+                h.progs[&20]
+                    .tail
+                    .back()
+                    .copied()
+                    .unwrap_or(h.progs[&20].head)
+            };
+            w.ensure_host(HostId(1))
+                .card_attack(EntityId(1), EntityId(10), target, None, None)
+                .unwrap();
+            assert_eq!(
+                w.host(HostId(1)).unwrap().mods_of(EntityId(10)),
+                &[Mod::Splash]
+            );
+        }
+        // Re-installing the same mod is refused (no wasted cost).
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckMod {
+                    x: 0,
+                    y: 0,
+                    card: "splash".into(),
+                },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "dup_mod");
+        // A non-moddable card and a foreign program are refused.
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckMod {
+                    x: 0,
+                    y: 0,
+                    card: "distract".into(),
+                },
+            })
+            .is_err());
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckMod {
+                    x: 5,
+                    y: 5,
+                    card: "tank".into(),
+                },
+            })
+            .is_err());
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 

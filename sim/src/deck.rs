@@ -184,6 +184,38 @@ pub struct Program {
     pub tail: VecDeque<CellPos>,
     pub max_len: u8,
     pub cpu_per_seg: u8,
+    /// Deck-built abilities (design/03 `mods`): persistent, applied on every
+    /// attack/defence, unlike the one-shot `Fx` next-turn effects.
+    #[serde(default)]
+    pub mods: Vec<Mod>,
+}
+
+/// Persistent program abilities (design/03 `Program.mods`). Built with a
+/// `Verb::DeckMod`, they fire on every exchange, not once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mod {
+    /// Attacks also deal 1 to orthogonally adjacent program cells.
+    Splash,
+    /// Incoming damage is returned to the attacker's body.
+    Reflect,
+    /// Roll twice on attacks and keep the higher face.
+    ExtraRoll,
+    /// Absorb N damage from every incoming hit.
+    Shield(u8),
+}
+
+impl Mod {
+    /// Card id that installs this mod (cards.yaml vocabulary).
+    pub fn from_card(card: &str) -> Option<Mod> {
+        match card {
+            "tank" => Some(Mod::Shield(1)),
+            "plating" => Some(Mod::Shield(2)),
+            "reflect" => Some(Mod::Reflect),
+            "splash" => Some(Mod::Splash),
+            "extra" => Some(Mod::ExtraRoll),
+            _ => None,
+        }
+    }
 }
 
 impl Program {
@@ -469,6 +501,7 @@ impl Host {
                 tail: VecDeque::new(),
                 max_len: max_len.max(1),
                 cpu_per_seg,
+                mods: Vec::new(),
             },
         );
         Ok(())
@@ -615,6 +648,8 @@ impl Host {
                 tail: VecDeque::new(),
                 max_len: p.max_len,
                 cpu_per_seg: p.cpu_per_seg,
+                // A clone carries the source's built-in abilities.
+                mods: p.mods.clone(),
             },
         );
         if let Some(maker) = self.makers.get(&prog.0).cloned() {
@@ -1172,7 +1207,9 @@ impl Host {
         let victim = seg.prog;
         // 3. Roll the attack die, honouring both sides' modifiers.
         let mut face = self.roll(6);
-        if self.take_fx(attacker, |f| matches!(f, Fx::ExtraRollNext)) {
+        if self.take_fx(attacker, |f| matches!(f, Fx::ExtraRollNext))
+            || self.mods_of(attacker).contains(&Mod::ExtraRoll)
+        {
             face = face.max(self.roll(6));
         }
         if let Some(Fx::BanDie(b)) = self.fx_of(victim, |f| matches!(f, Fx::BanDie(_))) {
@@ -1201,8 +1238,11 @@ impl Host {
             return Ok(out);
         }
         // Reflect: the damage lands on the attacker's body instead (a
-        // headshot would make reflect unconditionally lethal).
-        if self.take_fx(victim, |f| matches!(f, Fx::ReflectNext)) {
+        // headshot would make reflect unconditionally lethal). A persistent
+        // Reflect mod fires on every hit; the one-shot Fx is consumed.
+        if self.take_fx(victim, |f| matches!(f, Fx::ReflectNext))
+            || self.mods_of(victim).contains(&Mod::Reflect)
+        {
             out.reflected = true;
             out.damage = dmg;
             let body = self
@@ -1218,8 +1258,11 @@ impl Host {
         }
         out.damage = dmg;
         out.killed = self.deal_damage(target, dmg)?;
-        // Splash: 1 damage to orthogonally adjacent program cells.
-        if self.take_fx(attacker, |f| matches!(f, Fx::SplashNext)) {
+        // Splash: 1 damage to orthogonally adjacent program cells. A
+        // persistent Splash mod fires every attack; the Fx is consumed.
+        if self.take_fx(attacker, |f| matches!(f, Fx::SplashNext))
+            || self.mods_of(attacker).contains(&Mod::Splash)
+        {
             let neighbours = [
                 (target.0.wrapping_sub(1), target.1),
                 (target.0.wrapping_add(1), target.1),
@@ -1244,7 +1287,8 @@ impl Host {
             "empty",
         ))?;
         let victim = seg.prog;
-        // Shield absorbs segment damage first.
+        // Shield absorbs segment damage first: the one-shot Fx, then any
+        // persistent Shield mod (which absorbs every hit).
         if let Some(fx) = self.effects.get_mut(&victim.0) {
             for f in fx.iter_mut() {
                 if let Fx::ShieldNext(s) = f {
@@ -1254,6 +1298,22 @@ impl Host {
                     break;
                 }
             }
+        }
+        if dmg > 0 {
+            let mod_absorb: u32 = self
+                .progs
+                .get(&victim.0)
+                .map(|p| {
+                    p.mods
+                        .iter()
+                        .filter_map(|m| match m {
+                            Mod::Shield(n) => Some(*n as u32),
+                            _ => None,
+                        })
+                        .sum()
+                })
+                .unwrap_or(0);
+            dmg = dmg.saturating_sub(mod_absorb);
         }
         if seg.is_head {
             if dmg >= 1 {
@@ -1377,6 +1437,29 @@ impl Host {
             }
         }
         false
+    }
+
+    /// Install a persistent mod on a program (design/03 `Program.mods`).
+    /// Re-installing an existing mod is refused so cost is never wasted.
+    pub fn add_mod(&mut self, prog: EntityId, m: Mod) -> Result<(), SimError> {
+        let p = self.progs.get_mut(&prog.0).ok_or(SimError::new(
+            "no_prog",
+            "live program",
+            "missing",
+        ))?;
+        if p.mods.contains(&m) {
+            return Err(SimError::new("dup_mod", "uninstalled mod", "present"));
+        }
+        p.mods.push(m);
+        Ok(())
+    }
+
+    /// Persistent mods on a program (client display + attack resolution).
+    pub fn mods_of(&self, prog: EntityId) -> &[Mod] {
+        self.progs
+            .get(&prog.0)
+            .map(|p| p.mods.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Load card: append one tail segment adjacent to the program's tail
