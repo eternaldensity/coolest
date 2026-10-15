@@ -194,6 +194,13 @@ pub struct Mail {
     pub from: EntityId,
     pub to: EntityId,
     pub body: String,
+    /// Tick the mail was sent (design/04 logs `sent_at`). Default 0.
+    #[serde(default)]
+    pub tick: u64,
+    /// Trojan attachment (design/03): runs on the planter's alignment when
+    /// the victim opens it. Crafting one needs a `Mailer+`.
+    #[serde(default)]
+    pub trojan: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -209,18 +216,46 @@ impl Mailbox {
         Self::default()
     }
 
+    /// Local note (used by tests and as a self-addressed scribble): pushes
+    /// to this box's own inbox and outbox. Real delivery between beings
+    /// goes through `deliver`/`record_sent` (see `World`).
     pub fn send(&mut self, from: EntityId, to: EntityId, body: &str) -> Result<(), SimError> {
-        if self.outbox.len() >= MAIL_CAP || self.inbox.len() >= MAIL_CAP {
-            return Err(SimError::new("mailbox_full", "cap 20", "full"));
-        }
         let m = Mail {
             from,
             to,
             body: body.to_string(),
+            tick: 0,
+            trojan: false,
         };
-        self.outbox.push(m.clone());
+        self.record_sent(m.clone())?;
+        self.deliver(m)
+    }
+
+    /// Append to the inbox (capped), as a recipient receiving mail.
+    pub fn deliver(&mut self, m: Mail) -> Result<(), SimError> {
+        if self.inbox.len() >= MAIL_CAP {
+            return Err(SimError::new("mailbox_full", "cap 20", "full"));
+        }
         self.inbox.push(m);
         Ok(())
+    }
+
+    /// Append to the outbox (capped), as a sender keeping a copy.
+    pub fn record_sent(&mut self, m: Mail) -> Result<(), SimError> {
+        if self.outbox.len() >= MAIL_CAP {
+            return Err(SimError::new("outbox_full", "cap 20", "full"));
+        }
+        self.outbox.push(m);
+        Ok(())
+    }
+
+    /// Take the mail at `index` out of the inbox (opening it), if present.
+    pub fn open(&mut self, index: usize) -> Option<Mail> {
+        if index < self.inbox.len() {
+            Some(self.inbox.remove(index))
+        } else {
+            None
+        }
     }
 }
 
