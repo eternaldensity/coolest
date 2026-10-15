@@ -256,12 +256,30 @@ impl Shell {
         self.say_status();
     }
 
+    /// Like `do_verb`, but also relays any retaliation beat the act
+    /// triggered (warden kills, traces) — the console code/farm paths
+    /// would otherwise silently lose a producer that died on its first beat.
+    fn act_narrated(&mut self, verb: Verb) {
+        match self.server.apply_one(Intent {
+            actor: self.actor,
+            verb,
+        }) {
+            Ok((_, events)) => {
+                for line in Self::beat_lines(&events) {
+                    self.say(line);
+                }
+            }
+            Err(e) => self.say(format!("rejected: {e}")),
+        }
+        self.say_status();
+    }
+
     fn run_command(&mut self) {
         let cmd = std::mem::take(&mut self.input);
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
+                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · farm loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
@@ -277,12 +295,46 @@ impl Shell {
             },
             "talk" => self.start_talk(),
             "watch" => self.do_verb(Verb::Watch),
-            _ if cmd.starts_with("code ") => match cmd[5..].trim() {
-                "loop" => self.do_verb(Verb::Code { res: sim::Res::Loop }),
-                "data" => self.do_verb(Verb::Code { res: sim::Res::Data }),
-                "algo" => self.do_verb(Verb::Code { res: sim::Res::Algo }),
-                other => self.say(format!("unknown resource: {other}")),
-            },
+            _ if cmd.starts_with("code ") => {
+                let res = match cmd[5..].trim() {
+                    "loop" => Some(sim::Res::Loop),
+                    "data" => Some(sim::Res::Data),
+                    "algo" => Some(sim::Res::Algo),
+                    other => {
+                        self.say(format!("unknown resource: {other}"));
+                        None
+                    }
+                };
+                if let Some(res) = res {
+                    self.act_narrated(Verb::Code { res });
+                }
+            }
+            _ if cmd.starts_with("farm ") => {
+                let res = match cmd[5..].trim() {
+                    "loop" => Some(sim::Res::Loop),
+                    "data" => Some(sim::Res::Data),
+                    "algo" => Some(sim::Res::Algo),
+                    other => {
+                        self.say(format!("unknown resource: {other}"));
+                        None
+                    }
+                };
+                if let Some(res) = res {
+                    // Use the selected cell, else the safest free one (the
+                    // warden strikes an adjacent program on the same beat).
+                    let cell = self.sel.or_else(|| {
+                        self.server
+                            .world
+                            .host(HostId(1))
+                            .and_then(|h| h.free_cell_for(self.actor))
+                            .map(|c| (c.0, c.1))
+                    });
+                    match cell {
+                        Some((x, y)) => self.act_narrated(Verb::DeckFarm { x, y, res }),
+                        None => self.say("rig is full — strike a program first".to_string()),
+                    }
+                }
+            }
             "work 0" => self.do_verb(Verb::Work(0)),
             "work 1" => self.do_verb(Verb::Work(1)),
             "work 2" => self.do_verb(Verb::Work(2)),
@@ -689,7 +741,7 @@ impl Shell {
             }
             Tab::Deck => {
                 ui.heading("Deck — world host 1");
-                ui.label("H program head (kill it) · o tail (hit points) · click a cell, then Load/Strike · warden defends this rig");
+                ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
                         let (msg, beat) = match self.sel {
@@ -754,33 +806,65 @@ impl Shell {
                     }
                 });
                 // Snapshot arena state up front: buttons below need &mut self.
-                let (heads, tails, cpu, total) = match self.server.world.host(HostId(1)) {
+                // Producers get their own glyph + per-resource color so the
+                // economy loop is visible in the arena, not just in numbers.
+                let (heads, tails, prod, cpu, total) = match self.server.world.host(HostId(1)) {
                     Some(h) => {
-                        let mut heads = std::collections::BTreeSet::new();
+                        let mut heads = std::collections::BTreeMap::new();
                         let mut tails = std::collections::BTreeSet::new();
                         for p in h.progs.values() {
-                            heads.insert((p.head.0, p.head.1));
+                            if p.owner == self.actor {
+                                if let Some((makes, _)) = h.maker_info(p.id) {
+                                    if let Some(res) = makes.first() {
+                                        heads.insert((p.head.0, p.head.1), Some(*res));
+                                        for t in &p.tail {
+                                            tails.insert((t.0, t.1));
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            heads.insert((p.head.0, p.head.1), None);
                             for t in &p.tail {
                                 tails.insert((t.0, t.1));
                             }
                         }
-                        (heads, tails, h.cpu_load(), h.cpu_total)
+                        (heads, tails, h.producer_summary(self.actor), h.cpu_load(), h.cpu_total)
                     }
-                    None => (std::collections::BTreeSet::new(), std::collections::BTreeSet::new(), 0, 0),
+                    None => (
+                        std::collections::BTreeMap::new(),
+                        std::collections::BTreeSet::new(),
+                        vec![],
+                        0,
+                        0,
+                    ),
                 };
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
-                            let glyph = if heads.contains(&(x, y)) {
-                                "H"
+                            let (glyph, color) = if let Some(Some(res)) = heads.get(&(x, y)) {
+                                // Producer head: P in the resource's color.
+                                (
+                                    "P",
+                                    match res {
+                                        sim::Res::Loop => egui::Color32::from_rgb(120, 200, 120),
+                                        sim::Res::Data => egui::Color32::from_rgb(110, 190, 230),
+                                        sim::Res::Algo => egui::Color32::from_rgb(220, 150, 240),
+                                    },
+                                )
+                            } else if heads.contains_key(&(x, y)) {
+                                ("H", egui::Color32::LIGHT_RED)
                             } else if tails.contains(&(x, y)) {
-                                "o"
+                                ("o", egui::Color32::GRAY)
                             } else if Some((x, y)) == self.sel {
-                                "X"
+                                ("X", egui::Color32::YELLOW)
                             } else {
-                                "."
+                                (".", egui::Color32::DARK_GRAY)
                             };
-                            if ui.button(glyph).clicked() {
+                            if ui
+                                .button(egui::RichText::new(glyph).monospace().color(color))
+                                .clicked()
+                            {
                                 self.sel = Some((x, y));
                             }
                         }
@@ -788,6 +872,23 @@ impl Shell {
                     }
                 });
                 ui.label(format!("CPU {cpu}/{total}"));
+                // Producer yield summary: what the farm loop delivers.
+                let have = sim::Res::ALL
+                    .iter()
+                    .map(|r| format!("{} {}", r.name(), self.server.world.units(self.actor, *r)))
+                    .collect::<Vec<_>>()
+                    .join(" · ");
+                ui.label(format!("components: {have}"));
+                if prod.is_empty() {
+                    ui.label("Producers: none — click a free cell and Farm to yield units each act");
+                } else {
+                    let line = prod
+                        .iter()
+                        .map(|(r, y, c)| format!("{} ×{c} (+{y}/act)", r.name()))
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    ui.label(format!("Producers: {line}"));
+                }
             }
             Tab::Net => {
                 ui.heading("Net — world graph (Oldnet/Betanet)");
@@ -1572,6 +1673,58 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn deck_shows_producer_glyph_and_yield_summary() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            // Empty rig: the summary points at the Farm affordance.
+            assert!(
+                h.has_text("Producers: none — click a free cell and Farm"),
+                "text: {:?}",
+                h.labels()
+            );
+            // Farm a data producer on a free cell.
+            h.click_last(".");
+            h.click("Farm data");
+            // The producer shows as a P in the arena and the summary
+            // reports its yield per act.
+            assert!(
+                h.labels().iter().any(|(r, t)| r == "Button" && t == "P"),
+                "no P glyph; labels: {:?}",
+                h.labels()
+            );
+            assert!(
+                h.has_text("Producers: data ×1 (+2/act)"),
+                "text: {:?}",
+                h.labels()
+            );
+            // The Deck tab also reports components held.
+            assert!(
+                h.has_text("components: loop 0 · data 2 · algo 0"),
+                "text: {:?}",
+                h.labels()
+            );
+        }
+
+        #[test]
+        fn console_farm_autopicks_a_free_cell() {
+            let mut h = Harness::new();
+            let at = h.text_input_center();
+            h.click_at(at);
+            h.pass_with(vec![egui::Event::Text("farm algo".into())]);
+            h.tap_key(egui::Key::Enter);
+            h.pass_with(vec![]);
+            // No cell was selected, so the free-cell picker chose one and
+            // the farm act applied (no rejection in the log).
+            assert_eq!(h.shell.server.world.units(EntityId(1), sim::Res::Algo), 2);
+            assert_eq!(h.shell.server.log.len(), 1);
+            assert!(
+                !h.shell.log.iter().any(|l| l.contains("rejected")),
+                "log: {:?}",
+                h.shell.log
+            );
         }
 
         #[test]
