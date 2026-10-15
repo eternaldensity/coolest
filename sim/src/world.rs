@@ -94,6 +94,13 @@ pub enum Verb {
         y: u8,
         res: crate::deck::Res,
     },
+    /// Play a card from the closed table (design/03) at a cell. Logged like
+    /// any act, so replays reproduce dice and effects.
+    DeckCard {
+        card: String,
+        x: u8,
+        y: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1029,6 +1036,96 @@ impl World {
                 host.add_stock(intent.actor, res, 1);
                 b.mood = b.mood.saturating_sub(CODE_MOOD_COST);
                 kind = "coded";
+            }
+            Verb::DeckCard { ref card, x, y } => {
+                use crate::deck::Fx;
+                let actor = intent.actor;
+                let hostile;
+                {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    let target = CellPos(x, y);
+                    let victim = host.prog_at(x, y);
+                    let need = || SimError::new("no_target", "program cell", "empty");
+                    hostile = victim.is_some_and(|v| v != actor)
+                        || matches!(card.as_str(), "spike" | "overload");
+                    match card.as_str() {
+                        // Attacks (roll-aware, resource-funded).
+                        "spike" => {
+                            host.card_attack(
+                                actor,
+                                actor,
+                                target,
+                                Some((crate::deck::Res::Loop, 2)),
+                                None,
+                            )?;
+                        }
+                        "overload" => {
+                            host.card_attack(
+                                actor,
+                                actor,
+                                target,
+                                None,
+                                Some(crate::deck::Res::Loop),
+                            )?;
+                        }
+                        // Self buffs.
+                        "tank" => host.apply_fx(victim.ok_or_else(need)?, Fx::ShieldNext(1))?,
+                        "plating" => host.apply_fx(victim.ok_or_else(need)?, Fx::ShieldNext(2))?,
+                        "reflect" => host.apply_fx(victim.ok_or_else(need)?, Fx::ReflectNext)?,
+                        "splash" => host.apply_fx(victim.ok_or_else(need)?, Fx::SplashNext)?,
+                        "extra" => host.apply_fx(victim.ok_or_else(need)?, Fx::ExtraRollNext)?,
+                        // Debuffs on another program.
+                        "distract" => host.apply_fx(victim.ok_or_else(need)?, Fx::SkipNext)?,
+                        "freakout" => host.apply_fx(victim.ok_or_else(need)?, Fx::DotNext(1))?,
+                        "stun" => host.apply_fx(victim.ok_or_else(need)?, Fx::DotNext(2))?,
+                        "jam" => host.apply_fx(victim.ok_or_else(need)?, Fx::RollMinus(2))?,
+                        "hex" => host.apply_fx(victim.ok_or_else(need)?, Fx::BanDie(6))?,
+                        "decoy" => host.apply_fx(victim.ok_or_else(need)?, Fx::DecoyNext)?,
+                        "downgrade" => {
+                            host.apply_fx(victim.ok_or_else(need)?, Fx::DowngradeNext)?
+                        }
+                        "shuffle" => {
+                            host.apply_fx(victim.ok_or_else(need)?, Fx::RandomTargetNext)?
+                        }
+                        // Manipulation / immediate.
+                        "patch" => {
+                            host.heal_lowest(victim.ok_or_else(need)?, 2)?;
+                        }
+                        "load" => {
+                            host.grow(victim.ok_or_else(need)?)?;
+                        }
+                        "upgrade" => {
+                            host.upgrade_max(victim.ok_or_else(need)?, 1)?;
+                        }
+                        "copy" => {
+                            let src = victim.ok_or_else(need)?;
+                            let id = EntityId(100 + host.progs.len() as u64);
+                            let at = host.free_cell_for(actor).ok_or(SimError::new(
+                                "blocked",
+                                "free cell",
+                                "full",
+                            ))?;
+                            host.clone_to(src, id, at)?;
+                        }
+                        "farm" => {
+                            host.farm_once(actor);
+                        }
+                        _ => return Err(SimError::new("no_card", "known card", "unknown")),
+                    }
+                }
+                kind = "card";
+                if hostile {
+                    extra_kinds = Self::deck_beat(
+                        self.hosts.get_mut(&1).unwrap(),
+                        &mut self.funnel,
+                        self.tick,
+                        actor,
+                        true,
+                    );
+                }
             }
             Verb::DeckFarm { x, y, res } => {
                 let (max_len, cpu, rate) = farm_params(res);
@@ -2395,6 +2492,89 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.bank_balance(EntityId(1)), Some(100));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn every_card_id_resolves_through_apply() {
+        use crate::deck::Res;
+        // One program of ours and one enemy on the rig, so both self-buff
+        // and debuff cards have a valid target.
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let rig = w.ensure_host(HostId(1));
+        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 6, 1)
+            .unwrap();
+        rig.load(EntityId(20), EntityId(9), CellPos(6, 0), 6, 1)
+            .unwrap();
+        // Two loop units so the funded attacks have stock.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), Res::Loop, 4);
+
+        // (card id, cell of our program, cell of the enemy).
+        let mine = (0u8, 0u8);
+        let foe = (6u8, 0u8);
+        let cards = crate::deck::Host::implemented_cards();
+        assert_eq!(cards.len(), 20, "table size");
+        for card in cards {
+            // Self cards target our program; hostile ones target the enemy.
+            let self_card = matches!(
+                card,
+                "tank"
+                    | "plating"
+                    | "reflect"
+                    | "splash"
+                    | "extra"
+                    | "patch"
+                    | "load"
+                    | "upgrade"
+                    | "copy"
+                    | "farm"
+            );
+            let (x, y) = if self_card { mine } else { foe };
+            // Keep our program alive and the enemy present across the loop.
+            if !w.host(HostId(1)).unwrap().progs.contains_key(&20) {
+                w.ensure_host(HostId(1))
+                    .load(EntityId(20), EntityId(9), CellPos(6, 0), 6, 1)
+                    .unwrap();
+            }
+            if !w.host(HostId(1)).unwrap().progs.contains_key(&10) {
+                w.ensure_host(HostId(1))
+                    .load(EntityId(10), EntityId(1), CellPos(0, 0), 6, 1)
+                    .unwrap();
+            }
+            w.ensure_host(HostId(1))
+                .add_stock(EntityId(1), Res::Loop, 4);
+            w.tick = w.next_at(EntityId(1));
+            let (_, events) = w
+                .apply(&Intent {
+                    actor: EntityId(1),
+                    verb: Verb::DeckCard {
+                        card: card.to_string(),
+                        x,
+                        y,
+                    },
+                })
+                .unwrap_or_else(|e| panic!("card {card} refused: {e}"));
+            assert_eq!(
+                events.first().map(|e| e.kind.as_str()),
+                Some("card"),
+                "card {card} kind"
+            );
+        }
+        // An unknown card id is refused.
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckCard {
+                    card: "nope".to_string(),
+                    x: 0,
+                    y: 0,
+                },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_card");
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
