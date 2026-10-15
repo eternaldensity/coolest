@@ -1,7 +1,7 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `4174ca5`,
-> 190 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
+> Written 2026-10-15 for the next agent. Branch `main`, head `b2e4b50`,
+> 191 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
 > Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
 > file is the engineering state and the traps.
 
@@ -156,11 +156,15 @@ Remaining sub-items, all smaller:
   - **Fines → Wanted escalation**: today any mass > 0 is `Fined` and
     >= 6 is `Wanted`; consider an unpaid-fine deadline before the warrant.
 
-### P2 — Card hand/deck (finish the card system).
-Cards are currently a free palette (the Deck tab plays any of the 20 at no
-cost). design/03 has a hand: draw N, play cost (mood/CPU or per-card
-resource), discard, next-turn effects. The engine (`card_attack`, `Fx`,
-`apply_fx`, `end_turn`) is ready; this is UI + hand state + a cost model.
+### P2 — Card/program abilities (design/03 `mods`).
+Correction to an earlier note in this file: the design has **no card hand**
+(no draw/discard). It specifies `Program.mods: Vec<ModId>` — abilities
+*build into programs* — and cards that consume resources. The resource
+cost half is now done (`CardDef.cost_resource/cost_units`, enforced in
+`Verb::DeckCard`). The faithful remainder is per-program mods: give
+`Program` a `mods` list and have `card_attack` apply the attacker's mods
+when it fires, with a verb to attach a mod (paying its cost). That turns
+"play any card at a cell" into "your killer carries splash".
 
 ### P3 — Smaller, well-scoped
 - **Mailboxes / email trojan delivery**: `ZombieNet` is wired, but

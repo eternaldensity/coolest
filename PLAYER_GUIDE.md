@@ -76,6 +76,8 @@ The Deck tab also plays the **closed card table** (design/03): 8 negative,
 8 positive, 4 manipulation cards. Attacks roll a d6 (a 5-6 crits for +1);
 next-turn effects include shield, skip, stability poison, roll-minus,
 ban-die, decoy, downgrade, reflect, splash, extra-roll, and random-target.
+Cards **cost components to play** (1-2 loop/data/algo; `spike`/`overload`
+fund their own damage, `farm` is free), so the resource loop feeds them.
 Card play is a logged act, so replays reproduce the same dice.
 
 Aspirational verbs from the design (scan, connect, crack, patch, embody,
@@ -129,7 +131,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (190 tests)
+cargo test --workspace      # prove the rules hold (191 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
