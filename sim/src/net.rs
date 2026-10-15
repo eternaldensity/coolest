@@ -152,6 +152,34 @@ impl NetGraph {
         Ok(())
     }
 
+    /// True when `host` filters traffic from `source` (transit filter).
+    pub fn firewall_blocks(&self, host: HostId, source: HostId) -> bool {
+        self.firewalls
+            .get(&host.0)
+            .map(|b| b.contains(&source.0))
+            .unwrap_or(false)
+    }
+
+    /// Toggle a single firewall entry: add or remove `source` from `host`'s
+    /// block list. Refuses an unknown host.
+    pub fn set_firewall_entry(
+        &mut self,
+        host: HostId,
+        source: HostId,
+        on: bool,
+    ) -> Result<(), SimError> {
+        if !self.nodes.contains_key(&host.0) {
+            return Err(SimError::new("no_node", "known host", "missing"));
+        }
+        let e = self.firewalls.entry(host.0).or_default();
+        if on {
+            e.insert(source.0);
+        } else {
+            e.remove(&source.0);
+        }
+        Ok(())
+    }
+
     fn firewalled(&self, path: &[HostId], source: HostId) -> bool {
         // Transit hosts only (not endpoints) filter by source.
         let mid = if path.len() > 2 {

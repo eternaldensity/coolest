@@ -101,6 +101,16 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
+    /// Scrub your transit trail on the rig (design/03 "get out clean").
+    /// Needs a program on the host, or a privilege escalation there.
+    ScrubLog,
+    /// Toggle a transit firewall filter: `host` blocks traffic from
+    /// `source` (design/04 filters). Logged like any act.
+    SetFirewall {
+        host: HostId,
+        source: HostId,
+        on: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1036,6 +1046,28 @@ impl World {
                 host.add_stock(intent.actor, res, 1);
                 b.mood = b.mood.saturating_sub(CODE_MOOD_COST);
                 kind = "coded";
+            }
+            Verb::SetFirewall { host, source, on } => {
+                self.net.set_firewall_entry(host, source, on)?;
+                kind = if on { "firewall_on" } else { "firewall_off" };
+            }
+            Verb::ScrubLog => {
+                // Get out clean (design/03): erase your trail on the rig.
+                // A program on the host scrubs normally; a privilege
+                // escalation there lets you scrub with nothing left behind.
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                let privileged = host.privileged();
+                match host.scrub_log(intent.actor) {
+                    Ok(_) => kind = "scrubbed",
+                    Err(_) if privileged => {
+                        host.clear_logs_for(intent.actor);
+                        kind = "scrubbed";
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             Verb::DeckCard { ref card, x, y } => {
                 use crate::deck::Fx;
@@ -2492,6 +2524,128 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.bank_balance(EntityId(1)), Some(100));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn scrub_log_needs_access_or_privilege_and_firewall_toggles_routing() {
+        use crate::net::{LinkKind, NetKind};
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Net triangle so a firewall filter can partition a route.
+        w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+        w.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+        w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+        w.net
+            .add_link(
+                HostId(1),
+                HostId(2),
+                LinkKind::Wired { damaged: false },
+                5,
+                0,
+            )
+            .unwrap();
+        w.net
+            .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+            .unwrap();
+        // Firewall filter: host 2 blocks host 1, so 1->3 is partitioned.
+        assert!(w.net.route(HostId(1), HostId(3)).is_ok());
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SetFirewall {
+                    host: HostId(2),
+                    source: HostId(1),
+                    on: true,
+                },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("firewall_on"));
+        assert!(w.net.firewall_blocks(HostId(2), HostId(1)));
+        assert!(
+            w.net.route(HostId(1), HostId(3)).is_err(),
+            "filtered transit"
+        );
+        // Toggling off heals the route.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SetFirewall {
+                    host: HostId(2),
+                    source: HostId(1),
+                    on: false,
+                },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("firewall_off"));
+        assert!(w.net.route(HostId(1), HostId(3)).is_ok());
+        // Unknown host refuses.
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SetFirewall {
+                    host: HostId(9),
+                    source: HostId(1),
+                    on: true
+                },
+            })
+            .is_err());
+
+        // Scrub: no program and no privilege on the rig -> refused.
+        w.ensure_host(HostId(1)).log(EntityId(1), 100, HostId(1));
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::ScrubLog,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_access");
+        // A program on the rig lets you scrub your trail.
+        w.ensure_host(HostId(1))
+            .load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        w.ensure_host(HostId(1)).log(EntityId(1), 101, HostId(1));
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::ScrubLog,
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("scrubbed"));
+        assert!(w
+            .host(HostId(1))
+            .unwrap()
+            .logs_visible(EntityId(1))
+            .is_empty());
+        // Privilege alone also scrubs (no program left behind).
+        let mut w2 = World::new(1);
+        w2.spawn(EntityId(1), pos(8, 8), 1);
+        let rig = w2.ensure_host(HostId(1));
+        rig.add_vuln_kind("cve-2006-0005", true); // privilege
+        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        rig.log(EntityId(1), 100, HostId(1));
+        rig.exploit(EntityId(10), "cve-2006-0005").unwrap();
+        // Remove the program so only privilege remains.
+        rig.strike(CellPos(0, 0)).unwrap();
+        w2.tick = w2.next_at(EntityId(1));
+        let (_, events) = w2
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::ScrubLog,
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("scrubbed"));
+        assert!(w2
+            .host(HostId(1))
+            .unwrap()
+            .logs_visible(EntityId(1))
+            .is_empty());
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 

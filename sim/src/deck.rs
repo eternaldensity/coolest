@@ -362,6 +362,14 @@ impl Host {
             .collect()
     }
 
+    /// Drop a requester's own transit-log entries (privileged scrub path:
+    /// no program needed). Returns how many were removed.
+    pub fn clear_logs_for(&mut self, requester: EntityId) -> usize {
+        let before = self.logs.len();
+        self.logs.retain(|e| e.who != requester);
+        before - self.logs.len()
+    }
+
     /// True once a privilege vuln was exploited here.
     pub fn privileged(&self) -> bool {
         self.privileged
