@@ -932,6 +932,43 @@ impl Shell {
                         if h.breached { "yes" } else { "no" }
                     ));
                 }
+                // Exploit the rig's holes (design/03): needs a program of
+                // yours on the host as the delivery vehicle.
+                let vulns = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.vuln_ids())
+                    .unwrap_or_default();
+                let breached = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.breached)
+                    .unwrap_or(false);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Exploit:");
+                    for v in &vulns {
+                        if ui.button(v).clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::Exploit { vuln: v.clone() },
+                            }) {
+                                Ok(_) => self.say(format!("exploited {v}")),
+                                Err(e) => self.say(format!("exploit failed: {e}")),
+                            }
+                        }
+                    }
+                    if breached && ui.button("Send trojan").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::SendTrojan { host: HostId(1) },
+                        }) {
+                            Ok(_) => self.say("trojan planted — daily spam income".to_string()),
+                            Err(e) => self.say(format!("trojan failed: {e}")),
+                        }
+                    }
+                });
                 // Producer yield summary: what the farm loop delivers.
                 let have = sim::Res::ALL
                     .iter()
@@ -1761,6 +1798,26 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn exploit_then_trojan_through_clicks() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            // Exploit needs a program of ours on the host first.
+            h.click_last(".");
+            h.click("Farm loop");
+            // Exploit the office-ws privilege hole, then plant the trojan.
+            h.click("cve-2006-0005");
+            assert!(h.has_text("breached yes"), "text: {:?}", h.labels());
+            h.click("Send trojan");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("trojan planted")),
+                "log: {:?}",
+                h.shell.log
+            );
+            // Every step was a logged act: farm, exploit, trojan.
+            assert_eq!(h.shell.server.log.len(), 3);
         }
 
         #[test]
