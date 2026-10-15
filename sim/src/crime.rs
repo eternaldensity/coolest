@@ -83,10 +83,19 @@ impl Record {
 
     /// Evidence-weighted severity mass.
     pub fn mass(&self) -> f32 {
-        self.entries
+        let m: f32 = self
+            .entries
             .iter()
             .map(|c| c.act.severity() as f32 * c.evidence.clamp(0.0, 1.0))
-            .sum()
+            .sum();
+        // Rust's `Sum for f32` folds from -0.0, so an empty record would
+        // otherwise report negative zero (ugly in UIs, and a trap for
+        // `1.0 / mass`). Normalize it.
+        if m == 0.0 {
+            0.0
+        } else {
+            m
+        }
     }
 
     pub fn standing(&self) -> Standing {
@@ -258,6 +267,10 @@ mod tests {
         assert!(r.is_empty());
         assert_eq!(r.standing(), Standing::Clean);
         assert_eq!(r.alignment(), Alignment::HonestActive);
+        // Empty sums must not be negative zero (Rust's f32 Sum folds from
+        // -0.0): a clean record reports a plain 0.0.
+        assert!(!r.mass().is_sign_negative(), "mass {}", r.mass());
+        assert_eq!(r.mass().to_bits(), 0.0f32.to_bits());
     }
 
     #[test]
