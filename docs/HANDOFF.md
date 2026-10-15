@@ -1,7 +1,7 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `b2e4b50`,
-> 191 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
+> Written 2026-10-15 for the next agent. Branch `main`, head `28074af`,
+> 194 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
 > Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
 > file is the engineering state and the traps.
 
@@ -127,6 +127,8 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 7. What is done (recent units, newest first)
 
+- **Cards**: resource costs (design/03 consume-to-fire) and per-program
+  `Mod` abilities (`Verb::DeckMod`) that fire on every exchange.
 - **Crime/heat wiring (M4)**: `World` carries `record`/`clans`/`license`,
   illicit acts file evidence-weighted crimes (witness + live-chain gated),
   `standing()` feeds a wanted map into `step_npcs` so cops pursue, and
@@ -156,15 +158,10 @@ Remaining sub-items, all smaller:
   - **Fines → Wanted escalation**: today any mass > 0 is `Fined` and
     >= 6 is `Wanted`; consider an unpaid-fine deadline before the warrant.
 
-### P2 — Card/program abilities (design/03 `mods`).
-Correction to an earlier note in this file: the design has **no card hand**
-(no draw/discard). It specifies `Program.mods: Vec<ModId>` — abilities
-*build into programs* — and cards that consume resources. The resource
-cost half is now done (`CardDef.cost_resource/cost_units`, enforced in
-`Verb::DeckCard`). The faithful remainder is per-program mods: give
-`Program` a `mods` list and have `card_attack` apply the attacker's mods
-when it fires, with a verb to attach a mod (paying its cost). That turns
-"play any card at a cell" into "your killer carries splash".
+### P2 — Card/program abilities. DONE (see section 7).
+Costs and per-program mods both landed. Remaining nicety: nothing consumes
+`Fx`/`Mod` from a program's own *type* yet, so the design's "type synergy"
+(producers that match the attacker's type fire harder) is unbuilt.
 
 ### P3 — Smaller, well-scoped
 - **Mailboxes / email trojan delivery**: `ZombieNet` is wired, but
