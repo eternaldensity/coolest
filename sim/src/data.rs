@@ -39,6 +39,23 @@ pub struct VulnDef {
     pub effect: String,
 }
 
+impl VulnDef {
+    /// Host archetype this vuln applies to (design/03 host kinds).
+    pub fn arch(&self) -> Option<crate::deck::HostArch> {
+        crate::deck::HostArch::from_name(&self.target)
+    }
+
+    /// True when exploiting this vuln escalates privilege (reveals the
+    /// rig's transit log), not just a plain breach.
+    pub fn privileged(&self) -> bool {
+        self.effect == "privilege"
+    }
+}
+
+/// Effects this build resolves. Kept small and closed like the card table;
+/// per-vuln payloads land with zones (M3+).
+pub const KNOWN_VULN_EFFECTS: [&str; 2] = ["breach", "privilege"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistrictDef {
     pub id: String,
@@ -124,6 +141,24 @@ pub fn parse_vulns(s: &str) -> Result<Vec<VulnDef>, SimError> {
             "unique non-empty vuln ids",
             "dup/blank",
         ));
+    }
+    // Target must be a known host archetype and effect a known payload:
+    // both drive behaviour, so drift is a content bug (not just a comment).
+    for v in &vulns {
+        if v.arch().is_none() {
+            return Err(SimError::new(
+                "data",
+                "vuln target home-pc|office-ws|router|server|bank",
+                "unknown archetype",
+            ));
+        }
+        if !KNOWN_VULN_EFFECTS.contains(&v.effect.as_str()) {
+            return Err(SimError::new(
+                "data",
+                "vuln effect breach|privilege",
+                "unknown effect",
+            ));
+        }
     }
     Ok(vulns)
 }
@@ -213,7 +248,18 @@ mod tests {
         assert_eq!(jobs[4].resource, "algo");
 
         let vulns = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
-        assert_eq!(vulns.len(), 3);
+        assert_eq!(vulns.len(), 10);
+        // Every archetype has at least one hole, and the table mixes plain
+        // breaches with privilege escalations.
+        for arch in crate::deck::HostArch::ALL {
+            assert!(
+                vulns.iter().any(|v| v.arch() == Some(arch)),
+                "no vuln for {}",
+                arch.name()
+            );
+        }
+        assert!(vulns.iter().any(|v| v.privileged()));
+        assert!(vulns.iter().any(|v| !v.privileged()));
 
         let ds = parse_districts(include_str!("../../data/districts.yaml")).unwrap();
         assert_eq!(ds.iter().map(|d| d.weight).sum::<u32>(), 100);
@@ -270,6 +316,9 @@ mod tests {
             "- id: a\n  target: t\n  effect: e\n- id: a\n  target: t\n  effect: e\n"
         )
         .is_err());
+        // Unknown archetype or effect is a content bug.
+        assert!(parse_vulns("- id: a\n  target: toaster\n  effect: breach\n").is_err());
+        assert!(parse_vulns("- id: a\n  target: router\n  effect: explode\n").is_err());
         assert!(parse_districts("[]").is_err());
         assert!(parse_cards("negative: []\npositive: []\nmanipulation: []\n").is_err());
         assert!(parse_jobs("not: [valid").is_err());

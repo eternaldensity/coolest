@@ -28,7 +28,7 @@ pub use data::{
     parse_cards, parse_dialogues, parse_districts, parse_jobs, parse_vulns, CardDef, CardTable,
     DistrictDef, JobDef, VulnDef,
 };
-pub use deck::{AttackOutcome, CellPos, Fx, Host, Res};
+pub use deck::{AttackOutcome, CellPos, Fx, Host, HostArch, Res};
 pub use error::SimError;
 pub use ids::{EntityId, HostId, TileId};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};

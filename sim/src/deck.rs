@@ -8,6 +8,52 @@ use std::collections::{BTreeMap, VecDeque};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellPos(pub u8, pub u8);
 
+/// Host archetype (design/03): which kind of machine this is. Drives which
+/// vulns apply and, later, per-zone layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
+pub enum HostArch {
+    #[default]
+    HomePC,
+    OfficeWS,
+    Router,
+    Server,
+    Bank,
+}
+
+impl HostArch {
+    /// Lower-case name as used in data files.
+    pub fn name(self) -> &'static str {
+        match self {
+            HostArch::HomePC => "home-pc",
+            HostArch::OfficeWS => "office-ws",
+            HostArch::Router => "router",
+            HostArch::Server => "server",
+            HostArch::Bank => "bank",
+        }
+    }
+
+    /// Parse a data-file target name; unknown names are rejected.
+    pub fn from_name(s: &str) -> Option<HostArch> {
+        match s {
+            "home-pc" => Some(HostArch::HomePC),
+            "office-ws" => Some(HostArch::OfficeWS),
+            "router" => Some(HostArch::Router),
+            "server" => Some(HostArch::Server),
+            "bank" => Some(HostArch::Bank),
+            _ => None,
+        }
+    }
+
+    /// Every archetype, in stable order.
+    pub const ALL: [HostArch; 5] = [
+        HostArch::HomePC,
+        HostArch::OfficeWS,
+        HostArch::Router,
+        HostArch::Server,
+        HostArch::Bank,
+    ];
+}
+
 /// M2b resource types (2024): programming components creatures produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Res {
@@ -154,6 +200,9 @@ impl Program {
 struct VulnState {
     patched: bool,
     burned: bool,
+    /// Exploiting this vuln escalates privilege (from vulns.yaml effect).
+    #[serde(default)]
+    privileged: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,6 +253,15 @@ pub struct Host {
     /// Default is a nonzero constant so old saves still roll.
     #[serde(default = "default_rng")]
     rng: u64,
+    /// Host archetype (design/03): drives which vulns apply. Defaults to
+    /// HomePC so old saves and fresh arenas behave as before.
+    #[serde(default)]
+    arch: HostArch,
+    /// Privilege escalation: a `privilege` vuln was exploited here, so the
+    /// intruder can read this rig's transit log without a program. Plain
+    /// `breach` does not.
+    #[serde(default)]
+    privileged: bool,
 }
 
 /// Nonzero xorshift seed for hosts without a serialized rng state.
@@ -264,7 +322,54 @@ impl Host {
             // Seed from the host id so distinct rigs roll differently, and
             // never zero (xorshift would stick).
             rng: default_rng() ^ (id.0.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1),
+            arch: HostArch::default(),
+            privileged: false,
         }
+    }
+
+    /// Host archetype (design/03).
+    pub fn arch(&self) -> HostArch {
+        self.arch
+    }
+
+    /// Set the archetype and install that archetype's vulns from the data
+    /// table (design/03: "data-driven vulns"). Returns how many landed.
+    pub fn set_arch(&mut self, arch: HostArch, defs: &[crate::data::VulnDef]) -> usize {
+        self.arch = arch;
+        self.install_vulns(defs)
+    }
+
+    /// Install the vulns whose target matches this host's archetype.
+    /// Wild boxes (no matching entries) stay vuln-free.
+    pub fn install_vulns(&mut self, defs: &[crate::data::VulnDef]) -> usize {
+        let mut n = 0;
+        for d in defs {
+            if d.arch() == Some(self.arch) {
+                self.add_vuln_kind(&d.id, d.privileged());
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Transit log entries visible to a requester: privileged intruders see
+    /// the whole log, everyone else sees only their own trail.
+    pub fn logs_visible(&self, requester: EntityId) -> Vec<u64> {
+        self.logs
+            .iter()
+            .filter(|e| self.privileged || e.who == requester)
+            .map(|e| e.when)
+            .collect()
+    }
+
+    /// True once a privilege vuln was exploited here.
+    pub fn privileged(&self) -> bool {
+        self.privileged
+    }
+
+    /// Registered vuln ids on this host (client display).
+    pub fn vuln_ids(&self) -> Vec<String> {
+        self.vulns.keys().cloned().collect()
     }
 
     /// Advance the dice state and return a face in `1..=sides`.
@@ -543,14 +648,23 @@ impl Host {
     // ---- M2c: vulns, trace/bounce/logs, monitor ----
 
     /// Register a vuln on this host (data-driven in vulns.yaml later; 3 for M2).
-    pub fn add_vuln(&mut self, id: &str) {
+    /// Register a vuln on this host. `privileged` marks a vuln whose
+    /// exploit escalates privilege (from vulns.yaml effect).
+    pub fn add_vuln_kind(&mut self, id: &str, privileged: bool) {
         self.vulns.insert(
             id.to_string(),
             VulnState {
                 patched: false,
                 burned: false,
+                privileged,
             },
         );
+    }
+
+    /// Register a plain breach vuln (kept for callers that have no data
+    /// table to hand, e.g. tests).
+    pub fn add_vuln(&mut self, id: &str) {
+        self.add_vuln_kind(id, false);
     }
 
     /// Exploit fires once per vuln: sets breached. Patched or burned → Err.
@@ -570,6 +684,11 @@ impl Host {
         }
         v.burned = true;
         self.breached = true;
+        // A privilege vuln escalates: the intruder can read the rig's
+        // transit log without keeping a program on the host.
+        if self.vulns.get(vuln).map(|s| s.privileged).unwrap_or(false) {
+            self.privileged = true;
+        }
         if self.monitor_armed {
             self.flagged = true;
         }
@@ -1578,6 +1697,42 @@ mod tests {
         // 4 damage strips both tail segments; the head alone remains, so
         // the body is reduced to a single cell rather than destroyed.
         assert_eq!(h.progs[&21].len(), 1, "funded spike stripped the body");
+    }
+
+    #[test]
+    fn archetypes_install_their_own_vulns_and_privilege_reveals_logs() {
+        use crate::data::parse_vulns;
+        let defs = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
+        // A HomePC gets only home-pc holes; a Bank only bank holes.
+        let mut pc = Host::new(HostId(1), 12, 8, 100);
+        let n = pc.set_arch(HostArch::HomePC, &defs);
+        assert_eq!(n, 2, "home-pc entries");
+        assert_eq!(pc.arch(), HostArch::HomePC);
+        let mut bank = Host::new(HostId(2), 12, 8, 100);
+        assert_eq!(bank.set_arch(HostArch::Bank, &defs), 2);
+        // Exploiting a plain breach leaves the log private.
+        pc.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        pc.log(EntityId(9), 100, HostId(9));
+        pc.exploit(EntityId(10), "cve-2006-0002").unwrap(); // breach
+        assert!(pc.breached);
+        assert!(!pc.privileged());
+        assert!(pc.logs_visible(EntityId(1)).is_empty(), "log stays private");
+        // A privilege vuln reveals the whole transit log.
+        let mut ws = Host::new(HostId(3), 12, 8, 100);
+        ws.set_arch(HostArch::OfficeWS, &defs);
+        ws.load(EntityId(11), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        ws.log(EntityId(9), 100, HostId(9));
+        ws.log(EntityId(8), 101, HostId(8));
+        assert!(ws.exploit(EntityId(11), "cve-2006-0005").is_ok()); // privilege
+        assert!(ws.privileged());
+        assert_eq!(ws.logs_visible(EntityId(1)).len(), 2, "privileged sees all");
+        // A wild box (no matching entries) stays vuln-free.
+        let mut odd = Host::new(HostId(4), 12, 8, 100);
+        assert_eq!(odd.set_arch(HostArch::Server, &defs), 2);
+        let none = odd.install_vulns(&defs[..2]); // only home-pc/office-ws
+        assert_eq!(none, 0);
     }
 
     #[test]

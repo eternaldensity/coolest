@@ -1,5 +1,9 @@
-# M2 starter vulns (see sim/src/deck.rs exploit/patch).
-# effect: breach flag only in M2; per-vuln payloads land with zones (M3+).
+# M2 vuln table (see sim/src/deck.rs exploit/patch + Host::install_vulns).
+# target: host archetype the vuln applies to (design/03 host kinds).
+# effect: breach    -> sets breached (you are inside)
+#         privilege -> also reveals the rig's transit log without a program
+# Hosts install only the entries matching their archetype, so a HomePC and
+# a Bank present different holes. Per-vuln payloads land with zones (M3+).
 - id: cve-2006-0001
   target: office-ws
   effect: breach
@@ -9,3 +13,24 @@
 - id: cve-2006-0003
   target: router
   effect: breach
+- id: cve-2006-0004
+  target: home-pc
+  effect: privilege
+- id: cve-2006-0005
+  target: office-ws
+  effect: privilege
+- id: cve-2006-0006
+  target: router
+  effect: privilege
+- id: cve-2006-0007
+  target: server
+  effect: breach
+- id: cve-2006-0008
+  target: server
+  effect: privilege
+- id: cve-2006-0009
+  target: bank
+  effect: breach
+- id: cve-2006-0010
+  target: bank
+  effect: privilege
