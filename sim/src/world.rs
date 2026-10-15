@@ -1,5 +1,5 @@
 use crate::civic::{cop_duty, role_table, Role};
-use crate::crime::Standing;
+use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing};
 use crate::deck::{CellPos, Host};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
@@ -122,6 +122,9 @@ pub enum Verb {
     SendTrojan {
         host: HostId,
     },
+    /// Settle with the city (design/05): pay a fine proportional to the
+    /// record's evidence mass and clear it, ending any pursuit.
+    PayFine,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +209,10 @@ const DEFAULT_JOBS: [(i64, u8, u8); 5] = [
     (500, 24, 13),
 ];
 const WATCH_COST: i64 = 30;
+/// Chebyshev range at which an NPC witnesses an illicit act (design/05).
+const WITNESS_RANGE: i32 = 5;
+/// Cents per severity-evidence point when settling a fine (design/05).
+const FINE_PER_MASS: i64 = 100;
 /// Manual coding cost (design/10): one unit per act at a small mood price,
 /// so deck producers (free per act) are the real answer for higher tiers.
 const CODE_MOOD_COST: u8 = 2;
@@ -288,6 +295,21 @@ pub struct World {
     /// Last game day the zombie net paid out. Default 0 for old saves.
     #[serde(default)]
     spam_day: u64,
+    /// Conduct record (design/05 M4): evidence-weighted crimes. Alignment
+    /// and standing are pure functions of this, so editing it changes who
+    /// the city thinks you are. Default empty for old saves.
+    #[serde(default)]
+    record: Record,
+    /// Clan membership + enemies (design/05 M4b). Default empty.
+    #[serde(default)]
+    clans: Clans,
+    /// License to hack (design/05 M4b). Default unearned.
+    #[serde(default)]
+    license: License,
+    /// City/authority account fines are paid into (lazily opened, reserved
+    /// system id); default None for old saves.
+    #[serde(default)]
+    city: Option<u64>,
 }
 
 fn default_jobs() -> Vec<(i64, u8, u8)> {
@@ -324,6 +346,10 @@ impl World {
             home: None,
             zombies: crate::mailer::ZombieNet::new(),
             spam_day: 0,
+            record: Record::new(),
+            clans: Clans::new(),
+            license: License::new(),
+            city: None,
         }
     }
 
@@ -454,6 +480,119 @@ impl World {
     /// Ledger account id for a being or NPC, once opened.
     pub fn account(&self, id: EntityId) -> Option<u64> {
         self.accts.get(&id.0).copied()
+    }
+
+    // ---- M4 conduct: record, alignment, standing (design/05) ----
+
+    /// The protagonist's conduct record (evidence-weighted crimes).
+    pub fn record(&self) -> &Record {
+        &self.record
+    }
+
+    pub fn standing(&self) -> Standing {
+        self.record.standing()
+    }
+
+    pub fn alignment(&self) -> Alignment {
+        self.record.alignment()
+    }
+
+    pub fn record_mass(&self) -> f32 {
+        self.record.mass()
+    }
+
+    /// Cents to settle the current record (fine quote). 0 when clean.
+    pub fn fine_cost(&self) -> i64 {
+        let m = self.record.mass();
+        if m <= 0.0 {
+            0
+        } else {
+            (m.ceil() as i64) * FINE_PER_MASS
+        }
+    }
+
+    pub fn license(&self) -> &License {
+        &self.license
+    }
+
+    pub fn clans(&self) -> &Clans {
+        &self.clans
+    }
+
+    /// Most authoritative witness to `actor`'s act: Authority when a cop is
+    /// in earshot, HonestPassive for any other bystander, else None (no
+    /// honest eyes — the act leaves only a rumor).
+    fn witness_for(&self, actor: EntityId) -> Option<Alignment> {
+        let ap = self.pos_of(actor)?;
+        let mut civilian = false;
+        for (_, p, role) in self.npc_full() {
+            if p.sx != ap.sx || p.sy != ap.sy {
+                continue;
+            }
+            let d = (p.x as i32 - ap.x as i32)
+                .abs()
+                .max((p.y as i32 - ap.y as i32).abs());
+            if d > WITNESS_RANGE {
+                continue;
+            }
+            if role == Role::Cop {
+                return Some(Alignment::Authority);
+            }
+            civilian = true;
+        }
+        if civilian {
+            Some(Alignment::HonestPassive)
+        } else {
+            None
+        }
+    }
+
+    /// File an illicit act. Evidence is full only when an honest/authority
+    /// witness saw it and the perp is still traceable (live chain); an
+    /// unwitnessed act leaves a rumor that barely moves alignment
+    /// (design/05).
+    fn report_crime(
+        &mut self,
+        actor: EntityId,
+        act: Act,
+        host: Option<HostId>,
+        victim: Option<EntityId>,
+        live_chain: bool,
+    ) {
+        let evidence = match self.witness_for(actor) {
+            Some(witness) => trace_evidence(1.0, witness, live_chain),
+            // No honest eyes: only a rumor survives.
+            None => 0.1,
+        };
+        self.record.report(Crime {
+            act,
+            at_host: host,
+            tick: self.tick,
+            victim,
+            evidence,
+        });
+    }
+
+    /// A host is foreign to `actor` when someone else owns it and it is not
+    /// a range (unowned wild boxes stay quiet).
+    fn is_foreign(&self, actor: EntityId, host: HostId) -> bool {
+        match self.hosts.get(&host.0).and_then(|h| h.owner()) {
+            Some(o) => o != actor && o != Host::WARDEN,
+            None => false,
+        }
+    }
+
+    /// Being-id -> standing for cop pursuit: only the protagonist is
+    /// tracked, and only once Wanted.
+    fn wanted_map(&self) -> BTreeMap<u64, Standing> {
+        let mut m = BTreeMap::new();
+        if self.record.standing() == Standing::Wanted {
+            // Every being shares the single record in single-player.
+            for id in self.beings.keys() {
+                m.insert(*id, Standing::Wanted);
+            }
+        }
+        m
     }
 
     /// Bank balance for a being or NPC, once an account exists. Clients
@@ -715,6 +854,14 @@ impl World {
         if b.money < 0 {
             return "In debt: work to climb out".to_string();
         }
+        // Wanted: the city is hunting you; settling ends the chase.
+        if self.standing() == Standing::Wanted {
+            let cost = self.fine_cost();
+            return format!(
+                "Wanted: pay the fine (${:.2}) or lie low — cops pursue on sight",
+                cost as f64 / 100.0
+            );
+        }
         let pay0 = self.jobs.first().map(|j| j.0).unwrap_or(0);
         if b.money < pay0.max(100) {
             // Unit gate (design/10): the work advice is useless when the
@@ -846,6 +993,9 @@ impl World {
     }
 
     pub fn apply(&mut self, intent: &Intent) -> Result<(Delta, Vec<Event>), SimError> {
+        // Deck acts land on world host 1; computed before the being borrow
+        // because it reads host ownership.
+        let deck_foreign = self.is_foreign(intent.actor, HostId(1));
         let b = self.beings.get_mut(&intent.actor.0).ok_or(SimError::new(
             "unknown_actor",
             "spawned entity",
@@ -882,6 +1032,9 @@ impl World {
         }
         let mut kind = "acted";
         let mut extra_kinds: Vec<String> = Vec::new();
+        // Crimes committed this act, filed after the match: `report_crime`
+        // borrows the whole world, which the live `beings` borrow forbids.
+        let mut crimes: Vec<(Act, Option<HostId>, Option<EntityId>, bool)> = Vec::new();
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -996,6 +1149,8 @@ impl World {
             Verb::DamageWire(from, to) => {
                 self.net.damage_wire(from, to)?;
                 kind = "damaged";
+                // Wire sabotage is a crime; you are on the net, so traceable.
+                crimes.push((Act::Attack, None, None, true));
             }
             Verb::DeckLoad { x, y } => {
                 // Field-disjoint with the live `beings` borrow below,
@@ -1012,6 +1167,10 @@ impl World {
                     .unwrap()
                     .load(id, intent.actor, CellPos(x, y), 3, 1)?;
                 kind = "loaded";
+                // Loading onto a foreign, non-range rig is trespass.
+                if deck_foreign {
+                    crimes.push((Act::Trespass, Some(HostId(1)), None, true));
+                }
                 extra_kinds = Self::deck_beat(
                     self.hosts.get_mut(&1).unwrap(),
                     &mut self.funnel,
@@ -1028,6 +1187,10 @@ impl World {
                     .strike(CellPos(x, y))?;
                 if killed {
                     extra_kinds.push("kill".to_string());
+                    // Destroying someone else's program on a foreign rig.
+                    if deck_foreign {
+                        crimes.push((Act::Attack, Some(HostId(1)), None, true));
+                    }
                 }
                 kind = "struck";
                 extra_kinds.extend(Self::deck_beat(
@@ -1049,6 +1212,8 @@ impl World {
             Verb::VeilSeize => {
                 self.veil.transfer(intent.actor, EntityId(70), 3, true)?;
                 kind = "seized";
+                // Taking over a host reads as theft (design/05).
+                crimes.push((Act::Theft, None, None, true));
             }
             Verb::VeilEject => {
                 self.veil.eject(intent.actor)?;
@@ -1061,6 +1226,8 @@ impl World {
                 } else {
                     self.power.kill((sx, sy));
                     kind = "power_down";
+                    // Sabotage is a crime: you are on the net, so traceable.
+                    crimes.push((Act::Attack, None, None, true));
                 }
             }
             Verb::Code { res } => {
@@ -1100,6 +1267,42 @@ impl World {
                 }
                 self.zombies.enslave(host, intent.actor);
                 kind = "trojan";
+                // Spamming a rig for profit is theft (design/05).
+                crimes.push((Act::Theft, Some(host), None, true));
+            }
+            Verb::PayFine => {
+                // Settle with the city: cost scales with evidence mass.
+                let mass = self.record.mass();
+                if mass <= 0.0 {
+                    return Err(SimError::new("no_fine", "outstanding fine", "clean"));
+                }
+                let cost = (mass.ceil() as i64) * FINE_PER_MASS;
+                let acct = self
+                    .accts
+                    .get(&intent.actor.0)
+                    .copied()
+                    .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
+                // Pocket-first, bank covers the rest (same bridge as Buy).
+                let bank = self.ledger.balance(acct)?;
+                let cash = b.money.min(cost);
+                if bank < cost - cash {
+                    return Err(SimError::new("overdraw", "funds", "short"));
+                }
+                if cash > 0 {
+                    b.money -= cash;
+                    self.ledger.mint(acct, cash)?;
+                }
+                let city = match self.city {
+                    Some(id) => id,
+                    None => {
+                        let id = self.ledger.open(EntityId(u64::MAX - 2), HostId(1));
+                        self.city = Some(id);
+                        id
+                    }
+                };
+                self.ledger.transfer(acct, city, cost)?;
+                self.record.pardon_all();
+                kind = "paid_fine";
             }
             Verb::ScrubLog => {
                 // Get out clean (design/03): erase your trail on the rig.
@@ -1355,6 +1558,11 @@ impl World {
         };
         b.next_at = self.tick + eff;
         self.sched.schedule(intent.actor, b.next_at);
+        // File any crimes this act committed, now that the `beings` borrow
+        // is released (the witness lookup reads NPC positions).
+        for (act, host, victim, live_chain) in crimes {
+            self.report_crime(intent.actor, act, host, victim, live_chain);
+        }
         // Passive production (design/10): your rig's makers yield on every
         // successful act. In-act, so replay reproduces it exactly.
         if let Some(host) = self.hosts.get_mut(&1) {
@@ -1383,7 +1591,10 @@ impl World {
         // at an unchanged tick are no-ops, and this keeps intent replay
         // (which has no frames) on the same NPC tracks as live play.
         let hour = ((self.tick / 60) % 24) as u8;
-        self.step_npcs(hour, &BTreeMap::new());
+        // Wanted beings draw cop pursuit (design/05): the record's standing
+        // is the only source, so a paid-off record ends the chase.
+        let wanted = self.wanted_map();
+        self.step_npcs(hour, &wanted);
         let mut events = vec![Event {
             tick: self.tick,
             actor: intent.actor,
@@ -2575,6 +2786,239 @@ mod tests {
         .unwrap();
         assert_eq!(w.bank_balance(EntityId(1)), Some(100));
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn pay_fine_settles_the_record_and_ends_pursuit() {
+        use crate::crime::{Act, Crime, Standing};
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), HostId(1)).unwrap();
+        w.ledger.mint(acct, 2000).unwrap();
+        // Nothing owed while clean.
+        assert_eq!(w.fine_cost(), 0);
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::PayFine,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "no_fine");
+        // Wanted record (mass 8): fine quote is 800c.
+        for _ in 0..2 {
+            w.record.report(Crime {
+                act: Act::Attack,
+                at_host: None,
+                tick: 1,
+                victim: None,
+                evidence: 1.0,
+            });
+        }
+        assert_eq!(w.standing(), Standing::Wanted);
+        assert_eq!(w.fine_cost(), 800);
+        let bank_before = w.bank_balance(EntityId(1)).unwrap();
+        let pocket_before = w.needs(EntityId(1)).unwrap().2;
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::PayFine,
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("paid_fine"));
+        // Record cleared: clean standing, no more pursuit.
+        assert_eq!(w.standing(), Standing::Clean);
+        assert_eq!(w.record_mass(), 0.0);
+        // Pocket-first then bank, and the ledger stays closed.
+        let spent = (pocket_before - w.needs(EntityId(1)).unwrap().2)
+            + (bank_before - w.bank_balance(EntityId(1)).unwrap());
+        assert_eq!(spent, 800, "fine paid exactly");
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+        // Advise no longer warns about pursuit.
+        assert!(!w.advise(EntityId(1)).contains("Wanted"));
+        // Too poor to settle: refused without moving money.
+        w.record.report(Crime {
+            act: Act::Murder,
+            at_host: None,
+            tick: 1,
+            victim: None,
+            evidence: 1.0,
+        });
+        w.set_needs(EntityId(1), 80, 70, 0, 3);
+        let mut poor = World::new(2);
+        poor.spawn(EntityId(1), pos(8, 8), 1);
+        poor.open_account(EntityId(1), HostId(1)).unwrap();
+        poor.record.report(Crime {
+            act: Act::Murder,
+            at_host: None,
+            tick: 1,
+            victim: None,
+            evidence: 1.0,
+        });
+        poor.tick = poor.next_at(EntityId(1));
+        let err = poor
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::PayFine,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "overdraw");
+        assert_eq!(poor.record_mass(), 8.0, "record untouched when broke");
+    }
+
+    #[test]
+    fn sabotage_reports_crime_gated_by_witness_and_reaches_wanted() {
+        use crate::crime::{Act, Standing};
+        // Net with one wired link to sabotage.
+        let net_world = |with_cop: bool| {
+            let mut w = World::new(1);
+            w.spawn(EntityId(1), pos(8, 8), 1);
+            w.net
+                .add_node(HostId(1), crate::net::NetKind::Oldnet, 10, false);
+            w.net
+                .add_node(HostId(2), crate::net::NetKind::Oldnet, 100, true);
+            w.net
+                .add_link(
+                    HostId(1),
+                    HostId(2),
+                    crate::net::LinkKind::Wired { damaged: false },
+                    5,
+                    0,
+                )
+                .unwrap();
+            if with_cop {
+                // A cop two tiles away witnesses the act in full.
+                w.spawn_npc(EntityId(11), Role::Cop, (10, 8), (10, 8), (10, 8), 15);
+            }
+            w
+        };
+        // Unobserved: only a rumor, so mass stays tiny.
+        let mut solo = net_world(false);
+        solo.tick = solo.next_at(EntityId(1));
+        solo.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DamageWire(HostId(1), HostId(2)),
+        })
+        .unwrap();
+        assert_eq!(solo.record().len(), 1, "rumor entry filed");
+        assert!(
+            solo.record_mass() < 1.0,
+            "rumor mass {}",
+            solo.record_mass()
+        );
+        assert_eq!(solo.standing(), Standing::Fined);
+
+        // Witnessed by a cop: full evidence. Two Attacks reach Wanted.
+        let mut watched = net_world(true);
+        for _ in 0..2 {
+            watched.tick = watched.next_at(EntityId(1));
+            // Re-damage needs a fresh link each time; repair then hit again.
+            watched.net.repair_wire(HostId(1), HostId(2)).unwrap();
+            watched
+                .apply(&Intent {
+                    actor: EntityId(1),
+                    verb: Verb::DamageWire(HostId(1), HostId(2)),
+                })
+                .unwrap();
+        }
+        assert_eq!(watched.record().len(), 2);
+        assert_eq!(watched.record_mass(), 8.0, "two full-evidence attacks");
+        assert_eq!(watched.standing(), Standing::Wanted);
+        assert_ne!(watched.alignment(), crate::crime::Alignment::HonestActive);
+        // The crime's act/host are recorded for evidence trails.
+        assert_eq!(watched.record().len(), 2);
+        let _ = Act::Attack;
+    }
+
+    #[test]
+    fn deck_intrusion_counts_only_on_foreign_rigs() {
+        // Range rig (warden-owned): practice draws no record entry.
+        let mut range = World::new(1);
+        range.spawn(EntityId(1), pos(8, 8), 1);
+        range.ensure_host(HostId(1)).set_owner(Some(Host::WARDEN));
+        range.tick = range.next_at(EntityId(1));
+        range
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckLoad { x: 0, y: 0 },
+            })
+            .unwrap();
+        assert_eq!(range.record().len(), 0, "range practice is not trespass");
+
+        // Foreign rig: loading is trespass, killing is an attack.
+        let mut foreign = World::new(1);
+        foreign.spawn(EntityId(1), pos(8, 8), 1);
+        let host = foreign.ensure_host(HostId(1));
+        host.set_owner(Some(EntityId(11)));
+        host.load(EntityId(50), EntityId(11), CellPos(5, 5), 1, 1)
+            .unwrap();
+        foreign.tick = foreign.next_at(EntityId(1));
+        foreign
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckLoad { x: 0, y: 0 },
+            })
+            .unwrap();
+        assert_eq!(foreign.record().len(), 1, "trespass filed");
+        foreign.tick = foreign.next_at(EntityId(1));
+        foreign
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckStrike { x: 5, y: 5 },
+            })
+            .unwrap();
+        assert_eq!(foreign.record().len(), 2, "attack filed on kill");
+    }
+
+    #[test]
+    fn wanted_record_draws_cop_pursuit() {
+        use crate::crime::{Act, Crime, Standing};
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // A cop posted far away.
+        w.spawn_npc(EntityId(11), Role::Cop, (2, 2), (2, 2), (2, 2), 15);
+        let start = w.npc_full()[0].1;
+        // Clean: the cop follows its timetable, not the player.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(w.standing(), Standing::Clean);
+        // Make the player Wanted via the real record path.
+        for _ in 0..2 {
+            w.record.report(Crime {
+                act: Act::Attack,
+                at_host: None,
+                tick: 1,
+                victim: None,
+                evidence: 1.0,
+            });
+        }
+        assert_eq!(w.standing(), Standing::Wanted);
+        // Now the cop closes on the player's tile over successive acts.
+        let dist = |w: &World| {
+            let c = w.npc_full()[0].1;
+            (c.x as i32 - 8).abs() + (c.y as i32 - 8).abs()
+        };
+        let before = dist(&w);
+        // NPC turns are gated by their speed, so give the cop enough ticks.
+        for _ in 0..40 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Wait,
+            })
+            .unwrap();
+        }
+        assert!(
+            dist(&w) < before,
+            "cop did not pursue: {before} -> {}",
+            dist(&w)
+        );
+        let _ = start;
     }
 
     #[test]
