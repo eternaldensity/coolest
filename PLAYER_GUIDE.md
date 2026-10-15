@@ -52,9 +52,14 @@ both bars down:
 - **Deck:** click a cell, `Load killer` a program, `Strike` heads/tails.
   The warden defends host 1 — intrusions draw a trace, and kills count
   toward your record. Every act is logged; replays reproduce the arena.
+  The rig is an `office-ws` with its own vulns: `Exploit` one (needs a
+  program of yours there) to breach it, then `Send trojan` for capped
+  daily spam income. `Scrub log` erases your trail — a program on the
+  host, or a privilege vuln, gets you in.
 - **Net:** the tab lists hosts (net kind, modem, gateway, `DARK`) and links.
-  `Route 1→3` previews path/tolls and reroutes around dark sections;
-  `Damage wire 1-2` sabotage and `Cut/Restore power` are logged acts.
+  `Route 1→3` previews path/tolls and reroutes around dark sections and
+  firewalled transit; `Damage wire 1-2`, `Cut/Restore power`, and the
+  `Block/Unblock` firewall filter are all logged acts.
 - **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize hosts,
   `Eject` (light drain). Death ejects instead of killing.
 
@@ -63,8 +68,8 @@ both bars down:
 | View | What | Verbs wired today |
 |------|------|-------------------|
 | Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / deposit / withdraw |
-| Net | Host graph, latency, tolls | route (preview) / damage wire / cut+restore power |
-| Deck | Inside world host 1: RAM arena | load killer / strike / farm producers / play cards (warden answers) |
+| Net | Host graph, latency, tolls | route (preview) / damage wire / cut+restore power / firewall filter |
+| Deck | Inside world host 1: RAM arena | load killer / strike / farm producers / play cards / exploit + trojan / scrub log (warden answers) |
 | Veil | Helmet space over the same rules | jack in / move / seize / eject |
 
 The Deck tab also plays the **closed card table** (design/03): 8 negative,
@@ -118,7 +123,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (174 tests)
+cargo test --workspace      # prove the rules hold (184 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
