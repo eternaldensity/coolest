@@ -60,10 +60,9 @@ fn main() {
 
     // M2 deck fight.
     let mut h = Host::new(HostId(1), 12, 8, 100);
-    for v in &vulns {
-        h.add_vuln(&v.id);
-    }
-    println!("vulns registered: {}", vulns.len());
+    // Archetype drives which holes exist (design/03 host kinds).
+    let installed = h.set_arch(sim::HostArch::OfficeWS, &vulns);
+    println!("vulns registered: {installed} of {}", vulns.len());
     h.load(EntityId(10), EntityId(1), CellPos(2, 2), 3, 1)
         .unwrap();
     h.step(EntityId(10), CellPos(3, 2)).unwrap();

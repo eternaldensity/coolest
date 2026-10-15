@@ -165,10 +165,14 @@ impl Shell {
         server.world.power.anchor(HostId(3), (2, 0));
         server.world.ensure_host(HostId(1));
         // World host 1 is a defended range rig: loading foreign programs
-        // draws a warden and a trace (M2 retaliation, always on).
+        // draws a warden and a trace (M2 retaliation, always on). It is an
+        // office workstation, so it carries that archetype's vulns.
+        let vulns = sim::parse_vulns(include_str!("../../data/vulns.yaml")).unwrap_or_default();
         let range = server.world.ensure_host(HostId(1));
         range.set_owner(Some(Host::WARDEN));
         range.set_monitor(true);
+        let installed = range.set_arch(sim::HostArch::OfficeWS, &vulns);
+        let _ = installed;
         // Jobs drive both mechanics and button labels (data/jobs.yaml).
         let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap_or_default();
         if !jobs.is_empty() {
@@ -901,6 +905,14 @@ impl Shell {
                     }
                 });
                 ui.label(format!("CPU {cpu}/{total}"));
+                if let Some(h) = self.server.world.host(HostId(1)) {
+                    ui.label(format!(
+                        "arch {} · vulns {} · breached {}",
+                        h.arch().name(),
+                        h.vuln_ids().len(),
+                        if h.breached { "yes" } else { "no" }
+                    ));
+                }
                 // Producer yield summary: what the farm loop delivers.
                 let have = sim::Res::ALL
                     .iter()
@@ -1702,6 +1714,15 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn deck_shows_archetype_and_vuln_count() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            // The demo rig is an office workstation carrying its own holes.
+            assert!(h.has_text("arch office-ws"), "text: {:?}", h.labels());
+            assert!(h.has_text("breached no"), "text: {:?}", h.labels());
         }
 
         #[test]
