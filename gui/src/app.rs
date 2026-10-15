@@ -484,6 +484,29 @@ impl Shell {
                     .collect::<Vec<_>>()
                     .join(" · ");
                 ui.label(format!("components: {units}"));
+                // Heat (design/05): alignment/standing are pure functions of
+                // the record, so settling the fine clears both.
+                let standing = self.server.world.standing();
+                let mass = self.server.world.record_mass();
+                ui.label(format!(
+                    "standing {standing:?} · alignment {:?} · mass {mass:.1}",
+                    self.server.world.alignment()
+                ));
+                if mass > 0.0 {
+                    let cost = self.server.world.fine_cost();
+                    if ui
+                        .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
+                        .clicked()
+                    {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::PayFine,
+                        }) {
+                            Ok(_) => self.say("fine paid — record settled".to_string()),
+                            Err(e) => self.say(format!("fine failed: {e}")),
+                        }
+                    }
+                }
                 ui.label(format!("rations {rations} tick {}", self.server.world.tick));
                 let tick = self.server.world.tick;
                 ui.label(format!(
@@ -1798,6 +1821,38 @@ mod tests {
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn heat_shows_and_paying_a_fine_settles_it() {
+            let mut h = Harness::new();
+            // Clean to start: standing shown, no fine button.
+            assert!(h.has_text("standing Clean"), "text: {:?}", h.labels());
+            assert!(!h
+                .labels()
+                .iter()
+                .any(|(r, t)| r == "Button" && t.starts_with("Pay fine")));
+            // Commit sabotage through the Net tab: the record grows and the
+            // fine control appears.
+            h.click("Net");
+            h.click("Damage wire 1-2");
+            h.click("Street");
+            assert!(
+                h.labels()
+                    .iter()
+                    .any(|(r, t)| r == "Button" && t.starts_with("Pay fine")),
+                "no fine control; text: {:?}",
+                h.labels()
+            );
+            assert!(!h.has_text("standing Clean"), "text: {:?}", h.labels());
+            // Settle: the record clears and pursuit ends.
+            h.click_prefix("Pay fine");
+            assert!(h.has_text("standing Clean"), "text: {:?}", h.labels());
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("record settled")),
+                "log: {:?}",
+                h.shell.log
+            );
         }
 
         #[test]
