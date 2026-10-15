@@ -671,6 +671,46 @@ impl Shell {
                 });
                 ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
+                // Mail (design/03-04): read your inbox, craft a Mailer+,
+                // and trojan a nearby NPC. Trojans land when they open it.
+                let inbox = self.server.world.inbox(self.actor).len();
+                let has_plus = self.server.world.has_mailer_plus();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("Mail — inbox {inbox}"));
+                    if inbox > 0 && ui.button("Open mail").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::OpenMail { index: 0 },
+                        }) {
+                            Ok(_) => self.say("mail opened".to_string()),
+                            Err(e) => self.say(format!("open failed: {e}")),
+                        }
+                    }
+                    if !has_plus && ui.button("Craft Mailer+ (3 algo)").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::CraftMailerPlus,
+                        }) {
+                            Ok(_) => self.say("Mailer+ crafted — trojans unlocked".to_string()),
+                            Err(e) => self.say(format!("craft failed: {e}")),
+                        }
+                    }
+                    if has_plus {
+                        for (id, role) in self.nearby_npcs() {
+                            if ui.button(format!("Trojan {role:?}")).clicked() {
+                                match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::SendTrojan { to: EntityId(id) },
+                                }) {
+                                    Ok(_) => {
+                                        self.say(format!("trojan mailed to {id}"))
+                                    }
+                                    Err(e) => self.say(format!("trojan failed: {e}")),
+                                }
+                            }
+                        }
+                    }
+                });
                 // Snapshot world reads up front: UI callbacks below need &mut self.
                 // Counter shows within reach (counter serves adjacent tiles).
                 let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
@@ -1056,11 +1096,19 @@ impl Shell {
                         }
                     }
                     if breached && ui.button("Send trojan").clicked() {
+                        // Trojans go by mail now: send one to the rig's
+                        // owner, who runs it when they open it.
+                        let to = self
+                            .server
+                            .world
+                            .host(HostId(1))
+                            .and_then(|h| h.owner())
+                            .unwrap_or(self.actor);
                         match self.server.apply_one(Intent {
                             actor: self.actor,
-                            verb: Verb::SendTrojan { host: HostId(1) },
+                            verb: Verb::SendTrojan { to },
                         }) {
-                            Ok(_) => self.say("trojan planted — daily spam income".to_string()),
+                            Ok(_) => self.say("trojan mailed — lands when opened".to_string()),
                             Err(e) => self.say(format!("trojan failed: {e}")),
                         }
                     }
@@ -1925,6 +1973,44 @@ mod tests {
         }
 
         #[test]
+        fn mail_craft_and_send_trojan_through_clicks() {
+            let mut h = Harness::new();
+            // Mailer+ costs algo, which we do not have yet: refused.
+            h.click("Craft Mailer+ (3 algo)");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("craft failed")),
+                "log: {:?}",
+                h.shell.log
+            );
+            // Farm + code algo to afford it, then craft.
+            h.click("Deck");
+            h.click_last(".");
+            h.click("Farm algo");
+            h.click("Street");
+            for _ in 0..3 {
+                h.click_prefix("Code algo (");
+            }
+            h.click("Craft Mailer+ (3 algo)");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("Mailer+ crafted")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(h.has_text("Mail — inbox 0"), "text: {:?}", h.labels());
+            // Breach the rig, then send a trojan by mail (the Deck control
+            // targets the rig's owner — no adjacency needed).
+            h.click("Deck");
+            h.click("cve-2006-0005");
+            assert!(h.has_text("breached yes"), "text: {:?}", h.labels());
+            h.click("Send trojan");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("trojan mailed")),
+                "log: {:?}",
+                h.shell.log
+            );
+        }
+
+        #[test]
         fn mods_persist_on_the_selected_program() {
             let mut h = Harness::new();
             h.click("Deck");
@@ -1999,23 +2085,27 @@ mod tests {
         }
 
         #[test]
-        fn exploit_then_trojan_through_clicks() {
+        fn exploit_breaches_and_trojan_needs_a_mailer_plus() {
             let mut h = Harness::new();
             h.click("Deck");
             // Exploit needs a program of ours on the host first.
             h.click_last(".");
             h.click("Farm loop");
-            // Exploit the office-ws privilege hole, then plant the trojan.
+            // Exploit the office-ws privilege hole.
             h.click("cve-2006-0005");
             assert!(h.has_text("breached yes"), "text: {:?}", h.labels());
+            // Trojans are email attachments now: without a crafted Mailer+
+            // the send is refused with its cause (the craft path is covered
+            // by mail_craft_and_send_trojan_through_clicks).
             h.click("Send trojan");
             assert!(
-                h.shell.log.iter().any(|l| l.contains("trojan planted")),
+                h.shell
+                    .log
+                    .iter()
+                    .any(|l| l.contains("trojan failed: no_mailer_plus")),
                 "log: {:?}",
                 h.shell.log
             );
-            // Every step was a logged act: farm, exploit, trojan.
-            assert_eq!(h.shell.server.log.len(), 3);
         }
 
         #[test]
