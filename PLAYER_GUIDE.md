@@ -115,8 +115,11 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
   trojan spamming all file crimes. The status panel shows
   standing/alignment/mass; `Pay fine` (100c per severity point, pocket
   first) settles the record, which ends the chase and returns you to
-  honest. Clans and the license are modelled in `sim/src/crime.rs` but
-  not yet reachable from play.
+  honest. `Join clan 1` pays dues + initiation (killing a clanmate's
+  program makes you its enemy for life), and `Apply license` grants the
+  license to hack on 3 threat kills (warden kills) + a clean record —
+  licensed entry to honest machines is legal until you hit a defender,
+  which revokes it with a fresh charge.
 - **License to hack** (3 threat kills + spotless record) lets you enter
   honest machines to fight intruders legally. Hit a defender and it is
   revoked, plus a fresh charge.
@@ -134,7 +137,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (194 tests)
+cargo test --workspace      # prove the rules hold (198 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the

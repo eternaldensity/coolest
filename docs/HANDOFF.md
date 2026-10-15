@@ -1,7 +1,7 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `28074af`,
-> 194 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
+> Written 2026-10-15 for the next agent. Branch `main`, head `319df95`,
+> 198 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
 > Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
 > file is the engineering state and the traps.
 
@@ -129,10 +129,13 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 - **Cards**: resource costs (design/03 consume-to-fire) and per-program
   `Mod` abilities (`Verb::DeckMod`) that fire on every exchange.
-- **Crime/heat wiring (M4)**: `World` carries `record`/`clans`/`license`,
-  illicit acts file evidence-weighted crimes (witness + live-chain gated),
-  `standing()` feeds a wanted map into `step_npcs` so cops pursue, and
-  `Verb::PayFine` settles the record. Clans/license remain unwired.
+- **Crime/heat wiring (M4, complete)**: `World` carries
+  `record`/`clans`/`license`; illicit acts file evidence-weighted crimes
+  (witness + live-chain gated); `standing()` feeds a wanted map into
+  `step_npcs` so cops pursue; `Verb::PayFine` settles the record;
+  `Verb::ApplyLicense` grants the license on 3 threat kills + clean
+  record with abuse revocation; `Verb::JoinClan` pays dues and marks
+  clanmate enmity.
 - `Exploit` + `SendTrojan` verbs and capped daily spam income (vuln →
   breach → zombie net → ledger).
 - `ScrubLog` + `SetFirewall` verbs (get-out-clean trail erasure; transit
@@ -148,15 +151,9 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 ## 8. TODO — prioritised
 
 ### P1 — Wire crime/heat (M4). DONE (see section 7).
-Remaining sub-items, all smaller:
-  - **Clans**: `Clans::join/is_enemy/friendly` exist but nothing joins or
-    checks them in play; needs a `Verb::JoinClan` (fee + initiation) and a
-    check when attacking a clanmate (`mark_enemy`).
-  - **License**: `License::eligible`/`abuse` exist; wire "threat kills"
-    (e.g. killing a warden program while licensed) and `abuse` when hitting
-    a defender, plus a `Verb::ApplyLicense`.
-  - **Fines → Wanted escalation**: today any mass > 0 is `Fined` and
-    >= 6 is `Wanted`; consider an unpaid-fine deadline before the warrant.
+Everything listed here landed (reporting, pursuit, fines, license,
+clans). Possible tuning later: an unpaid-fine deadline before the
+warrant, and clan mutual-aid bonuses.
 
 ### P2 — Card/program abilities. DONE (see section 7).
 Costs and per-program mods both landed. Remaining nicety: nothing consumes
@@ -164,18 +161,19 @@ Costs and per-program mods both landed. Remaining nicety: nothing consumes
 (producers that match the attacker's type fire harder) is unbuilt.
 
 ### P3 — Smaller, well-scoped
-- **Mailboxes / email trojan delivery**: `ZombieNet` is wired, but
-  `Mailbox`/`Mailer` are not on `World`. A real trojan needs recipients that
-  open mail (NPC behaviour). Currently `SendTrojan` requires an existing
-  breach.
-- **GUI polish**: Deck Net mini-map (design/09 says Deck shows RAM + files +
-  Net minimap together); `Ctrl-K` command palette; `>`/`<` stairs; diagonal
-  vi-keys (`h`/`j`/`k`/`l` and arrows move today, `y`/`u`/`b`/`n` do not).
-- **`docs/deferred-wasm.md`** still leads with the superseded 0.21 problem;
-  the "Resolved" section is the truth.
-- **client-web** is a scripted demo, not a network client. `server::net` and
-  `server::runtime` (tokio) exist and are tested but nothing in the GUI uses
-  them — that is the multiplayer seam (design/08).
+- **Mailboxes / email delivery**: `ZombieNet` is wired, but `Mailbox`/
+  `Mailer` are not on `World`. A real trojan needs recipients that open
+  mail (NPC behaviour). Today `SendTrojan` requires an existing breach.
+- **Type synergy** (design/03): producers that match the attacker's type
+  should fire harder; nothing reads program type yet.
+- **GUI polish**: Deck Net mini-map (design/09 says Deck shows RAM + files
+  + Net minimap together); `Ctrl-K` command palette; `>`/`<` stairs;
+  diagonal vi-keys — note `sim::Dir` is only N/S/E/W, so diagonals need a
+  movement-model change, not just keybinds (`h`/`j`/`k`/`l` and arrows
+  move today).
+- **`client-web`** is a scripted demo, not a network client. `server::net`
+  and `server::runtime` (tokio) exist and are tested but nothing in the
+  GUI uses them — that is the multiplayer seam (design/08).
 
 ### Blocked / external
 - **ATProto PDS relay.** Lexicons validate (`server/src/atproto.rs`) but
