@@ -200,11 +200,18 @@ impl Clans {
 
     /// Two beings are friendly if they share a clan and neither is its enemy.
     pub fn friendly(&self, a: EntityId, b: EntityId) -> bool {
-        self.members.iter().any(|(clan, m)| {
-            m.contains(&a.0)
+        self.shared_clan(a, b).is_some()
+    }
+
+    /// The clan both beings belong to, when neither has turned enemy of it
+    /// (design/05). `friendly` is the boolean form.
+    pub fn shared_clan(&self, a: EntityId, b: EntityId) -> Option<u64> {
+        self.members.iter().find_map(|(clan, m)| {
+            (m.contains(&a.0)
                 && m.contains(&b.0)
                 && !self.is_enemy(a, *clan)
-                && !self.is_enemy(b, *clan)
+                && !self.is_enemy(b, *clan))
+            .then_some(*clan)
         })
     }
 }

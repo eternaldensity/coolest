@@ -136,6 +136,11 @@ pub enum Verb {
     /// record. Once held, entering honest machines to fight intruders is
     /// legal — but hitting a defender revokes it with a fresh charge.
     ApplyLicense,
+    /// Join a clan (design/05 M4b): pays the fee + initiation. Hitting a
+    /// clanmate afterwards makes you its enemy for life.
+    JoinClan {
+        clan: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +229,8 @@ const WATCH_COST: i64 = 30;
 const WITNESS_RANGE: i32 = 5;
 /// Cents per severity-evidence point when settling a fine (design/05).
 const FINE_PER_MASS: i64 = 100;
+/// Clan dues + initiation (design/05 M4b).
+const CLAN_FEE: i64 = 500;
 /// Manual coding cost (design/10): one unit per act at a small mood price,
 /// so deck producers (free per act) are the real answer for higher tiers.
 const CODE_MOOD_COST: u8 = 2;
@@ -1288,6 +1295,15 @@ impl World {
                         }
                     }
                 }
+                // Hitting a clanmate makes you that clan's enemy for life
+                // (design/05 M4b): the rig's owner is the clan member.
+                if killed {
+                    if let Some(owner) = self.hosts.get(&1).and_then(|h| h.owner()) {
+                        if let Some(clan) = self.clans.shared_clan(intent.actor, owner) {
+                            self.clans.mark_enemy(intent.actor, clan);
+                        }
+                    }
+                }
                 kind = "struck";
                 extra_kinds.extend(Self::deck_beat(
                     self.hosts.get_mut(&1).unwrap(),
@@ -1530,6 +1546,35 @@ impl World {
             Verb::ApplyLicense => {
                 self.license.apply(&self.record)?;
                 kind = "licensed";
+            }
+            Verb::JoinClan { clan } => {
+                // Dues + initiation (design/05 M4b): pay the fee into the
+                // city pool (pocket-first), then join.
+                let acct = self
+                    .accts
+                    .get(&intent.actor.0)
+                    .copied()
+                    .ok_or(SimError::new("no_account", "open account", "unbanked"))?;
+                let bank = self.ledger.balance(acct)?;
+                let cash = b.money.min(CLAN_FEE);
+                if bank < CLAN_FEE - cash {
+                    return Err(SimError::new("overdraw", "clan dues", "short"));
+                }
+                if cash > 0 {
+                    b.money -= cash;
+                    self.ledger.mint(acct, cash)?;
+                }
+                let city = match self.city {
+                    Some(id) => id,
+                    None => {
+                        let id = self.ledger.open(EntityId(u64::MAX - 2), HostId(1));
+                        self.city = Some(id);
+                        id
+                    }
+                };
+                self.ledger.transfer(acct, city, CLAN_FEE)?;
+                self.clans.join(clan, intent.actor, true, true)?;
+                kind = "joined_clan";
             }
             Verb::DeckMod { x, y, ref card } => {
                 // Install a persistent mod on your program (design/03):
@@ -3361,6 +3406,59 @@ mod tests {
             .logs_visible(EntityId(1))
             .is_empty());
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn join_clan_costs_dues_and_hitting_a_clanmate_makes_an_enemy() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), HostId(1)).unwrap();
+        w.ledger.mint(acct, 600).unwrap();
+        // Unbanked is refused; so is an empty purse.
+        let mut poor = World::new(1);
+        poor.spawn(EntityId(1), pos(8, 8), 1);
+        poor.tick = poor.next_at(EntityId(1));
+        assert!(poor
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::JoinClan { clan: 1 },
+            })
+            .is_err());
+        // Funded: joins, and the dues leave the player's pocket+bank.
+        let before = w.bank_balance(EntityId(1)).unwrap() + w.needs(EntityId(1)).unwrap().2;
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::JoinClan { clan: 1 },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("joined_clan"));
+        assert!(w.clans().is_member(1, EntityId(1)));
+        let after = w.bank_balance(EntityId(1)).unwrap() + w.needs(EntityId(1)).unwrap().2;
+        assert_eq!(before - after, CLAN_FEE);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+
+        // A clanmate's rig: killing there marks lifetime enmity.
+        w.clans.join(1, EntityId(11), true, true).unwrap();
+        assert!(w.clans().friendly(EntityId(1), EntityId(11)));
+        assert_eq!(w.clans().shared_clan(EntityId(1), EntityId(11)), Some(1));
+        let host = w.ensure_host(HostId(1));
+        host.set_owner(Some(EntityId(11)));
+        host.load(EntityId(50), EntityId(11), CellPos(5, 5), 1, 1)
+            .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckStrike { x: 5, y: 5 },
+        })
+        .unwrap();
+        assert!(w.clans().is_enemy(EntityId(1), 1));
+        assert!(
+            !w.clans().friendly(EntityId(1), EntityId(11)),
+            "lifetime enemy"
+        );
+        assert_eq!(w.clans().shared_clan(EntityId(1), EntityId(11)), None);
     }
 
     #[test]
