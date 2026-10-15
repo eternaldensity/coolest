@@ -805,6 +805,35 @@ impl Shell {
                         }
                     }
                 });
+                // Card table (design/03): play a card at the selected cell.
+                // Self cards target your program; attacks/debuffs the enemy.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Cards @selected:");
+                    for card in sim::Host::implemented_cards() {
+                        if ui.button(card).clicked() {
+                            let msg = match self.sel {
+                                Some((x, y)) => match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::DeckCard {
+                                        card: card.to_string(),
+                                        x,
+                                        y,
+                                    },
+                                }) {
+                                    Ok((_, events)) => {
+                                        for line in Self::beat_lines(&events) {
+                                            self.say(line);
+                                        }
+                                        format!("card {card} @({x},{y})")
+                                    }
+                                    Err(e) => format!("card {card} refused: {e}"),
+                                },
+                                None => "click a cell first".to_string(),
+                            };
+                            self.say(msg);
+                        }
+                    }
+                });
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
@@ -1672,6 +1701,33 @@ mod tests {
             assert!(last.contains("HostId(2)"), "healed line: {last:?}");
             // Routing is a read-only query (not an act), so only the cut
             // and restore are logged.
+            assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn card_row_plays_a_card_at_the_selected_cell() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            // Farm a producer, then select it and buff it with a card.
+            h.click_last(".");
+            h.click("Farm loop");
+            assert!(
+                h.labels().iter().any(|(r, t)| r == "Button" && t == "P"),
+                "no producer"
+            );
+            h.click("P");
+            h.click("tank");
+            assert!(
+                !h.shell.log.iter().any(|l| l.contains("refused")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("card tank @")),
+                "log: {:?}",
+                h.shell.log
+            );
+            // The card act is logged like any other.
             assert_eq!(h.shell.server.log.len(), 2);
         }
 
