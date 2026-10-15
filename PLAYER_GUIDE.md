@@ -106,6 +106,12 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
   your record — editing records changes who the city thinks you are.
 - **Clans** offer backup but demand a fee + initiation; hitting a clanmate
   makes you its enemy for life.
+- **Wired up today:** sabotage (damage wire / cut power), veil seize and
+  trojan spamming all file crimes. The status panel shows
+  standing/alignment/mass; `Pay fine` (100c per severity point, pocket
+  first) settles the record, which ends the chase and returns you to
+  honest. Clans and the license are modelled in `sim/src/crime.rs` but
+  not yet reachable from play.
 - **License to hack** (3 threat kills + spotless record) lets you enter
   honest machines to fight intruders legally. Hit a defender and it is
   revoked, plus a fresh charge.
@@ -123,7 +129,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (184 tests)
+cargo test --workspace      # prove the rules hold (190 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the

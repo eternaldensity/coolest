@@ -1,7 +1,7 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `d240455`,
-> 184 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
+> Written 2026-10-15 for the next agent. Branch `main`, head `4174ca5`,
+> 190 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
 > Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
 > file is the engineering state and the traps.
 
@@ -127,6 +127,10 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 7. What is done (recent units, newest first)
 
+- **Crime/heat wiring (M4)**: `World` carries `record`/`clans`/`license`,
+  illicit acts file evidence-weighted crimes (witness + live-chain gated),
+  `standing()` feeds a wanted map into `step_npcs` so cops pursue, and
+  `Verb::PayFine` settles the record. Clans/license remain unwired.
 - `Exploit` + `SendTrojan` verbs and capped daily spam income (vuln →
   breach → zombie net → ledger).
 - `ScrubLog` + `SetFirewall` verbs (get-out-clean trail erasure; transit
@@ -141,22 +145,16 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 8. TODO — prioritised
 
-### P1 — Wire crime/heat (M4). Biggest remaining gap.
-`sim/src/crime.rs` is complete and unit-tested (`Record`, `Clans`,
-`License`, `trace_evidence`, `standing`, `pardon_weak`, `License::abuse`)
-but **`World` has no `record`/`clans`/`license` fields and nothing reports
-a crime**. Today you can breach, kill, sabotage and cut power with zero
-consequence; `step_npcs` takes a `wanted` map that every caller passes
-empty, so cops never pursue. Suggested sub-units:
-  1. `World` fields (serde default) + report crimes from hostile acts
-     (`DeckLoad`/`DeckStrike` on foreign rigs, `DamageWire`, `SetPower`,
-     `VeilSeize`, `SendTrojan`) using `trace_evidence(base, witness,
-     live_chain)` with cop proximity for witnesses.
-  2. Feed `standing()` into a `wanted` map and pass it to `step_npcs` so
-     cops pursue Wanted targets; surface alignment in the GUI.
-  3. Fines via the ledger + pay-to-pardon; `License::abuse` on hitting a
-     defender.
-  Add a `Verb::PayFine`/`Pardon` as needed. Keep it all logged acts.
+### P1 — Wire crime/heat (M4). DONE (see section 7).
+Remaining sub-items, all smaller:
+  - **Clans**: `Clans::join/is_enemy/friendly` exist but nothing joins or
+    checks them in play; needs a `Verb::JoinClan` (fee + initiation) and a
+    check when attacking a clanmate (`mark_enemy`).
+  - **License**: `License::eligible`/`abuse` exist; wire "threat kills"
+    (e.g. killing a warden program while licensed) and `abuse` when hitting
+    a defender, plus a `Verb::ApplyLicense`.
+  - **Fines → Wanted escalation**: today any mass > 0 is `Fined` and
+    >= 6 is `Wanted`; consider an unpaid-fine deadline before the warrant.
 
 ### P2 — Card hand/deck (finish the card system).
 Cards are currently a free palette (the Deck tab plays any of the 20 at no
