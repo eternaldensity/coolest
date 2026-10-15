@@ -29,6 +29,7 @@ both bars down:
   - **Farm** (Deck tab, on a selected cell) — deploy a producer that
     yields 3/2/2 units per act, free, but costs rig CPU (2/3/5).
     Higher tiers are hungrier, so mid/high jobs want producers.
+    Producers are not intruders, so the range warden ignores them.
 - **Eat** a ration → +30 food. No rations? Order more (online stores, M1).
 - **Watch** a show → +15 mood, costs $0.30.
 - **Sleep** in your rented room → rests to 06:00, no needs cost beyond
@@ -62,9 +63,15 @@ both bars down:
 | View | What | Verbs wired today |
 |------|------|-------------------|
 | Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / deposit / withdraw |
-| Net | Host graph, latency, tolls | route (preview) / damage wire |
-| Deck | Inside world host 1: RAM arena | load killer / strike (warden answers) |
+| Net | Host graph, latency, tolls | route (preview) / damage wire / cut+restore power |
+| Deck | Inside world host 1: RAM arena | load killer / strike / farm producers / play cards (warden answers) |
 | Veil | Helmet space over the same rules | jack in / move / seize / eject |
+
+The Deck tab also plays the **closed card table** (design/03): 8 negative,
+8 positive, 4 manipulation cards. Attacks roll a d6 (a 5-6 crits for +1);
+next-turn effects include shield, skip, stability poison, roll-minus,
+ban-die, decoy, downgrade, reflect, splash, extra-roll, and random-target.
+Card play is a logged act, so replays reproduce the same dice.
 
 Aspirational verbs from the design (scan, connect, crack, patch, embody,
 transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
@@ -111,7 +118,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (156 tests)
+cargo test --workspace      # prove the rules hold (174 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
