@@ -53,9 +53,15 @@ both bars down:
   The warden defends host 1 — intrusions draw a trace, and kills count
   toward your record. Every act is logged; replays reproduce the arena.
   The rig is an `office-ws` with its own vulns: `Exploit` one (needs a
-  program of yours there) to breach it, then `Send trojan` for capped
-  daily spam income. `Scrub log` erases your trail — a program on the
-  host, or a privilege vuln, gets you in.
+  program of yours there) to breach it. `Scrub log` erases your trail —
+  a program on the host, or a privilege vuln, gets you in.
+- **Mail:** the Street tab has a Mail row. `Craft Mailer+ (3 algo)` unlocks
+  trojans; `Send trojan` mails one (the Deck control targets the rig's
+  owner, or `Trojan <role>` an adjacent NPC). A trojan is an **attachment**
+  — nothing happens until the recipient opens it, and NPCs read their mail
+  on their own turn. When a trojaned mail is opened, the reader's hosts
+  join your zombie net and pay capped daily spam income (400/host/day).
+  Opening one yourself does the same to *your* rigs.
 - **Net:** the tab lists hosts (net kind, modem, gateway, `DARK`) and links.
   `Route 1→3` previews path/tolls and reroutes around dark sections and
   firewalled transit; `Damage wire 1-2`, `Cut/Restore power`, and the
@@ -137,7 +143,7 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (198 tests)
+cargo test --workspace      # prove the rules hold (201 tests)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the

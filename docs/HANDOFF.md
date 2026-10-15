@@ -1,7 +1,7 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `319df95`,
-> 198 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
+> Written 2026-10-15 for the next agent. Branch `main`, head `9582bdd`,
+> 201 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
 > Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
 > file is the engineering state and the traps.
 
@@ -127,6 +127,9 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 7. What is done (recent units, newest first)
 
+- **Mail/trojans (design/03/04)**: per-entity mailboxes, `Mailer+`
+  crafting, `SendMail`/`SendTrojan`/`OpenMail`, NPCs reading mail on their
+  turn, and trojan-on-open enslaving the reader's hosts.
 - **Cards**: resource costs (design/03 consume-to-fire) and per-program
   `Mod` abilities (`Verb::DeckMod`) that fire on every exchange.
 - **Crime/heat wiring (M4, complete)**: `World` carries
@@ -161,11 +164,12 @@ Costs and per-program mods both landed. Remaining nicety: nothing consumes
 (producers that match the attacker's type fire harder) is unbuilt.
 
 ### P3 — Smaller, well-scoped
-- **Mailboxes / email delivery**: `ZombieNet` is wired, but `Mailbox`/
-  `Mailer` are not on `World`. A real trojan needs recipients that open
-  mail (NPC behaviour). Today `SendTrojan` requires an existing breach.
 - **Type synergy** (design/03): producers that match the attacker's type
   should fire harder; nothing reads program type yet.
+- **Mail follow-ups**: `Mailer+` is a flat World flag (design calls it rare
+  loot/craft — loot has no source yet); attachments are a boolean, not a
+  whole file that must be saved to disk (design/04); `Mailer::snoop` still
+  has no verb, so reading someone else's box is unwired.
 - **GUI polish**: Deck Net mini-map (design/09 says Deck shows RAM + files
   + Net minimap together); `Ctrl-K` command palette; `>`/`<` stairs;
   diagonal vi-keys — note `sim::Dir` is only N/S/E/W, so diagonals need a
