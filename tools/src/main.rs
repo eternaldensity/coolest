@@ -2,11 +2,12 @@
 //! Usage: fidom-tools balance | gen [n] [seed0] | gen-report [n] [seed0] | soak [actors] [ticks] [seed]
 //!        fidom-tools chaos [actors] [ticks] [seed] | replay <seed> <spawns.json> <log.jsonl>
 //!        fidom-tools mapgen-check [n] [seed0] | ledger-audit <world-save.json>
+//!        fidom-tools fuzz [seed] [acts] | replay-fuzz [seed] [acts] | fuzz-sweep [seeds] [acts]
 
 use std::time::Instant;
 use tools::{
-    audit_world_ledger, chaos_soak, gen_report, gen_stats, mapgen_report, replay_from_files, soak,
-    trace_csv, ttk_csv,
+    audit_world_ledger, chaos_soak, fuzz_invariants, fuzz_sweep, gen_report, gen_stats,
+    mapgen_report, replay_from_files, replay_fuzz, soak, trace_csv, ttk_csv,
 };
 
 fn fail(msg: String) -> ! {
@@ -61,6 +62,51 @@ fn main() {
             match replay_from_files(seed, &spec, log_path) {
                 Ok(hash) => println!("replay seed={seed} hash={hash:016x}"),
                 Err(e) => fail(format!("replay failed: {e}")),
+            }
+        }
+        Some("fuzz") => {
+            let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
+            let acts: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20_000);
+            let t = Instant::now();
+            match fuzz_invariants(seed, acts) {
+                Ok((applied, refused)) => println!(
+                    "fuzz seed={seed} acts={acts} applied={applied} refused={refused} elapsed_ms={}",
+                    t.elapsed().as_millis()
+                ),
+                Err(e) => fail(format!("fuzz FAIL {e}")),
+            }
+        }
+        Some("replay-fuzz") => {
+            let seed: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
+            let acts: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(5_000);
+            let t = Instant::now();
+            match replay_fuzz(seed, acts) {
+                Ok((applied, refused)) => println!(
+                    "replay-fuzz seed={seed} acts={acts} applied={applied} refused={refused} elapsed_ms={}",
+                    t.elapsed().as_millis()
+                ),
+                Err(e) => fail(format!("replay-fuzz FAIL {e}")),
+            }
+        }
+        Some("fuzz-sweep") => {
+            let seeds: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+            let acts: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20_000);
+            let t = Instant::now();
+            let fails = fuzz_sweep(seeds, acts);
+            if fails.is_empty() {
+                println!(
+                    "fuzz-sweep seeds={seeds} acts={acts} all clean elapsed_ms={}",
+                    t.elapsed().as_millis()
+                );
+            } else {
+                for f in &fails {
+                    eprintln!("{f}");
+                }
+                fail(format!(
+                    "fuzz-sweep {}/{} seeds failed",
+                    fails.len(),
+                    seeds * 2
+                ));
             }
         }
         Some("mapgen-check") => {

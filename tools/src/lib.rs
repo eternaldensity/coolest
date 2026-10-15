@@ -331,6 +331,289 @@ pub fn audit_world_ledger(world_json: &str) -> Result<(bool, i64, i64, i64), Str
     Ok((live == audit - iou, live, audit, iou))
 }
 
+/// A demo-shaped world for fuzzing: shops, a rented home, a defended rig,
+/// a tri-net with power, a veil, and two NPCs. Mirrors the shell's world so
+/// fuzz acts exercise the same systems.
+pub fn fuzz_world(seed: u64) -> World {
+    let mut w = World::new(seed);
+    w.spawn(
+        EntityId(1),
+        Pos {
+            city: 1,
+            sx: 0,
+            sy: 0,
+            z: 0,
+            x: 8,
+            y: 8,
+        },
+        10,
+    );
+    w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+    w.net.add_node(HostId(2), NetKind::Oldnet, 100, true);
+    w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+    w.net
+        .add_link(
+            HostId(1),
+            HostId(2),
+            LinkKind::Wired { damaged: false },
+            5,
+            0,
+        )
+        .ok();
+    w.net
+        .add_link(HostId(2), HostId(3), LinkKind::Laser, 40, 10)
+        .ok();
+    let range = w.ensure_host(HostId(1));
+    range.set_owner(Some(Host::WARDEN));
+    range.set_monitor(true);
+    w.veil.add_area(1, "lobby", vec![2], false);
+    w.veil.add_area(2, "ops", vec![1, 3], false);
+    w.veil.add_area(3, "roof", vec![2], true);
+    w.spawn_npc(
+        EntityId(10),
+        sim::Role::Shopkeeper,
+        (3, 3),
+        (12, 4),
+        (8, 12),
+        20,
+    );
+    w.spawn_npc(EntityId(11), sim::Role::Cop, (4, 12), (12, 12), (8, 8), 15);
+    let buyer = w.open_account(EntityId(1), HostId(1)).unwrap();
+    w.ledger.mint(buyer, 5000).unwrap();
+    let till = w.open_account(EntityId(10), HostId(1)).unwrap();
+    let mut shop = sim::Shop::new(till);
+    shop.add_line("ration", 100, 5, 2, 5, 200);
+    shop.add_line("meds", 400, 2, 1, 3, 900);
+    shop.set_hours(8, 20);
+    w.place_shop(10, 8, shop);
+    w.set_home(Pos {
+        city: 1,
+        sx: 0,
+        sy: 0,
+        z: 0,
+        x: 8,
+        y: 8,
+    });
+    w
+}
+
+/// One generated act from the full verb surface (deterministic per rng).
+fn fuzz_verb(rng: &mut Rng) -> Verb {
+    let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
+    match rng.below(132) {
+        0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
+        25..=29 => Verb::Wait,
+        30..=39 => Verb::Eat,
+        40..=54 => Verb::Work(rng.below(5) as u8),
+        55..=59 => Verb::Watch,
+        60..=69 => Verb::Buy(["ration", "meds", "firewall"][rng.below(3) as usize].to_string()),
+        70..=72 => Verb::Sleep,
+        73..=78 => Verb::Deposit((rng.below(300) + 1) as i64),
+        79..=84 => Verb::Withdraw((rng.below(300) + 1) as i64),
+        85..=88 => Verb::DeckLoad {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+        },
+        89..=92 => Verb::DeckStrike {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+        },
+        93..=95 => Verb::DamageWire(HostId(1), HostId(2)),
+        96..=97 => Verb::VeilEnter {
+            mp: 5 + rng.below(8) as u8,
+        },
+        98 => Verb::VeilMove {
+            area: 1 + rng.below(3) as u64,
+        },
+        99 => Verb::VeilEject,
+        100..=103 => Verb::SetPower {
+            sx: rng.below(3) as i32,
+            sy: 0,
+            up: rng.below(2) == 0,
+        },
+        104..=111 => Verb::Code {
+            res: sim::Res::from_index(rng.below(3) as u8),
+        },
+        112..=117 => Verb::DeckFarm {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+            res: sim::Res::from_index(rng.below(3) as u8),
+        },
+        118..=129 => Verb::DeckCard {
+            card: Host::implemented_cards()[rng.below(20) as usize].to_string(),
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+        },
+        _ => Verb::VeilSeize,
+    }
+}
+
+/// Invariant fuzz: drive the demo world with generated acts and check the
+/// engine's invariants after every one. Returns (applied, refused); an Err
+/// names the first violation with its seed and step so it replays.
+pub fn fuzz_invariants(seed: u64, acts: usize) -> Result<(usize, usize), String> {
+    let mut rng = Rng::new(seed);
+    let mut w = fuzz_world(seed);
+    let (mut applied, mut refused) = (0usize, 0usize);
+    let mut last_tick = 0u64;
+    for step in 0..acts {
+        let due = w.next_at(EntityId(1));
+        if w.tick < due {
+            w.tick = due;
+        }
+        let verb = fuzz_verb(&mut rng);
+        let label = format!("{verb:?}");
+        let pocket = w.needs(EntityId(1)).map(|n| n.2).unwrap_or(0);
+        let bank = w.bank_balance(EntityId(1));
+        match w.apply(&Intent {
+            actor: EntityId(1),
+            verb,
+        }) {
+            Ok(_) => {
+                applied += 1;
+                if label.starts_with("Buy") {
+                    let after = w.needs(EntityId(1)).map(|n| n.2).unwrap_or(0);
+                    let bank_after = w.bank_balance(EntityId(1)).unwrap_or(0);
+                    let spent = (pocket - after) + (bank.unwrap_or(0) - bank_after);
+                    if spent <= 0 {
+                        return Err(format!(
+                            "seed={seed} step={step}: successful {label} drew nothing"
+                        ));
+                    }
+                }
+            }
+            Err(_) => refused += 1,
+        }
+        if w.ledger.live_sum() != w.ledger.audit_sum() {
+            return Err(format!(
+                "seed={seed} step={step}: ledger drift after {label}"
+            ));
+        }
+        if w.tick < last_tick {
+            return Err(format!(
+                "seed={seed} step={step}: tick went backwards after {label}"
+            ));
+        }
+        last_tick = w.tick;
+        match w.pos_of(EntityId(1)) {
+            Some(p) if p.x < 16 && p.y < 16 => {}
+            other => {
+                return Err(format!(
+                    "seed={seed} step={step}: actor {other:?} after {label}"
+                ))
+            }
+        }
+        let (food, mood, _, _) = w.needs(EntityId(1)).unwrap();
+        if food > 100 || mood > 100 {
+            return Err(format!(
+                "seed={seed} step={step}: needs over cap after {label}"
+            ));
+        }
+        if w.next_at(EntityId(1)) < w.tick {
+            return Err(format!(
+                "seed={seed} step={step}: next_at behind tick after {label}"
+            ));
+        }
+        if let Some(h) = w.host(HostId(1)) {
+            if h.progs.len() > (h.w as usize) * (h.h as usize) {
+                return Err(format!(
+                    "seed={seed} step={step}: host overcrowded after {label}"
+                ));
+            }
+            for p in h.progs.values() {
+                if p.head.0 >= h.w || p.head.1 >= h.h {
+                    return Err(format!(
+                        "seed={seed} step={step}: prog out of arena after {label}"
+                    ));
+                }
+            }
+        }
+        for (id, np, _) in w.npc_full() {
+            if np.x >= 16 || np.y >= 16 {
+                return Err(format!(
+                    "seed={seed} step={step}: npc {id} out of bounds after {label}"
+                ));
+            }
+        }
+        if w.veil.controlled(EntityId(1)).is_some() && !w.veil.present(EntityId(1)) {
+            return Err(format!(
+                "seed={seed} step={step}: veil bookkeeping after {label}"
+            ));
+        }
+        for res in sim::Res::ALL {
+            if w.units(EntityId(1), res) > 100_000 {
+                return Err(format!(
+                    "seed={seed} step={step}: {} stock runaway",
+                    res.name()
+                ));
+            }
+        }
+    }
+    Ok((applied, refused))
+}
+
+/// Determinism fuzz: apply generated acts through the real server path, then
+/// replay the accepted-intent log on a twin built identically and require an
+/// identical snapshot hash. Also asserts every processed intent is logged
+/// exactly once. Returns (applied, refused).
+pub fn replay_fuzz(seed: u64, acts: usize) -> Result<(usize, usize), String> {
+    let mut rng = Rng::new(seed);
+    let mut s = Server::new(seed);
+    s.world = fuzz_world(seed);
+    let (mut applied, mut refused) = (0usize, 0usize);
+    for step in 0..acts {
+        let verb = fuzz_verb(&mut rng);
+        let label = format!("{verb:?}");
+        let before = s.log.len();
+        match s.apply_one(Intent {
+            actor: EntityId(1),
+            verb,
+        }) {
+            Ok(_) => applied += 1,
+            Err(_) => refused += 1,
+        }
+        if s.log.len() != before + 1 {
+            return Err(format!(
+                "seed={seed} step={step}: {label} not logged exactly once"
+            ));
+        }
+        if s.world.ledger.live_sum() != s.world.ledger.audit_sum() {
+            return Err(format!(
+                "seed={seed} step={step}: ledger drift after {label}"
+            ));
+        }
+    }
+    let hash = s.world.snapshot_hash();
+    let mut t = Server::new(seed);
+    t.world = fuzz_world(seed);
+    for i in s.log.clone() {
+        t.submit(i);
+    }
+    t.step();
+    if t.world.snapshot_hash() != hash {
+        return Err(format!(
+            "seed={seed}: replay hash {:016x} != {hash:016x}",
+            t.world.snapshot_hash()
+        ));
+    }
+    Ok((applied, refused))
+}
+
+/// Sweep both fuzzers over seeds `1..=seeds`. Returns the failing-seed
+/// reports (empty when every seed passes).
+pub fn fuzz_sweep(seeds: u64, acts: usize) -> Vec<String> {
+    let mut fails = Vec::new();
+    for seed in 1..=seeds {
+        if let Err(e) = fuzz_invariants(seed, acts) {
+            fails.push(format!("invariants {e}"));
+        }
+        if let Err(e) = replay_fuzz(seed, acts) {
+            fails.push(format!("replay {e}"));
+        }
+    }
+    fails
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,6 +645,25 @@ mod tests {
     fn soak_deterministic() {
         assert_eq!(soak(7, 20, 500), soak(7, 20, 500));
         assert_ne!(soak(7, 20, 500), soak(8, 20, 500));
+    }
+
+    #[test]
+    fn fuzzers_pass_on_their_seeds_and_fail_loudly() {
+        // A short sweep must be clean, and the report shape is stable.
+        assert_eq!(fuzz_sweep(3, 500), Vec::<String>::new());
+        let (applied, refused) = fuzz_invariants(1, 500).unwrap();
+        assert!(
+            applied > 0 && refused > 0,
+            "applied={applied} refused={refused}"
+        );
+        let (applied, _) = replay_fuzz(1, 500).unwrap();
+        assert!(applied > 0);
+        // Deterministic per seed.
+        assert_eq!(
+            fuzz_invariants(7, 300).unwrap(),
+            fuzz_invariants(7, 300).unwrap()
+        );
+        assert_eq!(replay_fuzz(7, 300).unwrap(), replay_fuzz(7, 300).unwrap());
     }
 
     #[test]

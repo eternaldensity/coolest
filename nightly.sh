@@ -18,4 +18,7 @@ cargo run -q -p tools -- soak 100 1000000 7
 echo "== chaos 100k ticks =="
 cargo run -q -p tools -- chaos 100 100000 7
 
+echo "== fuzz sweep (invariants + replay determinism) =="
+cargo run -q -p tools -- fuzz-sweep 25 20000
+
 echo "NIGHTLY GREEN (PDS chaos unavailable: no PDS bridge yet)"
