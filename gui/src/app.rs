@@ -178,6 +178,10 @@ impl Shell {
         if !jobs.is_empty() {
             server.world.set_jobs(&jobs);
         }
+        // Card costs come from data/cards.yaml (design/11 rule 4).
+        if let Ok(cards) = sim::parse_cards(include_str!("../../data/cards.yaml")) {
+            server.world.set_cards(&cards);
+        }
         let mut talks = BTreeMap::new();
         for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
         {
@@ -837,7 +841,12 @@ impl Shell {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Cards @selected:");
                     for card in sim::Host::implemented_cards() {
-                        if ui.button(card).clicked() {
+                        // Show the resource cost (design/03: cards consume).
+                        let label = match self.server.world.card_cost(card) {
+                            Some((res, n)) => format!("{card} ({n} {})", res.name()),
+                            None => card.to_string(),
+                        };
+                        if ui.button(label).clicked() {
                             let msg = match self.sel {
                                 Some((x, y)) => match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -1954,7 +1963,8 @@ mod tests {
                 "no producer"
             );
             h.click("P");
-            h.click("tank");
+            // Cards now carry a resource cost in the label.
+            h.click("tank (1 loop)");
             assert!(
                 !h.shell.log.iter().any(|l| l.contains("refused")),
                 "log: {:?}",

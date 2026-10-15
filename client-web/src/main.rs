@@ -26,10 +26,12 @@ fn main() {
     // Data files drive runtime (design/11): jobs tune payouts, vulns seed hosts.
     let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
     let vulns = sim::parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
+    let cards = sim::parse_cards(include_str!("../../data/cards.yaml")).unwrap();
 
     // M0.5 survival.
     let mut w = World::new(42);
     w.set_jobs(&jobs);
+    w.set_cards(&cards);
     w.spawn(EntityId(1), pos(8, 8), 10);
     let act = |w: &mut World, v: Verb| {
         // Jump the clock like the server scheduler would.
@@ -40,6 +42,10 @@ fn main() {
         })
         .ok();
     };
+    // M0.5 survival. Jobs consume components (design/10), so stock the
+    // rig first — the manual path would be four `Code` acts.
+    w.ensure_host(HostId(1))
+        .add_stock(EntityId(1), sim::Res::Loop, 4);
     act(&mut w, Verb::Work(0));
     act(&mut w, Verb::Eat);
     act(&mut w, Verb::Watch);
