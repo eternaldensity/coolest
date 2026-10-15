@@ -400,7 +400,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(134) {
+    match rng.below(142) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -448,6 +448,18 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
             host: HostId(1 + rng.below(3) as u64),
             source: HostId(1 + rng.below(3) as u64),
             on: rng.below(2) == 0,
+        },
+        133..=136 => Verb::Exploit {
+            vuln: [
+                "cve-2006-0001",
+                "cve-2006-0002",
+                "cve-2006-0004",
+                "cve-2006-0005",
+            ][rng.below(4) as usize]
+                .to_string(),
+        },
+        137..=140 => Verb::SendTrojan {
+            host: HostId(1 + rng.below(2) as u64),
         },
         _ => Verb::ScrubLog,
     }

@@ -111,6 +111,17 @@ pub enum Verb {
         source: HostId,
         on: bool,
     },
+    /// Exploit a vuln on the rig (design/03). Needs one of your programs
+    /// there as the delivery vehicle; the vuln must be unpatched/unburned.
+    Exploit {
+        vuln: String,
+    },
+    /// Send an email trojan to a host you have already breached
+    /// (design/03): it joins your zombie net and spams for capped income
+    /// each game day.
+    SendTrojan {
+        host: HostId,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +281,13 @@ pub struct World {
     /// first restock (reserved system id); default None for old saves.
     #[serde(default)]
     supplier: Option<u64>,
+    /// Email-trojan zombie net (design/03): hosts enslaved by the player,
+    /// each spamming for capped income per game day. Default empty.
+    #[serde(default)]
+    zombies: crate::mailer::ZombieNet,
+    /// Last game day the zombie net paid out. Default 0 for old saves.
+    #[serde(default)]
+    spam_day: u64,
 }
 
 fn default_jobs() -> Vec<(i64, u8, u8)> {
@@ -304,6 +322,8 @@ impl World {
             funnel: Funnel::default(),
             supplier: None,
             home: None,
+            zombies: crate::mailer::ZombieNet::new(),
+            spam_day: 0,
         }
     }
 
@@ -854,6 +874,12 @@ impl World {
             b.last_rent_day = day;
             b.money -= RENT_CENTS;
         }
+        // Email-trojan income (design/03): once per game day the zombie net
+        // spams for capped credit into its owners' accounts.
+        if day > self.spam_day {
+            self.spam_day = day;
+            self.zombies.payout_day(&mut self.ledger, day, &self.accts);
+        }
         let mut kind = "acted";
         let mut extra_kinds: Vec<String> = Vec::new();
         match intent.verb {
@@ -1050,6 +1076,30 @@ impl World {
             Verb::SetFirewall { host, source, on } => {
                 self.net.set_firewall_entry(host, source, on)?;
                 kind = if on { "firewall_on" } else { "firewall_off" };
+            }
+            Verb::Exploit { ref vuln } => {
+                // Delivery vehicle: one of the actor's programs on the rig.
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                let prog = host
+                    .progs
+                    .values()
+                    .find(|p| p.owner == intent.actor)
+                    .map(|p| p.id)
+                    .ok_or(SimError::new("no_prog", "your program on host", "absent"))?;
+                host.exploit(prog, vuln)?;
+                kind = "exploited";
+            }
+            Verb::SendTrojan { host } => {
+                // Requires a breach on that host (you are already inside).
+                let breached = self.hosts.get(&host.0).map(|h| h.breached).unwrap_or(false);
+                if !breached {
+                    return Err(SimError::new("not_breached", "breached host", "sealed"));
+                }
+                self.zombies.enslave(host, intent.actor);
+                kind = "trojan";
             }
             Verb::ScrubLog => {
                 // Get out clean (design/03): erase your trail on the rig.
@@ -2524,6 +2574,72 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.bank_balance(EntityId(1)), Some(100));
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn exploit_breaches_then_trojan_pays_capped_daily_income() {
+        use crate::data::parse_vulns;
+        let defs = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), HostId(1)).unwrap();
+        w.ledger.mint(acct, 0).unwrap();
+        // OfficeWS rig with its archetype holes, plus our delivery program.
+        let rig = w.ensure_host(HostId(1));
+        assert_eq!(rig.set_arch(crate::deck::HostArch::OfficeWS, &defs), 2);
+        rig.load(EntityId(10), EntityId(1), CellPos(0, 0), 2, 1)
+            .unwrap();
+        // Exploit needs a program of ours on the host.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Exploit {
+                    vuln: "cve-2006-0005".into(),
+                }, // privilege
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("exploited"));
+        assert!(w.host(HostId(1)).unwrap().breached);
+        assert!(w.host(HostId(1)).unwrap().privileged());
+        // A sealed host refuses a trojan; the breached one accepts it.
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SendTrojan { host: HostId(9) },
+            })
+            .is_err());
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::SendTrojan { host: HostId(1) },
+            })
+            .unwrap();
+        assert_eq!(events.last().map(|e| e.kind.as_str()), Some("trojan"));
+        // Daily spam income lands in the owner's account, capped per day.
+        let bank = |w: &World| w.bank_balance(EntityId(1)).unwrap_or(0);
+        let before = bank(&w);
+        // Cross into day 1.
+        w.tick = w.next_at(EntityId(1)).max(crate::world::DAY_TICKS);
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        let after = bank(&w);
+        assert!(after > before, "no trojan income: {before} -> {after}");
+        assert_eq!(after - before, 400, "one zombie host pays 400/day");
+        // Same-day acts do not pay again.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Wait,
+        })
+        .unwrap();
+        assert_eq!(bank(&w), after, "double payout");
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
