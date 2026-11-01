@@ -20,9 +20,12 @@
 > uses meters, stat rows, and component chips instead of repeated prose,
 > and the Street inspector lists nearby landmarks so it is never a dead
 > panel. Hover tooltips on vitals, costs, jobs, host state, actions, and
-> inspector landmarks explain the rule behind each number. Scope is the
-> `gui/` shell; the deterministic sim and server stay unchanged except for
-> small interaction verbs.
+> inspector landmarks explain the rule behind each number. The signal-noir
+> pass adds the Chakra Petch display face, hard-edged L-bracket cards,
+> segmented phosphor meters, view-specific grid/scanline backdrops,
+> painted map/Deck/Net/Veil glows, and a CRT console with colour-coded
+> logs. Scope is the `gui/` shell; the deterministic sim and server stay
+> unchanged except for small interaction verbs.
 
 ## 1. Experience goals
 
@@ -77,64 +80,98 @@ signal, red = danger/heat, gold = money, mint = recovery/success.
 
 | Token | Hex | Use |
 |---|---|---|
-| `ink` | `#0A0E12` | page background |
-| `panel` | `#111820` | primary panels |
-| `panel-alt` | `#161F29` | raised/hovered panels |
-| `line` | `#26323D` | borders, dividers |
-| `text` | `#E8EDF2` | primary text |
-| `muted` | `#93A1AE` | secondary text |
-| `faint` | `#7C8996` | disabled/ambient |
-| `oldnet` | `#F0A830` | Oldnet, streetlight, decay |
-| `oldnet-dim` | `#B97A22` | Oldnet secondary |
-| `betanet` | `#59D8E6` | Betanet, authority, signal |
-| `money` | `#E6B85C` | cash, payouts, prices |
-| `danger` | `#F06A6F` | HP loss, heat, wanted |
-| `success` | `#62C98A` | healing, completion |
-| `veil` | `#A78BFA` | Veil/mindpower |
+| `void` | `#030608` | deepest ground, console, graph wells |
+| `ink` | `#060B0E` | page background |
+| `panel` | `#0A1217` | primary panels |
+| `panel-alt` | `#0F1B22` | raised/hovered panels |
+| `panel-hot` | `#14262F` | hover lift |
+| `line` | `#213640` | borders, dividers |
+| `line-hot` | `#315562` | active dividers |
+| `text` | `#E6F2F5` | primary text |
+| `muted` | `#8FA8B3` | secondary text |
+| `faint` | `#5D7682` | disabled/ambient |
+| `oldnet` | `#FFB024` | Oldnet, streetlight, decay |
+| `betanet` | `#4CE4F2` | Betanet, authority, signal |
+| `money` | `#F2C14E` | cash, payouts, prices |
+| `danger` | `#FF4D5E` | HP loss, heat, wanted |
+| `success` | `#5AE6A2` | healing, completion |
+| `veil` | `#B388FF` | Veil/mindpower |
 | `paper` | `#E8E1D0` | civic forms, light-mode accents |
+| `loop` | `#7CE092` | LOOP components |
+| `data` | `#5EC8F0` | DATA components |
+| `algo` | `#D88CF0` | ALGO components |
 
 Rules:
 
+- Dark-first: near-black grounds, neon accents at roughly 10–15% of the
+  surface. The glow means nothing if everything glows.
 - Never use color alone to convey state; pair with icon, label, or shape.
 - Oldnet/Betanet colors are functional, not decorative.
 - Red is reserved for urgent/danger; don’t use it for ordinary labels.
 - Keep large surfaces dark; use color in thin lines, glyphs, and meters.
+- Hard edges and L-brackets carry the HUD language; no rounded cards or
+  pill buttons.
 
 ### 3.2 Typography
 
-Bundle two open fonts (OFL) with local fallbacks:
+Bundle three open fonts (OFL) with local fallbacks:
 
-- **IBM Plex Sans** — UI, names, prose, buttons.
-- **IBM Plex Mono** — numbers, addresses, logs, deck/program labels,
-  terminal input.
-- Optional condensed display face for section labels only; do not add a
-  third family unless it clearly earns its bundle size.
+- **Chakra Petch SemiBold** — display face for headings, brand, tabs,
+  buttons, card titles, and node numbers. Technical, squared, and
+  unmistakably not a default web app.
+- **IBM Plex Sans** — body prose and names where a display face would hurt
+  readability.
+- **IBM Plex Mono** — numbers, stat rows, logs, map labels, terminal input,
+  and system metadata.
+
+The three-face split is deliberate: human voice (Plex Sans), machine data
+(Plex Mono), and institutional signage (Chakra Petch).
 
 Type scale:
 
 | Role | Size | Weight |
 |---|---|---|
-| Screen title | 20–22 | 600 |
-| Section header | 12 uppercase, +0.08em | 600 |
-| Body | 14 | 400 |
-| Dense metadata | 12 | 400 |
-| Numbers/timers | 13 mono tabular | 500 |
-| Micro-label | 10 uppercase | 600 |
+| Screen title | 21 display | 600 |
+| Card header | 10.5 uppercase display | 600 |
+| Body | 13.5 sans | 400 |
+| Dense metadata | 11.5 mono | 400 |
+| Numbers/timers | 11.5 mono tabular | 400 |
+| Micro-label | 9–10 uppercase mono/display | 600 |
 
 Rules: no raw `{:?}` debug formatting in player-facing strings; humanize
 `Wanted`, `OfficeWS`, `cve-2006-0005`, etc.
 
 ### 3.3 Shape, spacing, texture
 
-- 8px spacing base; 4px for dense chips.
-- 1px borders; 2px accent line on the active panel/tab.
-- 6–8px corner radii, not pill-shaped everything.
-- Subtle dither/noise on large panels; scanlines only inside Oldnet/Deck
-  surfaces; no constant shimmer.
-- Selection: 1px cyan/amber outline + corner ticks, not a filled block.
+- Zero corner radius. Panels, buttons, inputs, and meters are hard-edged.
+- 1px hairline borders, L-bracket corner marks, and a 2px accent rail at
+  the top-left of each card.
+- Near-black grounds with a hairline grid and dark scanlines; the grid is
+  fixed behind the scrolling content.
+- Segmented phosphor meters: 20 blocks with 1px gaps, labels above the bar.
+- Map/Deck/Net/Veil each get their own glow, grid, and corner-mark
+  treatment so the views have distinct material identities.
+- Selection: cyan/amber double outline plus corner ticks, not a filled
+  block. Hover: thin cyan edge.
 - Damage/heat: short 120–180ms pulse, then settle. Respect reduced motion.
 
-### 3.4 Iconography
+### 3.4 Visual references
+
+Principles, not assets:
+
+- **Cyberpunk 2077 HUD** — L-bracket framing, zero radius, scanlines,
+  monospace data, semantic accent colors.
+- **DESIGN.md / Cyberpunk UI** — dark-first, accents at 10–15% coverage,
+  information density as aesthetic, one controlled effect per view.
+- **Blade Runner 2049** — near-black fields, amber/cyan temperature split,
+  hairline cyan signals, monumental display type.
+- **CRT terminals** — segmented phosphor bars, prompt/log console,
+  scanline wash, amber and cyan phosphor.
+
+The result should feel like a municipal terminal from a future that never
+arrived, not a generic dark dashboard with neon buttons.
+
+### 3.5 Iconography
 
 A small custom 16px line-icon set, drawn with egui shapes or bundled SVG:
 

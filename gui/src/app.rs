@@ -36,6 +36,39 @@ fn pos(x: u8, y: u8) -> Pos {
 
 /// One-line effect blurb for stocked items whose benefit is otherwise
 /// unstated. No entry means no promised effect.
+fn log_color(line: &str) -> egui::Color32 {
+    let s = line.to_lowercase();
+    if s.contains("rejected")
+        || s.contains("failed")
+        || s.contains("no route")
+        || s.contains("hurt")
+        || s.contains("downed")
+        || s.contains("burned")
+    {
+        crate::theme::DANGER
+    } else if s.contains("paid")
+        || s.contains("saved")
+        || s.contains("loaded")
+        || s.contains("complete")
+        || s.contains("granted")
+        || s.contains("joined")
+        || s.contains("healed")
+    {
+        crate::theme::SUCCESS
+    } else if s.contains("trace")
+        || s.contains("scan")
+        || s.contains("route")
+        || s.contains("wire")
+        || s.contains("firewall")
+    {
+        crate::theme::BETANET
+    } else if s.contains("contract") || s.contains("pay") || s.contains('$') {
+        crate::theme::MONEY
+    } else {
+        crate::theme::MUTED
+    }
+}
+
 fn kind_hint(kind: sim::ProgramKind) -> &'static str {
     match kind {
         sim::ProgramKind::Killer => "Killer: attacks heads and tails.",
@@ -188,7 +221,6 @@ pub struct Shell {
     talking: Option<sim::Conversation>,
     frames_left: Option<u32>,
     jobs: Vec<sim::JobDef>,
-    themed: bool,
     palette_open: bool,
     palette_query: String,
     help_open: bool,
@@ -340,7 +372,6 @@ impl Shell {
             talking: None,
             frames_left: frames,
             jobs,
-            themed: false,
             palette_open: false,
             palette_query: String::new(),
             help_open: false,
@@ -1281,50 +1312,115 @@ impl Shell {
                 let canvas = egui::vec2(ui.available_width(), map_size.y);
                 let (resp, painter) = ui.allocate_painter(canvas, egui::Sense::click());
                 let rect = egui::Rect::from_center_size(resp.rect.center(), map_size);
+                // Outer bezel and substrate.
+                painter.rect_filled(rect.expand(4.0), 0.0, crate::theme::VOID);
+                painter.rect_stroke(
+                    rect.expand(4.0),
+                    0.0,
+                    egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::BETANET, 110)),
+                    egui::StrokeKind::Inside,
+                );
+                crate::theme::corner_marks(
+                    &painter,
+                    rect.expand(4.0),
+                    crate::theme::alpha(crate::theme::BETANET, 180),
+                    10.0,
+                );
+
                 for y in 0..16u8 {
                     for x in 0..16u8 {
                         let r = egui::Rect::from_min_size(
                             rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                            egui::vec2(ts - 2.0, ts - 2.0),
+                            egui::vec2(ts - 1.0, ts - 1.0),
                         );
                         let walkable = terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true);
                         let fill = if walkable {
-                            if (x as i32 + y as i32) % 5 == 0 {
-                                egui::Color32::from_rgb(0x17, 0x21, 0x29)
+                            if (x as i32 / 2 + y as i32 / 2) % 2 == 0 {
+                                egui::Color32::from_rgb(0x08, 0x12, 0x17)
                             } else {
-                                egui::Color32::from_rgb(0x13, 0x1C, 0x24)
+                                egui::Color32::from_rgb(0x0A, 0x16, 0x1C)
                             }
                         } else {
-                            egui::Color32::from_rgb(0x1B, 0x24, 0x2C)
+                            egui::Color32::from_rgb(0x18, 0x28, 0x31)
                         };
-                        painter.rect_filled(r, 3.0, fill);
-                        painter.rect_stroke(
-                            r,
-                            3.0,
-                            egui::Stroke::new(0.7, crate::theme::LINE),
-                            egui::StrokeKind::Inside,
-                        );
+                        painter.rect_filled(r, 0.0, fill);
+                        if walkable {
+                            painter.rect_stroke(
+                                r,
+                                0.0,
+                                egui::Stroke::new(
+                                    0.5,
+                                    crate::theme::alpha(crate::theme::BETANET, 18),
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
+                        } else {
+                            painter.rect_stroke(
+                                r,
+                                0.0,
+                                egui::Stroke::new(
+                                    1.0,
+                                    crate::theme::alpha(crate::theme::LINE_HOT, 180),
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
+                            painter.line_segment(
+                                [r.left_top(), r.right_top()],
+                                egui::Stroke::new(
+                                    1.0,
+                                    crate::theme::alpha(crate::theme::BETANET, 60),
+                                ),
+                            );
+                            let hatch = r.shrink(5.0);
+                            painter.line_segment(
+                                [hatch.left_bottom(), hatch.right_top()],
+                                egui::Stroke::new(
+                                    0.6,
+                                    crate::theme::alpha(crate::theme::LINE_HOT, 90),
+                                ),
+                            );
+                        }
                     }
                 }
+
+                // Subtle coordinate ticks make the map read as a survey grid.
+                for i in (0..16).step_by(4) {
+                    painter.text(
+                        rect.min + egui::vec2(i as f32 * ts + 3.0, 2.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("{i:02}"),
+                        egui::FontId::monospace(7.0),
+                        crate::theme::alpha(crate::theme::FAINT, 150),
+                    );
+                    painter.text(
+                        rect.min + egui::vec2(3.0, i as f32 * ts + 2.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("{i:02}"),
+                        egui::FontId::monospace(7.0),
+                        crate::theme::alpha(crate::theme::FAINT, 120),
+                    );
+                }
+
                 // Guarantees (doors/egress/computers) get a gold corner tick.
                 if let Some(s) = &terrain {
                     for (_, gx, gy) in &s.guarantees {
-                        let r = egui::Rect::from_min_size(
-                            rect.min + egui::vec2(*gx as f32 * ts + 3.0, *gy as f32 * ts + 3.0),
-                            egui::vec2(ts - 8.0, ts - 8.0),
-                        );
-                        painter.rect_stroke(
-                            r,
-                            2.0,
-                            egui::Stroke::new(1.4, crate::theme::OLDNET_DIM),
-                            egui::StrokeKind::Inside,
+                        let base = rect.min + egui::vec2(*gx as f32 * ts, *gy as f32 * ts);
+                        let r = egui::Rect::from_min_size(base, egui::vec2(ts - 1.0, ts - 1.0));
+                        crate::theme::corner_marks(
+                            &painter,
+                            r.shrink(4.0),
+                            crate::theme::alpha(crate::theme::OLDNET, 210),
+                            7.0,
                         );
                     }
                 }
+
                 for (sx, sy) in &shop_tiles {
                     let c = rect.min
                         + egui::vec2(*sx as f32 * ts + ts / 2.0, *sy as f32 * ts + ts / 2.0);
-                    painter.circle_filled(c, 9.0, egui::Color32::from_rgb(0x2A, 0x21, 0x14));
+                    painter.circle_filled(c, 17.0, crate::theme::alpha(crate::theme::OLDNET, 20));
+                    painter.circle_filled(c, 10.0, egui::Color32::from_rgb(0x2A, 0x20, 0x0D));
+                    painter.circle_stroke(c, 10.0, egui::Stroke::new(1.3, crate::theme::OLDNET));
                     painter.text(
                         c,
                         egui::Align2::CENTER_CENTER,
@@ -1336,8 +1432,9 @@ impl Shell {
                 for (_, nx, ny) in &npcs {
                     let c = rect.min
                         + egui::vec2(*nx as f32 * ts + ts / 2.0, *ny as f32 * ts + ts / 2.0);
-                    painter.circle_filled(c, 8.0, egui::Color32::from_rgb(0x1D, 0x2A, 0x22));
-                    painter.circle_stroke(c, 8.0, egui::Stroke::new(1.2, crate::theme::SUCCESS));
+                    painter.circle_filled(c, 16.0, crate::theme::alpha(crate::theme::SUCCESS, 18));
+                    painter.circle_filled(c, 8.0, egui::Color32::from_rgb(0x10, 0x24, 0x1B));
+                    painter.circle_stroke(c, 8.0, egui::Stroke::new(1.3, crate::theme::SUCCESS));
                     painter.text(
                         c,
                         egui::Align2::CENTER_CENTER,
@@ -1346,10 +1443,17 @@ impl Shell {
                         crate::theme::SUCCESS,
                     );
                 }
+
                 let player =
                     rect.min + egui::vec2(ax as f32 * ts + ts / 2.0, ay as f32 * ts + ts / 2.0);
-                painter.circle_filled(player, 10.0, egui::Color32::from_rgb(0x18, 0x31, 0x3A));
-                painter.circle_stroke(player, 10.0, egui::Stroke::new(1.8, crate::theme::BETANET));
+                painter.circle_filled(player, 24.0, crate::theme::alpha(crate::theme::BETANET, 14));
+                painter.circle_stroke(
+                    player,
+                    15.0,
+                    egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::BETANET, 90)),
+                );
+                painter.circle_filled(player, 10.0, egui::Color32::from_rgb(0x0E, 0x2A, 0x33));
+                painter.circle_stroke(player, 10.0, egui::Stroke::new(2.0, crate::theme::BETANET));
                 painter.text(
                     player,
                     egui::Align2::CENTER_CENTER,
@@ -1357,6 +1461,7 @@ impl Shell {
                     egui::FontId::monospace(12.0),
                     crate::theme::BETANET,
                 );
+
                 let hover_tile = resp.hover_pos().and_then(|p| {
                     if !rect.contains(p) {
                         return None;
@@ -1372,26 +1477,43 @@ impl Shell {
                 if let Some((x, y)) = self.street_sel {
                     let r = egui::Rect::from_min_size(
                         rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                        egui::vec2(ts - 2.0, ts - 2.0),
+                        egui::vec2(ts - 1.0, ts - 1.0),
+                    );
+                    painter.rect_stroke(
+                        r.expand(1.0),
+                        0.0,
+                        egui::Stroke::new(3.0, crate::theme::alpha(crate::theme::OLDNET, 35)),
+                        egui::StrokeKind::Inside,
                     );
                     painter.rect_stroke(
                         r,
-                        3.0,
-                        egui::Stroke::new(2.0, crate::theme::OLDNET),
+                        0.0,
+                        egui::Stroke::new(1.6, crate::theme::OLDNET),
                         egui::StrokeKind::Inside,
                     );
+                    crate::theme::corner_marks(&painter, r, crate::theme::OLDNET, 8.0);
                 }
                 if let Some((x, y)) = hover_tile {
                     let r = egui::Rect::from_min_size(
                         rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                        egui::vec2(ts - 2.0, ts - 2.0),
+                        egui::vec2(ts - 1.0, ts - 1.0),
                     );
                     painter.rect_stroke(
                         r,
-                        3.0,
-                        egui::Stroke::new(1.4, crate::theme::BETANET),
+                        0.0,
+                        egui::Stroke::new(1.2, crate::theme::BETANET),
                         egui::StrokeKind::Inside,
                     );
+                }
+
+                // CRT wash over the whole survey surface.
+                let mut sy = rect.top();
+                while sy < rect.bottom() {
+                    painter.line_segment(
+                        [egui::pos2(rect.left(), sy), egui::pos2(rect.right(), sy)],
+                        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(18)),
+                    );
+                    sy += 4.0;
                 }
                 if resp.clicked() {
                     if let Some(t) = hover_tile {
@@ -1558,10 +1680,6 @@ impl Shell {
     /// headless tests drive it through `egui::Context::run_ui` with no
     /// window, GPU, or screenshots (see the accesskit harness below).
     fn show(&mut self, ui: &mut egui::Ui) {
-        if !self.themed {
-            crate::theme::apply(ui.ctx());
-            self.themed = true;
-        }
         if let Some(left) = self.frames_left {
             if left == 0 {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1598,50 +1716,85 @@ impl Shell {
             self.help_open = !self.help_open;
         }
 
-        egui::Panel::top("tabs").show(ui, |ui| {
+        let view_accent = match self.tab {
+            Tab::Street => crate::theme::BETANET,
+            Tab::Deck => crate::theme::OLDNET,
+            Tab::Net => crate::theme::BETANET,
+            Tab::Veil => crate::theme::VEIL,
+        };
+
+        egui::Panel::top("tabs")
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::VOID)
+                    .inner_margin(egui::Margin::symmetric(12, 7)),
+            )
+            .show(ui, |ui| {
             ui.horizontal(|ui| {
+                let (mark, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                let mp = ui.painter();
+                mp.rect_filled(mark, 0.0, crate::theme::alpha(crate::theme::OLDNET, 220));
+                mp.rect_filled(mark.shrink2(egui::vec2(3.0, 3.0)), 0.0, crate::theme::VOID);
+                mp.line_segment(
+                    [
+                        mark.left_top() + egui::vec2(3.0, 3.0),
+                        mark.right_bottom() - egui::vec2(3.0, 3.0),
+                    ],
+                    egui::Stroke::new(1.5, crate::theme::BETANET),
+                );
+                ui.add_space(5.0);
                 ui.label(
                     egui::RichText::new("FIDOM")
-                        .size(20.0)
+                        .family(crate::theme::display_family())
+                        .size(22.0)
                         .strong()
                         .color(crate::theme::PAPER),
                 );
                 ui.label(
                     egui::RichText::new("CIVIC NETWORK TERMINAL")
-                        .size(9.0)
+                        .family(egui::FontFamily::Monospace)
+                        .size(8.5)
                         .color(crate::theme::OLDNET),
                 );
-                ui.separator();
+                let blink = if self.reduced_motion || (ui.input(|i| i.time) * 2.0).sin() > 0.0 {
+                    1.0
+                } else {
+                    0.2
+                };
+                let (cursor, _) =
+                    ui.allocate_exact_size(egui::vec2(5.0, 10.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    cursor,
+                    0.0,
+                    crate::theme::alpha(crate::theme::OLDNET, (210.0 * blink) as u8),
+                );
+                ui.add_space(8.0);
                 if let Some((_, _, money, _)) = self.server.world.needs(self.actor) {
                     let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
-                    ui.label(
-                        egui::RichText::new(format!("S({},{})", here.sx, here.sy))
-                            .size(11.0)
-                            .color(crate::theme::MUTED),
+                    crate::theme::chip(
+                        ui,
+                        format!("[ S({},{}) ]", here.sx, here.sy),
+                        crate::theme::MUTED,
                     )
                     .on_hover_text(
                         "Section coordinates. The city is a 16×16 tile grid per section.",
                     );
                     let tick = self.server.world.tick;
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Day {} {:02}:{:02}",
+                    crate::theme::chip(
+                        ui,
+                        format!(
+                            "[ Day {} {:02}:{:02} ]",
                             tick / 1440 + 1,
                             (tick / 60) % 24,
                             tick % 60
-                        ))
-                        .size(11.0)
-                        .monospace()
-                        .color(crate::theme::MUTED),
+                        ),
+                        crate::theme::MUTED,
                     )
                     .on_hover_text("Game clock. Acts advance time; shops and police keep hours.");
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new(format!("${:.2}", money as f64 / 100.0))
-                            .size(12.0)
-                            .strong()
-                            .color(crate::theme::MONEY),
+                    crate::theme::chip(
+                        ui,
+                        format!("[ ${:.2} ]", money as f64 / 100.0),
+                        crate::theme::MONEY,
                     )
                     .on_hover_text(
                         "Pocket cash. Fines take pocket money first; bank it with `deposit <c>`.",
@@ -1650,48 +1803,105 @@ impl Shell {
                     let heat_color = if standing == Standing::Wanted {
                         crate::theme::DANGER
                     } else {
-                        crate::theme::MUTED
+                        crate::theme::SUCCESS
                     };
-                    ui.label(
-                        egui::RichText::new(format!("{standing:?}"))
-                            .size(11.0)
-                            .color(heat_color),
-                    )
-                    .on_hover_text(
-                        "Clean or Wanted. Wanted draws police; pay the fine to clear your record.",
-                    );
+                    crate::theme::chip(ui, format!("[ {standing:?} ]"), heat_color)
+                        .on_hover_text(
+                            "Clean or Wanted. Wanted draws police; pay the fine to clear your record.",
+                        );
                     let mail = self.server.world.inbox(self.actor).len();
-                    ui.label(
-                        egui::RichText::new(format!("mail {mail}"))
-                            .size(11.0)
-                            .color(crate::theme::BETANET),
+                    crate::theme::chip(
+                        ui,
+                        format!("[ mail {mail} ]"),
+                        crate::theme::BETANET,
                     )
                     .on_hover_text("Unread mail. Open it from the Street tab's Mail card.");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.selectable_value(&mut self.tab, Tab::Veil, "Veil")
-                        .on_hover_text("Mind space: jack in, move areas, seize hosts, read files.");
-                    ui.selectable_value(&mut self.tab, Tab::Net, "Net")
-                        .on_hover_text("Network graph: routes, tolls, power, firewalls.");
-                    ui.selectable_value(&mut self.tab, Tab::Deck, "Deck")
-                        .on_hover_text(
+                    for (tab, label, hint) in [
+                        (
+                            Tab::Veil,
+                            "Veil",
+                            "Mind space: jack in, move areas, seize hosts, read files.",
+                        ),
+                        (
+                            Tab::Net,
+                            "Net",
+                            "Network graph: routes, tolls, power, firewalls.",
+                        ),
+                        (
+                            Tab::Deck,
+                            "Deck",
                             "Your rig: load programs, fight the warden, farm components.",
-                        );
-                    ui.selectable_value(&mut self.tab, Tab::Street, "Street")
-                        .on_hover_text("City streets: move, work, shop, take contracts, talk.");
+                        ),
+                        (
+                            Tab::Street,
+                            "Street",
+                            "City streets: move, work, shop, take contracts, talk.",
+                        ),
+                    ] {
+                        let selected = self.tab == tab;
+                        let resp = ui
+                            .selectable_value(
+                                &mut self.tab,
+                                tab,
+                                egui::RichText::new(label)
+                                    .family(crate::theme::display_family())
+                                    .size(13.0)
+                                    .color(if selected {
+                                        crate::theme::BETANET
+                                    } else {
+                                        crate::theme::MUTED
+                                    }),
+                            )
+                            .on_hover_text(hint);
+                        if selected {
+                            let r = resp.rect;
+                            ui.painter().line_segment(
+                                [
+                                    r.left_bottom() + egui::vec2(2.0, -1.0),
+                                    r.right_bottom() + egui::vec2(-2.0, -1.0),
+                                ],
+                                egui::Stroke::new(2.0, crate::theme::BETANET),
+                            );
+                        }
+                    }
                     ui.label(
                         egui::RichText::new("VIEWS")
-                            .size(9.0)
+                            .family(egui::FontFamily::Monospace)
+                            .size(8.5)
                             .color(crate::theme::FAINT),
                     );
                 });
             });
+            let r = ui.max_rect();
+            ui.painter().line_segment(
+                [
+                    egui::pos2(r.left(), r.bottom() - 1.0),
+                    egui::pos2(r.right(), r.bottom() - 1.0),
+                ],
+                egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::OLDNET, 110)),
+            );
         });
 
         egui::Panel::left("status")
             .exact_size(248.0)
             .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(10, 10)),
+            )
             .show(ui, |ui| {
+                crate::theme::scanlines(ui, 16);
+                let edge = ui.max_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(edge.right() - 0.5, edge.top()),
+                        egui::pos2(edge.right() - 0.5, edge.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::LINE_HOT, 180)),
+                );
                 crate::theme::heading(ui, "Status");
                 if let Some((food, mood, _money, rations)) = self.server.world.needs(self.actor) {
                     crate::theme::card(ui, "survival", crate::theme::OLDNET, |ui| {
@@ -2005,26 +2215,64 @@ impl Shell {
             egui::Panel::right("inspector")
                 .exact_size(300.0)
                 .resizable(false)
-                .show(ui, |ui| self.inspector(ui));
+                .frame(
+                    egui::Frame::new()
+                        .fill(crate::theme::PANEL)
+                        .inner_margin(egui::Margin::symmetric(10, 10)),
+                )
+                .show(ui, |ui| {
+                    crate::theme::scanlines(ui, 16);
+                    let edge = ui.max_rect();
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(edge.left() + 0.5, edge.top()),
+                            egui::pos2(edge.left() + 0.5, edge.bottom()),
+                        ],
+                        egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::LINE_HOT, 180)),
+                    );
+                    self.inspector(ui);
+                });
         }
 
         egui::Panel::bottom("console")
             .exact_size(156.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::VOID)
+                    .inner_margin(egui::Margin::symmetric(12, 8)),
+            )
             .show(ui, |ui| {
+                let r = ui.max_rect();
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(r.left(), r.top() + 0.5),
+                        egui::pos2(r.right(), r.top() + 0.5),
+                    ],
+                    egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::OLDNET, 150)),
+                );
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("CONSOLE")
-                            .size(10.0)
+                        egui::RichText::new("// CONSOLE")
+                            .family(crate::theme::display_family())
+                            .size(10.5)
                             .strong()
-                            .color(crate::theme::MUTED),
+                            .color(crate::theme::OLDNET),
                     );
                     ui.label(
                         egui::RichText::new("type a command · Enter runs · F1 manual")
-                            .size(10.0)
+                            .family(egui::FontFamily::Monospace)
+                            .size(9.5)
                             .color(crate::theme::FAINT),
                     );
                 });
                 ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(">")
+                            .family(egui::FontFamily::Monospace)
+                            .size(13.0)
+                            .strong()
+                            .color(crate::theme::BETANET),
+                    );
                     let resp = ui
                         .add(
                             egui::TextEdit::singleline(&mut self.input)
@@ -2037,23 +2285,43 @@ impl Shell {
                         self.run_command();
                     }
                 });
-                ui.separator();
                 egui::ScrollArea::vertical()
-                    .max_height(90.0)
+                    .max_height(84.0)
                     .show(ui, |ui| {
                         ui.label(
                             egui::RichText::new("LOG")
-                                .size(10.0)
+                                .family(crate::theme::display_family())
+                                .size(9.5)
                                 .strong()
-                                .color(crate::theme::MUTED),
+                                .color(crate::theme::FAINT),
                         );
                         for line in self.log.iter().rev().take(8) {
-                            ui.label(line);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("›")
+                                        .family(egui::FontFamily::Monospace)
+                                        .size(10.0)
+                                        .color(crate::theme::FAINT),
+                                );
+                                ui.label(
+                                    egui::RichText::new(line)
+                                        .family(egui::FontFamily::Monospace)
+                                        .size(11.0)
+                                        .color(log_color(line)),
+                                );
+                            });
                         }
                     });
             });
 
-        egui::CentralPanel::default().show(ui, |ui| {
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(crate::theme::INK)
+                    .inner_margin(egui::Margin::symmetric(10, 8)),
+            )
+            .show(ui, |ui| {
+            crate::theme::backdrop(ui, view_accent);
             let scroll_id = match self.tab {
                 Tab::Street => "street-scroll",
                 Tab::Deck => "deck-scroll",
@@ -2506,14 +2774,12 @@ impl Shell {
                         );
                     });
                     if let Some((progress, threshold)) = h.trace_progress() {
-                        let frac = progress as f32 / threshold.max(1) as f32;
-                        ui.add(
-                            egui::ProgressBar::new(frac)
-                                .desired_width(ui.available_width().min(520.0))
-                                .fill(crate::theme::DANGER)
-                                .text(format!(
-                                    "TRACE {progress}/{threshold} — scrub or outrun"
-                                )),
+                        crate::theme::meter(
+                            ui,
+                            "TRACE",
+                            progress as f32,
+                            threshold.max(1) as f32,
+                            crate::theme::DANGER,
                         )
                         .on_hover_text(
                             "Trace progress. At the threshold your program burns; scrub the log or outrun it.",
@@ -2556,16 +2822,25 @@ impl Shell {
                     ),
                 };
                 crate::theme::card(ui, "arena", crate::theme::BETANET, |ui| {
+                let grid = egui::Frame::new()
+                    .fill(crate::theme::VOID)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        crate::theme::alpha(crate::theme::LINE, 220),
+                    ))
+                    .inner_margin(egui::Margin::same(6))
+                    .show(ui, |ui| {
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
-                            let (glyph, color, fill, tip) =
+                            let (glyph, color, fill, stroke_color, tip) =
                                 if let Some(Some(res)) = heads.get(&(x, y)) {
                                     // Producer head: P in the resource's color.
                                     (
                                         "P",
                                         crate::theme::resource_color(*res),
-                                        egui::Color32::from_rgb(0x16, 0x21, 0x1B),
+                                        egui::Color32::from_rgb(0x10, 0x1B, 0x16),
+                                        crate::theme::alpha(crate::theme::resource_color(*res), 200),
                                         format!(
                                             "{} producer head. Yields components each act and costs CPU.",
                                             res.name().to_uppercase()
@@ -2593,7 +2868,8 @@ impl Shell {
                                     (
                                         glyph,
                                         color,
-                                        egui::Color32::from_rgb(0x16, 0x1F, 0x29),
+                                        egui::Color32::from_rgb(0x10, 0x1B, 0x23),
+                                        crate::theme::alpha(color, 200),
                                         format!(
                                             "{} head. Strike the head to kill the program.",
                                             kind.name()
@@ -2603,7 +2879,8 @@ impl Shell {
                                     (
                                         "o",
                                         crate::theme::FAINT,
-                                        egui::Color32::from_rgb(0x11, 0x18, 0x20),
+                                        egui::Color32::from_rgb(0x08, 0x10, 0x14),
+                                        crate::theme::alpha(crate::theme::FAINT, 120),
                                         "Program tail. Strikes shrink it; hit the head to kill it."
                                             .to_string(),
                                     )
@@ -2612,13 +2889,15 @@ impl Shell {
                                         "X",
                                         crate::theme::OLDNET,
                                         egui::Color32::from_rgb(0x2A, 0x21, 0x14),
+                                        crate::theme::OLDNET,
                                         "Selected cell. Load a program here.".to_string(),
                                     )
                                 } else {
                                     (
                                         ".",
                                         crate::theme::FAINT,
-                                        egui::Color32::from_rgb(0x0D, 0x14, 0x1A),
+                                        crate::theme::VOID,
+                                        crate::theme::alpha(crate::theme::LINE, 170),
                                         "Empty cell. Click to select.".to_string(),
                                     )
                                 };
@@ -2632,7 +2911,7 @@ impl Shell {
                                             .color(color),
                                     )
                                     .fill(fill)
-                                    .stroke(egui::Stroke::new(1.0, crate::theme::LINE)),
+                                    .stroke(egui::Stroke::new(1.0, stroke_color)),
                                 )
                                 .on_hover_text(tip)
                                 .clicked()
@@ -2643,17 +2922,17 @@ impl Shell {
                         ui.end_row();
                     }
                 });
-                ui.label(format!("CPU {cpu}/{total}"))
-                    .on_hover_text("CPU used / total. Over budget blocks new loads and growth.");
-                if total > 0 {
-                    ui.add(
-                        egui::ProgressBar::new(cpu as f32 / total as f32)
-                            .desired_width(ui.available_width().min(520.0))
-                            .fill(crate::theme::BETANET)
-                            .text(format!("CPU {cpu}/{total}")),
-                    )
-                    .on_hover_text("Rig CPU load. Producers and programs both consume it.");
-                }
+                    });
+                crate::theme::corner_marks(
+                    ui.painter(),
+                    grid.response.rect,
+                    crate::theme::alpha(crate::theme::BETANET, 170),
+                    9.0,
+                );
+                crate::theme::meter(ui, "CPU", cpu as f32, total.max(1) as f32, crate::theme::BETANET)
+                    .on_hover_text(
+                        "CPU used / total. Over budget blocks new loads and growth; producers and programs both consume it.",
+                    );
                 if let Some(h) = self.server.world.host(HostId(1)) {
                     ui.label(format!(
                         "arch {} · vulns {} · breached {} · scanned {}",
@@ -3222,12 +3501,35 @@ impl Shell {
                     "Click a node to inspect it. Dark nodes are in unpowered sections.",
                 );
                 let grect = gresp.rect;
-                gp.rect_filled(grect, 8.0, egui::Color32::from_rgb(0x0D, 0x14, 0x1A));
+                gp.rect_filled(grect, 0.0, crate::theme::VOID);
+                let grid = crate::theme::alpha(crate::theme::BETANET, 10);
+                let mut gx = grect.left();
+                while gx < grect.right() {
+                    gp.line_segment(
+                        [egui::pos2(gx, grect.top()), egui::pos2(gx, grect.bottom())],
+                        egui::Stroke::new(1.0, grid),
+                    );
+                    gx += 28.0;
+                }
+                let mut gy = grect.top();
+                while gy < grect.bottom() {
+                    gp.line_segment(
+                        [egui::pos2(grect.left(), gy), egui::pos2(grect.right(), gy)],
+                        egui::Stroke::new(1.0, grid),
+                    );
+                    gy += 28.0;
+                }
                 gp.rect_stroke(
                     grect,
-                    8.0,
-                    egui::Stroke::new(1.0, crate::theme::LINE),
+                    0.0,
+                    egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::LINE, 220)),
                     egui::StrokeKind::Inside,
+                );
+                crate::theme::corner_marks(
+                    &gp,
+                    grect,
+                    crate::theme::alpha(crate::theme::BETANET, 170),
+                    9.0,
                 );
                 let mut npos = std::collections::BTreeMap::new();
                 let n = node_ids.len().max(1);
@@ -3251,6 +3553,10 @@ impl Shell {
                         }
                     };
                     let color = if dark { crate::theme::FAINT } else { color };
+                    gp.line_segment(
+                        [*a, *b],
+                        egui::Stroke::new(6.0, crate::theme::alpha(color, 22)),
+                    );
                     if dash {
                         let steps = 10;
                         for s in 0..steps {
@@ -3289,24 +3595,41 @@ impl Shell {
                             NetKind::Betanet => crate::theme::BETANET,
                         }
                     };
+                    gp.circle_filled(
+                        *p,
+                        30.0,
+                        crate::theme::alpha(color, if dark { 8 } else { 16 }),
+                    );
                     if self.net_sel == Some(*id) {
-                        gp.circle_stroke(*p, 28.0, egui::Stroke::new(2.0, crate::theme::OLDNET));
+                        gp.circle_stroke(*p, 29.0, egui::Stroke::new(1.0, crate::theme::OLDNET));
+                        gp.circle_stroke(
+                            *p,
+                            25.0,
+                            egui::Stroke::new(2.0, crate::theme::OLDNET),
+                        );
+                        let sel_rect = egui::Rect::from_center_size(*p, egui::vec2(58.0, 58.0));
+                        crate::theme::corner_marks(
+                            &gp,
+                            sel_rect,
+                            crate::theme::OLDNET,
+                            8.0,
+                        );
                     }
-                    gp.circle_filled(*p, 23.0, egui::Color32::from_rgb(0x12, 0x1B, 0x22));
+                    gp.circle_filled(*p, 23.0, crate::theme::VOID);
                     gp.circle_stroke(*p, 23.0, egui::Stroke::new(1.8, color));
                     gp.text(
                         *p,
                         egui::Align2::CENTER_CENTER,
                         format!("{}", id.0),
-                        egui::FontId::monospace(12.0),
+                        crate::theme::display(12.0),
                         color,
                     );
                     if n.gateway {
                         gp.text(
                             *p + egui::vec2(0.0, 34.0),
                             egui::Align2::CENTER_CENTER,
-                            "gateway",
-                            egui::FontId::proportional(9.0),
+                            "GATEWAY",
+                            egui::FontId::monospace(8.5),
                             crate::theme::MUTED,
                         );
                     }
@@ -3496,12 +3819,40 @@ impl Shell {
                         "Area map: links are exits, and red labels mark hazards.",
                     );
                     let vr = vresp.rect;
-                    vp.rect_filled(vr, 10.0, egui::Color32::from_rgb(0x0C, 0x0B, 0x16));
+                    vp.rect_filled(vr, 0.0, crate::theme::VOID);
+                    vp.circle_filled(
+                        vr.center(),
+                        vr.width().min(vr.height()) * 0.65,
+                        crate::theme::alpha(crate::theme::VEIL, 12),
+                    );
+                    let grid = crate::theme::alpha(crate::theme::VEIL, 10);
+                    let mut gx = vr.left();
+                    while gx < vr.right() {
+                        vp.line_segment(
+                            [egui::pos2(gx, vr.top()), egui::pos2(gx, vr.bottom())],
+                            egui::Stroke::new(1.0, grid),
+                        );
+                        gx += 24.0;
+                    }
+                    let mut gy = vr.top();
+                    while gy < vr.bottom() {
+                        vp.line_segment(
+                            [egui::pos2(vr.left(), gy), egui::pos2(vr.right(), gy)],
+                            egui::Stroke::new(1.0, grid),
+                        );
+                        gy += 24.0;
+                    }
                     vp.rect_stroke(
                         vr,
-                        10.0,
-                        egui::Stroke::new(1.0, crate::theme::LINE),
+                        0.0,
+                        egui::Stroke::new(1.0, crate::theme::alpha(crate::theme::LINE, 220)),
                         egui::StrokeKind::Inside,
+                    );
+                    crate::theme::corner_marks(
+                        &vp,
+                        vr,
+                        crate::theme::alpha(crate::theme::VEIL, 190),
+                        9.0,
                     );
                     let n = areas.len().max(1);
                     let mut pos = std::collections::BTreeMap::new();
@@ -3515,6 +3866,13 @@ impl Shell {
                         if let Some((_, exits, _)) = self.server.world.veil.area_info(*a) {
                             for e in exits {
                                 if let (Some(p0), Some(p1)) = (pos.get(a), pos.get(&e)) {
+                                    vp.line_segment(
+                                        [*p0, *p1],
+                                        egui::Stroke::new(
+                                            5.0,
+                                            crate::theme::alpha(crate::theme::VEIL, 24),
+                                        ),
+                                    );
                                     vp.line_segment(
                                         [*p0, *p1],
                                         egui::Stroke::new(1.2, crate::theme::VEIL),
@@ -3532,22 +3890,36 @@ impl Shell {
                         } else {
                             crate::theme::VEIL
                         };
-                        vp.circle_filled(*p, 24.0, egui::Color32::from_rgb(0x15, 0x11, 0x26));
+                        vp.circle_filled(*p, 34.0, crate::theme::alpha(color, 14));
+                        if selected {
+                            vp.circle_stroke(
+                                *p,
+                                29.0,
+                                egui::Stroke::new(1.0, crate::theme::alpha(color, 120)),
+                            );
+                            crate::theme::corner_marks(
+                                &vp,
+                                egui::Rect::from_center_size(*p, egui::vec2(58.0, 58.0)),
+                                color,
+                                8.0,
+                            );
+                        }
+                        vp.circle_filled(*p, 24.0, crate::theme::VOID);
                         vp.circle_stroke(*p, 24.0, egui::Stroke::new(2.0, color));
                         vp.text(
                             *p,
                             egui::Align2::CENTER_CENTER,
                             format!("{a}"),
-                            egui::FontId::monospace(12.0),
+                            crate::theme::display(12.0),
                             color,
                         );
                         let hazard = self.server.world.veil.area_hazard(*a);
                         if hazard > 0 {
                             vp.text(
-                                *p + egui::vec2(0.0, 34.0),
+                                *p + egui::vec2(0.0, 36.0),
                                 egui::Align2::CENTER_CENTER,
-                                format!("hazard {hazard}"),
-                                egui::FontId::proportional(9.0),
+                                format!("! HAZARD {hazard}"),
+                                egui::FontId::monospace(8.5),
                                 crate::theme::DANGER,
                             );
                         }
@@ -3786,6 +4158,7 @@ mod tests {
             fn new_sized(width: f32, height: f32) -> Self {
                 let ctx = egui::Context::default();
                 ctx.enable_accesskit();
+                crate::theme::apply(&ctx);
                 let mut h = Self {
                     shell: Shell::new(None),
                     ctx,

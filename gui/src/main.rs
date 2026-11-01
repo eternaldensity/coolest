@@ -10,11 +10,17 @@ fn main() {
         .skip_while(|a| a != "--frames")
         .nth(1)
         .and_then(|n| n.parse::<u32>().ok());
-    let opts = eframe::NativeOptions::default();
+    let opts = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1600.0, 1000.0]),
+        ..Default::default()
+    };
     if let Err(e) = eframe::run_native(
         "FIDOM",
         opts,
-        Box::new(move |_cc| Ok(Box::new(app::Shell::new(frames)))),
+        Box::new(move |cc| {
+            crate::theme::apply(&cc.egui_ctx);
+            Ok(Box::new(app::Shell::new(frames)))
+        }),
     ) {
         eprintln!("shell exited: {e:?}");
         std::process::exit(1);
@@ -37,7 +43,10 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(app::Shell::new(None)))),
+                Box::new(|cc| {
+                    crate::theme::apply(&cc.egui_ctx);
+                    Ok(Box::new(app::Shell::new(None)))
+                }),
             )
             .await
             .expect("failed to start eframe");
