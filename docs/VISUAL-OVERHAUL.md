@@ -1,9 +1,12 @@
 # Visual Overhaul — “Civic Decay / Signal & Static”
 
-> Status: design plan, not implemented. Scope is the `gui/` shell; the
+> Status: UI-1 foundation and the first Street pass are implemented
+> (`7d19970`): civic-decay theme, IBM Plex fonts, top bar, vitals rail,
+> progress meters, scrollable central pane, and a painted Street map with
+> hover/selection. Deck/Net/Veil restyling, command palette, right
+> inspector, and responsive polish remain. Scope is the `gui/` shell; the
 > deterministic sim and server stay unchanged except for a few interaction
-> verbs noted in §8.5. The goal is not “more neon”; it is a readable,
-> atmospheric game whose information hierarchy survives a real session.
+> verbs noted in §8.5.
 
 ## 1. Experience goals
 
