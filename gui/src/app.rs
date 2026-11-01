@@ -1182,168 +1182,172 @@ impl Shell {
             });
         });
 
-        egui::Panel::left("status").show(ui, |ui| {
-            crate::theme::heading(ui, "Status");
-            if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
-                crate::theme::section(ui, "survival");
-                ui.label(status_line(food, mood, money));
-                crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
-                crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
-                let bank = self
-                    .server
-                    .world
-                    .bank_balance(self.actor)
-                    .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
-                    .unwrap_or_else(|| "bank —".to_string());
-                ui.label(bank);
-                let units = sim::Res::ALL
-                    .iter()
-                    .map(|r| format!("{} {}", r.name(), self.server.world.units(self.actor, *r)))
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-                ui.label(format!("components: {units}"));
-                ui.horizontal_wrapped(|ui| {
-                    for r in sim::Res::ALL {
-                        crate::theme::chip(
+        egui::Panel::left("status")
+            .exact_size(248.0)
+            .resizable(false)
+            .show(ui, |ui| {
+                crate::theme::heading(ui, "Status");
+                if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
+                    crate::theme::section(ui, "survival");
+                    ui.label(status_line(food, mood, money));
+                    crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
+                    crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
+                    let bank = self
+                        .server
+                        .world
+                        .bank_balance(self.actor)
+                        .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
+                        .unwrap_or_else(|| "bank —".to_string());
+                    ui.label(bank);
+                    let units = sim::Res::ALL
+                        .iter()
+                        .map(|r| {
+                            format!("{} {}", r.name(), self.server.world.units(self.actor, *r))
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    ui.label(format!("components: {units}"));
+                    ui.horizontal_wrapped(|ui| {
+                        for r in sim::Res::ALL {
+                            crate::theme::chip(
+                                ui,
+                                format!("{} {}", self.server.world.units(self.actor, r), r.name()),
+                                crate::theme::MUTED,
+                            );
+                        }
+                    });
+                    // Body/health (design/06-07). The clinic is the only way
+                    // back from a lethal blow in v0.4.
+                    if let Some(h) = self.server.world.health_of(self.actor) {
+                        crate::theme::section(ui, "body");
+                        ui.label(format!("HP {}/{}", h.hp, h.max_hp));
+                        if !h.is_alive() && ui.button("Revive at clinic").clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::Revive,
+                            }) {
+                                Ok(_) => self.say("revived at the clinic".to_string()),
+                                Err(e) => self.say(format!("revive failed: {e}")),
+                            }
+                        }
+                    }
+                    if let Some(body) = self.server.world.body_of(self.actor) {
+                        ui.label(format!(
+                            "PV {} · DV {} · STR {} · DEX {}",
+                            body.pv, body.dv, body.str, body.dex
+                        ));
+                    }
+                    if let Some(mind) = self.server.world.mind_of(self.actor) {
+                        ui.label(format!(
+                            "mindpower {} · literacy {}",
+                            mind.mindpower, mind.comp_literacy
+                        ));
+                        crate::theme::meter(
                             ui,
-                            format!("{} {}", self.server.world.units(self.actor, r), r.name()),
-                            crate::theme::MUTED,
+                            "Mind",
+                            mind.mindpower as f32,
+                            20.0,
+                            crate::theme::VEIL,
                         );
                     }
-                });
-                // Body/health (design/06-07). The clinic is the only way
-                // back from a lethal blow in v0.4.
-                if let Some(h) = self.server.world.health_of(self.actor) {
-                    crate::theme::section(ui, "body");
-                    ui.label(format!("HP {}/{}", h.hp, h.max_hp));
-                    if !h.is_alive() && ui.button("Revive at clinic").clicked() {
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::Revive,
-                        }) {
-                            Ok(_) => self.say("revived at the clinic".to_string()),
-                            Err(e) => self.say(format!("revive failed: {e}")),
+                    // Heat (design/05): alignment/standing are pure functions of
+                    // the record, so settling the fine clears both.
+                    crate::theme::section(ui, "conduct");
+                    let standing = self.server.world.standing();
+                    let mass = self.server.world.record_mass();
+                    ui.label(format!("standing {standing:?} · mass {mass:.1}"));
+                    ui.label(format!("alignment {:?}", self.server.world.alignment()));
+                    if mass > 0.0 {
+                        let cost = self.server.world.fine_cost();
+                        if ui
+                            .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
+                            .clicked()
+                        {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::PayFine,
+                            }) {
+                                Ok(_) => self.say("fine paid — record settled".to_string()),
+                                Err(e) => self.say(format!("fine failed: {e}")),
+                            }
                         }
                     }
-                }
-                if let Some(body) = self.server.world.body_of(self.actor) {
+                    // License to hack (design/05): 3 threat kills + clean record.
+                    let lic = self.server.world.license();
                     ui.label(format!(
-                        "PV {} · DV {} · STR {} · DEX {}",
-                        body.pv, body.dv, body.str, body.dex
+                        "license: {} kills{}{}",
+                        lic.threat_kills,
+                        if lic.granted { " · HELD" } else { "" },
+                        if lic.revoked { " · revoked" } else { "" }
                     ));
-                }
-                if let Some(mind) = self.server.world.mind_of(self.actor) {
-                    ui.label(format!(
-                        "mindpower {} · literacy {}",
-                        mind.mindpower, mind.comp_literacy
-                    ));
-                    crate::theme::meter(
-                        ui,
-                        "Mind",
-                        mind.mindpower as f32,
-                        20.0,
-                        crate::theme::VEIL,
-                    );
-                }
-                // Heat (design/05): alignment/standing are pure functions of
-                // the record, so settling the fine clears both.
-                crate::theme::section(ui, "conduct");
-                let standing = self.server.world.standing();
-                let mass = self.server.world.record_mass();
-                ui.label(format!(
-                    "standing {standing:?} · alignment {:?} · mass {mass:.1}",
-                    self.server.world.alignment()
-                ));
-                if mass > 0.0 {
-                    let cost = self.server.world.fine_cost();
-                    if ui
-                        .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
-                        .clicked()
-                    {
+                    if !lic.granted && ui.button("Apply license").clicked() {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
-                            verb: Verb::PayFine,
+                            verb: Verb::ApplyLicense,
                         }) {
-                            Ok(_) => self.say("fine paid — record settled".to_string()),
-                            Err(e) => self.say(format!("fine failed: {e}")),
+                            Ok(_) => self.say("license granted".to_string()),
+                            Err(e) => self.say(format!("license refused: {e}")),
                         }
                     }
-                }
-                // License to hack (design/05): 3 threat kills + clean record.
-                let lic = self.server.world.license();
-                ui.label(format!(
-                    "license: {} kills{}{}",
-                    lic.threat_kills,
-                    if lic.granted { " · HELD" } else { "" },
-                    if lic.revoked { " · revoked" } else { "" }
-                ));
-                if !lic.granted && ui.button("Apply license").clicked() {
-                    match self.server.apply_one(Intent {
-                        actor: self.actor,
-                        verb: Verb::ApplyLicense,
-                    }) {
-                        Ok(_) => self.say("license granted".to_string()),
-                        Err(e) => self.say(format!("license refused: {e}")),
+                    // Clan (design/05 M4b): dues + initiation, lifetime enemies.
+                    let in_clan = self.server.world.clans().is_member(1, self.actor);
+                    ui.label(if in_clan {
+                        "clan: member of 1"
+                    } else {
+                        "clan: none"
+                    });
+                    if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::JoinClan { clan: 1 },
+                        }) {
+                            Ok(_) => self.say("joined clan 1".to_string()),
+                            Err(e) => self.say(format!("join refused: {e}")),
+                        }
+                    }
+                    ui.label(format!("rations {rations} tick {}", self.server.world.tick));
+                    let tick = self.server.world.tick;
+                    ui.label(format!(
+                        "Day {} {:02}:{:02}",
+                        tick / 1440 + 1,
+                        (tick / 60) % 24,
+                        tick % 60
+                    ));
+                    if food < 30 || mood < 30 {
+                        ui.label(
+                            egui::RichText::new("! needs low — Eat / Watch soon")
+                                .color(egui::Color32::RED),
+                        );
                     }
                 }
-                // Clan (design/05 M4b): dues + initiation, lifetime enemies.
-                let in_clan = self.server.world.clans().is_member(1, self.actor);
-                ui.label(if in_clan {
-                    "clan: member of 1"
-                } else {
-                    "clan: none"
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Objective: {}",
+                        self.server.world.advise(self.actor)
+                    ))
+                    .strong(),
+                );
+                let cop = Timetable::cop_day();
+                ui.label(format!(
+                    "cop 10:00 -> {:?}",
+                    cop_duty(&cop, 10, Standing::Clean)
+                ));
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        let msg = persist_save(&self.server);
+                        self.say(msg);
+                    }
+                    if ui.button("Load").clicked() {
+                        let msg = persist_load(&mut self.server);
+                        self.say(msg);
+                    }
                 });
-                if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
-                    match self.server.apply_one(Intent {
-                        actor: self.actor,
-                        verb: Verb::JoinClan { clan: 1 },
-                    }) {
-                        Ok(_) => self.say("joined clan 1".to_string()),
-                        Err(e) => self.say(format!("join refused: {e}")),
-                    }
-                }
-                ui.label(format!("rations {rations} tick {}", self.server.world.tick));
-                let tick = self.server.world.tick;
-                ui.label(format!(
-                    "Day {} {:02}:{:02}",
-                    tick / 1440 + 1,
-                    (tick / 60) % 24,
-                    tick % 60
-                ));
-                if food < 30 || mood < 30 {
-                    ui.label(
-                        egui::RichText::new("! needs low — Eat / Watch soon")
-                            .color(egui::Color32::RED),
-                    );
-                }
-            }
-            ui.label(
-                egui::RichText::new(format!(
-                    "Objective: {}",
-                    self.server.world.advise(self.actor)
-                ))
-                .strong(),
-            );
-            let cop = Timetable::cop_day();
-            ui.label(format!(
-                "cop 10:00 -> {:?}",
-                cop_duty(&cop, 10, Standing::Clean)
-            ));
-            ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
-                    let msg = persist_save(&self.server);
-                    self.say(msg);
-                }
-                if ui.button("Load").clicked() {
-                    let msg = persist_load(&mut self.server);
-                    self.say(msg);
-                }
             });
-        });
 
         if ui.ctx().content_rect().width() >= 1120.0 {
             egui::Panel::right("inspector")
-                .default_size(300.0)
+                .exact_size(300.0)
+                .resizable(false)
                 .show(ui, |ui| self.inspector(ui));
         }
 
@@ -1731,7 +1735,8 @@ impl Shell {
                 }
                 let (ax, ay) = (here.x, here.y);
                 let shop_tiles = self.server.world.shop_positions();
-                let ts = 22.0;
+                let side = ui.available_width().clamp(320.0, 680.0);
+                let ts = (side / 16.0).floor();
                 let map_size = egui::vec2(16.0 * ts, 16.0 * ts);
                 let (resp, painter) =
                     ui.allocate_painter(map_size, egui::Sense::click());
@@ -3187,22 +3192,39 @@ mod tests {
             /// Click the bottom-right-most button with this label (for grids
             /// of identical labels like map cells).
             fn click_last(&mut self, label: &str) {
-                let at = self.button_center_last(label);
-                let mods = egui::Modifiers::default();
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: mods,
-                }]);
-                let at = self.button_center_last(label);
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: mods,
-                }]);
-                self.pass_with(vec![]);
+                // Grids live at the top of their view; reset scroll before
+                // resolving the bottom-right-most cell.
+                for _ in 0..24 {
+                    let at = self.button_center_last(label);
+                    if at.y >= 60.0 && at.y < 610.0 {
+                        let mods = egui::Modifiers::default();
+                        self.pass_with(vec![egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: mods,
+                        }]);
+                        let at = self.button_center_last(label);
+                        self.pass_with(vec![egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: mods,
+                        }]);
+                        self.pass_with(vec![]);
+                        return;
+                    }
+                    self.pass_with(vec![
+                        egui::Event::PointerMoved(egui::pos2(700.0, 420.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Line,
+                            delta: egui::vec2(0.0, 20.0),
+                            phase: egui::TouchPhase::Move,
+                            modifiers: egui::Modifiers::default(),
+                        },
+                    ]);
+                }
+                panic!("could not scroll cell {label:?} into view");
             }
 
             /// Click the first button (reading order) whose label starts with
