@@ -23,6 +23,8 @@ Playable sim + headless client + GUI shell (242 test executions green).
   sim/server/bridge/PDS and how the architecture supports gameplay
 - [docs/V0.5-V0.6-PLAN.md](docs/V0.5-V0.6-PLAN.md) — contracts, then program
   identity; PDS bridge remains v0.7+
+- [docs/VISUAL-OVERHAUL.md](docs/VISUAL-OVERHAUL.md) — visual language,
+  interaction model, wireframes, and the phased UI plan
 - [design/](design/) — full design docs (00–12): vision, world, deck combat,
   network, AI/crime, characters, architecture, roadmap, and the
   2006 + 2024 synthesis
