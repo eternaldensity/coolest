@@ -3,8 +3,9 @@
 > **Status 2026-11-01: implemented.** Body/Mind, health/revival, items/
 > inventory, street combat, cop arrest, and the real-mindpower Veil all
 > landed; `./gate.sh` green (228 test executions) and `./nightly.sh`
-> green. The sections below are the plan as written; see `HANDOFF.md` for
-> the current engineering state and the v0.5 shortlist.
+> green. The sections below are the v0.4 plan as written; the current
+> roadmap is `docs/V0.5-V0.6-PLAN.md`, and `HANDOFF.md` has the
+> engineering state.
 >
 > Original baseline: `main` @ `ba6c0db`, `bash ./gate.sh` green
 > (exit 0), 201 test executions (176 unique `#[test]` fns; `gui` compiles

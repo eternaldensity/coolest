@@ -3,8 +3,9 @@
 > Refreshed 2026-11-01 for v0.4. Branch `main`, head after the v0.4
 > commits, 228 test executions (200 unique `#[test]` fns), `./gate.sh`
 > and `./nightly.sh` both green. Read `README.md` and `PLAYER_GUIDE.md`
-> first for the game itself; `docs/NEXT-STATE.md` is the v0.4 plan and
-> the v0.5 shortlist; this file is the engineering state and the traps.
+> first for the game itself; `docs/NEXT-STATE.md` is the v0.4 plan,
+> `docs/V0.5-V0.6-PLAN.md` is the current roadmap, and this file is the
+> engineering state and the traps.
 
 ## 1. What this is
 
@@ -164,27 +165,28 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 8. TODO — prioritised
 
-v0.4 (Body/Mind, items, street combat, M5 Veil) is done; see section 7 and
-`docs/NEXT-STATE.md`. The next state is **v0.5 Programs with identity**.
+v0.4 (Body/Mind, items, street combat, M5 Veil) is done; see section 7.
+The current roadmap is `docs/V0.5-V0.6-PLAN.md`.
 
-### P1 — Program identity (design/03, the M2 gate)
+### v0.5 — Contracts & Consequence (local-first)
+Replace infinite `Work` with a daily contract board: offers, `Accept`,
+one active contract, deadlines, employer escrow, delivery/hack/courier
+completion, abandon/expiry, and employer reputation. No ATProto. See
+`docs/JOB-BOARD-ACCEPT.md` for the design rationale.
+
+### v0.6 — Programs with Identity (M2.5)
 `Program` still has no kind: `DeckLoad` installs the same generic killer.
-Add Killer/Shield/Scanner/Cracker/Connector/Cloner/Editor kinds, a loadout
-choice, type synergy (matched producers fire harder), scan/crack/overwrite/
-takeover/clone verbs, and host zones/files/accounts. This is what makes
-"choice matters" testable.
+Add Killer/Shield/Scanner/Cracker/Connector/Cloner/Editor kinds, loadout
+choice, scan/crack/patch/overwrite/clone verbs, and bounded type synergy.
+Host zones/files/accounts are the leading v0.7 candidate; PDS bridge is
+also v0.7+ (requirements ready in `docs/PDS-BRIDGE-REQUIREMENTS.md`).
 
-### P2 — Content and UX
-- Finish M1/M2 content: 8 jobs, more item/loot lines, a short tutorial/
-  objective arc (the survival loop is still the whole opening).
-- GUI polish: Deck Net mini-map, Ctrl-K palette, `>`/`<` stairs, diagonal
-  movement (`sim::Dir` is only N/S/E/W today).
-- Mail follow-ups: `Mailer::snoop` still has no verb; attachments are a
-  boolean, not a saved file; Mailer+ still has no loot source.
-
-### P3 — Smaller / deferred
-- Unpaid-fine deadline before the warrant; clan mutual-aid bonuses.
-- Body-part targeting, elemental damage, full skill tree/XP (design/06-07).
+### Later
+- PDS Bridge Mode A: operated PDS + polling; then firehose/OAuth.
+- Hosts as dungeons: zones, files, drives, accounts, remote admin.
+- Content/UX: 8 jobs, tutorial/story, Deck Net mini-map, Ctrl-K, stairs,
+  diagonals.
+- Body-part combat, full skill tree/XP, clan mutual-aid bonuses.
 - `client-web` is a scripted demo, not a network client. `server::net` and
   `server::runtime` (tokio) exist and are tested but nothing in the GUI
   uses them — that is the multiplayer seam (design/08).
