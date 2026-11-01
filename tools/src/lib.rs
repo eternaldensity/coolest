@@ -394,13 +394,18 @@ pub fn fuzz_world(seed: u64) -> World {
         x: 8,
         y: 8,
     });
+    // Exercise the item verbs on successful paths as well as refusals.
+    w.add_item(EntityId(1), "knife", 1).ok();
+    w.add_item(EntityId(1), "medkit", 2).ok();
+    w.add_item(EntityId(1), "snack", 1).ok();
+    w.drop_item(EntityId(1), "snack").ok();
     w
 }
 
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(157) {
+    match rng.below(169) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -479,6 +484,18 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
             to: EntityId(1 + rng.below(11) as u64),
         },
         156 => Verb::Revive,
+        157..=159 => Verb::Pickup {
+            item: ["knife", "medkit", "snack"][rng.below(3) as usize].to_string(),
+        },
+        160..=162 => Verb::Drop {
+            item: ["knife", "medkit", "snack"][rng.below(3) as usize].to_string(),
+        },
+        163..=165 => Verb::Equip {
+            item: ["knife", "jacket", "pistol"][rng.below(3) as usize].to_string(),
+        },
+        166..=168 => Verb::Use {
+            item: ["medkit", "snack"][rng.below(2) as usize].to_string(),
+        },
         _ => Verb::OpenMail { index: 0 },
     }
 }

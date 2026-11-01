@@ -182,6 +182,9 @@ impl Shell {
         if let Ok(cards) = sim::parse_cards(include_str!("../../data/cards.yaml")) {
             server.world.set_cards(&cards);
         }
+        if let Ok(items) = sim::parse_items(include_str!("../../data/items.yaml")) {
+            server.world.set_items(&items);
+        }
         let mut talks = BTreeMap::new();
         for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
         {
@@ -207,6 +210,9 @@ impl Shell {
         shop.add_line("ration", 100, 5, 2, 5, 200);
         shop.add_line("meds", 400, 2, 1, 3, 900);
         shop.add_line("firewall", 1500, 1, 1, 1, 1200);
+        shop.add_line("knife", 300, 2, 1, 3, 200);
+        shop.add_line("jacket", 500, 2, 1, 3, 300);
+        shop.add_line("medkit", 250, 3, 1, 4, 150);
         shop.set_hours(8, 20);
         server.world.place_shop(10, 8, shop);
         // Night store three doors down: always open, steeper prices for
@@ -215,6 +221,7 @@ impl Shell {
         let mut night = sim::Shop::new(night_till);
         night.add_line("ration", 150, 3, 2, 3, 300);
         night.add_line("meds", 600, 2, 1, 2, 1200);
+        night.add_line("knife", 450, 1, 1, 2, 300);
         night.set_hours(0, 24);
         server.world.place_shop(13, 8, night);
         // Rented room above the noodle shop (design/01): sleep here.
@@ -287,13 +294,25 @@ impl Shell {
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · farm loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep · revive"
+                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · farm loop/data/algo · watch · buy <item> · pickup/drop/equip/use <item> · talk · deposit/withdraw <c> · sleep · revive"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
             "sleep" => self.do_verb(Verb::Sleep),
             "revive" => self.do_verb(Verb::Revive),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
+            _ if cmd.starts_with("pickup ") => self.do_verb(Verb::Pickup {
+                item: cmd[7..].trim().to_string(),
+            }),
+            _ if cmd.starts_with("drop ") => self.do_verb(Verb::Drop {
+                item: cmd[5..].trim().to_string(),
+            }),
+            _ if cmd.starts_with("equip ") => self.do_verb(Verb::Equip {
+                item: cmd[6..].trim().to_string(),
+            }),
+            _ if cmd.starts_with("use ") => self.do_verb(Verb::Use {
+                item: cmd[4..].trim().to_string(),
+            }),
             _ if cmd.starts_with("deposit ") => match cmd[8..].trim().parse::<i64>() {
                 Ok(amt) => self.do_verb(Verb::Deposit(amt)),
                 Err(_) => self.say(format!("unknown: {cmd}")),
@@ -698,6 +717,63 @@ impl Shell {
                 });
                 ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
+                // Pack (design/07): carried stacks, worn gear, and items on
+                // this tile. Buttons stay in one wrapped row to avoid egui's
+                // silent clip/click overflow.
+                let inv = self
+                    .server
+                    .world
+                    .inventory(self.actor)
+                    .cloned()
+                    .unwrap_or_default();
+                let items = self.server.world.item_table().clone();
+                let cap = self
+                    .server
+                    .world
+                    .body_of(self.actor)
+                    .map(|b| b.carry_grams())
+                    .unwrap_or(0);
+                let worn = inv.worn();
+                let carried = inv.carried();
+                if !carried.is_empty() || !worn.is_empty() {
+                    let weight = inv.total_weight(&items);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!("Pack {weight}/{cap}g"));
+                        for (slot, id) in &worn {
+                            let name = items.get(id).map(|d| d.name.as_str()).unwrap_or(id);
+                            ui.label(format!("{slot:?}: {name}"));
+                        }
+                        for (id, qty) in &carried {
+                            let def = items.get(id);
+                            let name = def.map(|d| d.name.as_str()).unwrap_or(id);
+                            ui.label(format!("{name} x{qty}"));
+                            if let Some(def) = def {
+                                if def.is_gear() && ui.button(format!("Equip {name}")).clicked() {
+                                    self.do_verb(Verb::Equip { item: id.clone() });
+                                }
+                                if def.effect.is_some() && ui.button(format!("Use {name}")).clicked()
+                                {
+                                    self.do_verb(Verb::Use { item: id.clone() });
+                                }
+                            }
+                            if ui.button(format!("Drop {name}")).clicked() {
+                                self.do_verb(Verb::Drop { item: id.clone() });
+                            }
+                        }
+                    });
+                }
+                let floor = self.server.world.floor_items_at(here);
+                if !floor.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("On floor:");
+                        for (id, qty) in floor {
+                            let name = items.get(&id).map(|d| d.name.as_str()).unwrap_or(&id);
+                            if ui.button(format!("Pick up {name} x{qty}")).clicked() {
+                                self.do_verb(Verb::Pickup { item: id.clone() });
+                            }
+                        }
+                    });
+                }
                 // Mail (design/03-04): read your inbox, craft a Mailer+,
                 // and trojan a nearby NPC. Trojans land when they open it.
                 let inbox = self.server.world.inbox(self.actor).len();
@@ -2311,6 +2387,38 @@ mod tests {
             );
             // Farm + two watches are all logged acts.
             assert_eq!(h.shell.server.log.len(), 3);
+        }
+
+        #[test]
+        fn inventory_equips_uses_drops_and_picks_up() {
+            let mut h = Harness::new();
+            h.shell
+                .server
+                .world
+                .add_item(EntityId(1), "knife", 1)
+                .unwrap();
+            h.pass_with(vec![]);
+            h.click("Equip Knife");
+            assert!(h.has_text("Weapon: Knife"), "text: {:?}", h.labels());
+            h.shell
+                .server
+                .world
+                .add_item(EntityId(1), "medkit", 1)
+                .unwrap();
+            h.shell.server.world.damage(EntityId(1), 10);
+            h.pass_with(vec![]);
+            h.click("Use Medkit");
+            assert!(h.has_text("HP 20/20"), "text: {:?}", h.labels());
+            h.shell
+                .server
+                .world
+                .add_item(EntityId(1), "snack", 1)
+                .unwrap();
+            h.pass_with(vec![]);
+            h.click("Drop Snack");
+            assert!(h.has_text("Pick up Snack x1"), "text: {:?}", h.labels());
+            h.click("Pick up Snack x1");
+            assert!(!h.has_text("On floor:"), "text: {:?}", h.labels());
         }
 
         #[test]

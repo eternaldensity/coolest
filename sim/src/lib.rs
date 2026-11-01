@@ -6,6 +6,7 @@ pub mod data;
 pub mod deck;
 pub mod error;
 pub mod ids;
+pub mod items;
 pub mod ledger;
 pub mod mailer;
 pub mod net;
@@ -27,12 +28,13 @@ pub use crime::{
     WARRANT_AT,
 };
 pub use data::{
-    parse_cards, parse_dialogues, parse_districts, parse_jobs, parse_vulns, CardDef, CardTable,
-    DistrictDef, JobDef, VulnDef,
+    parse_cards, parse_dialogues, parse_districts, parse_items, parse_jobs, parse_vulns, CardDef,
+    CardTable, DistrictDef, JobDef, VulnDef,
 };
 pub use deck::{AttackOutcome, CellPos, Fx, Host, HostArch, Mod, Res};
 pub use error::SimError;
 pub use ids::{EntityId, HostId, TileId};
+pub use items::{Inventory, ItemDef, ItemEffect, ItemTable, Slot};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
 pub use mailer::{Mailer, ZombieNet};
 pub use net::{LinkKind, NetGraph, NetKind, Route};

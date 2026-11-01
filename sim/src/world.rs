@@ -4,6 +4,7 @@ use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record
 use crate::deck::{CellPos, Host};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use crate::items::{Inventory, ItemTable};
 use crate::ledger::{Ledger, Mail, Mailbox};
 use crate::net::NetGraph;
 use crate::pos::Pos;
@@ -142,6 +143,22 @@ pub enum Verb {
     /// Wake at the clinic after a lethal blow (design/07 v0.4: revive, not
     /// permadeath). Restores part of max HP and returns you home.
     Revive,
+    /// Pick one item up from the actor's tile (design/07).
+    Pickup {
+        item: String,
+    },
+    /// Drop one carried item onto the actor's tile.
+    Drop {
+        item: String,
+    },
+    /// Wear/wield a carried item, swapping out the previous slot occupant.
+    Equip {
+        item: String,
+    },
+    /// Consume a carried consumable (food/mood/heal).
+    Use {
+        item: String,
+    },
     /// Build a persistent ability into the program at a cell (design/03
     /// `Program.mods`), paying the card's resource cost.
     DeckMod {
@@ -206,6 +223,14 @@ struct PlacedShop {
     shop: Shop,
 }
 
+/// One dropped item stack on a street tile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FloorItem {
+    pub pos: Pos,
+    pub def: String,
+    pub qty: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Npc {
     pos: Pos,
@@ -235,6 +260,9 @@ struct Being {
     /// Design/06 mental stats. Defaults for old saves.
     #[serde(default)]
     mind: Mind,
+    /// Carried/worn items (design/07). Default empty for old saves.
+    #[serde(default)]
+    inventory: Inventory,
 }
 
 /// M1 jobs: (payout_cents, mood_cost, food_cost), tiered ladder in
@@ -342,6 +370,14 @@ pub struct World {
     /// old saves; `normalize` fills it from the spawn tables on load.
     #[serde(default)]
     health: BTreeMap<u64, Health>,
+    /// Item definitions (design/07). Code defaults mirror data/items.yaml;
+    /// `set_items` overrides from the file at runtime.
+    #[serde(default = "crate::items::default_items")]
+    items: ItemTable,
+    /// Dropped item stacks on street tiles.
+    #[serde(default)]
+    floor_items: Vec<FloorItem>,
+
     /// Conduct record (design/05 M4): evidence-weighted crimes. Alignment
     /// and standing are pure functions of this, so editing it changes who
     /// the city thinks you are. Default empty for old saves.
@@ -435,6 +471,8 @@ impl World {
             zombies: crate::mailer::ZombieNet::new(),
             spam_day: 0,
             health: BTreeMap::new(),
+            items: crate::items::default_items(),
+            floor_items: Vec::new(),
             record: Record::new(),
             clans: Clans::new(),
             license: License::new(),
@@ -582,6 +620,7 @@ impl World {
                 last_rent_day: self.tick / DAY_TICKS,
                 body: Body::default(),
                 mind: Mind::default(),
+                inventory: Inventory::new(),
             },
         );
         self.health.insert(id.0, Health::new(BASE_HP));
@@ -1069,6 +1108,169 @@ impl World {
 
     pub fn mind_of(&self, id: EntityId) -> Option<Mind> {
         self.beings.get(&id.0).map(|b| b.mind)
+    }
+
+    // ---- Items / inventory (design/07) ----
+
+    pub fn item_table(&self) -> &ItemTable {
+        &self.items
+    }
+
+    /// Override the item table from data/items.yaml (validated by parse_items).
+    pub fn set_items(&mut self, table: &ItemTable) {
+        if !table.is_empty() {
+            self.items = table.clone();
+        }
+    }
+
+    pub fn inventory(&self, id: EntityId) -> Option<&Inventory> {
+        self.beings.get(&id.0).map(|b| &b.inventory)
+    }
+
+    pub fn carry_weight(&self, id: EntityId) -> u32 {
+        self.inventory(id)
+            .map(|inv| inv.total_weight(&self.items))
+            .unwrap_or(0)
+    }
+
+    /// Add a carried stack, respecting the STR carry cap.
+    pub fn add_item(&mut self, id: EntityId, item: &str, qty: u32) -> Result<(), SimError> {
+        let def = self
+            .items
+            .get(item)
+            .ok_or(SimError::new("no_item", "known item", "unknown"))?;
+        let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
+        let cap = b.body.carry_grams();
+        if !b.inventory.can_add(&self.items, &def.id, qty, cap) {
+            return Err(SimError::new("overloaded", "carry capacity", "too heavy"));
+        }
+        b.inventory.add(&self.items, &def.id, qty)
+    }
+
+    pub fn remove_item(&mut self, id: EntityId, item: &str, qty: u32) -> Result<(), SimError> {
+        let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
+        b.inventory.remove(item, qty)
+    }
+
+    pub fn equip_item(&mut self, id: EntityId, item: &str) -> Result<(), SimError> {
+        let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
+        b.inventory.equip(&self.items, item)
+    }
+
+    pub fn unequip_item(&mut self, id: EntityId, slot: crate::items::Slot) -> Result<(), SimError> {
+        let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
+        b.inventory.unequip(slot)
+    }
+
+    /// Consume one item and apply its effect. Returns the effect applied.
+    pub fn use_item(
+        &mut self,
+        id: EntityId,
+        item: &str,
+    ) -> Result<crate::items::ItemEffect, SimError> {
+        let effect = {
+            let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+                "unknown_actor",
+                "spawned entity",
+                "missing",
+            ))?;
+            b.inventory.consume(&self.items, item)?
+        };
+        let b = self.beings.get_mut(&id.0).unwrap();
+        match effect {
+            crate::items::ItemEffect::Food(n) => b.food = (b.food + n).min(100),
+            crate::items::ItemEffect::Mood(n) => b.mood = (b.mood + n).min(100),
+            crate::items::ItemEffect::Heal(n) => {
+                if let Some(h) = self.health.get_mut(&id.0) {
+                    h.heal(n);
+                }
+            }
+        }
+        Ok(effect)
+    }
+
+    pub fn drop_item(&mut self, id: EntityId, item: &str) -> Result<(), SimError> {
+        let pos = {
+            let b = self.beings.get_mut(&id.0).ok_or(SimError::new(
+                "unknown_actor",
+                "spawned entity",
+                "missing",
+            ))?;
+            b.inventory.remove(item, 1)?;
+            b.pos
+        };
+        self.floor_items.push(FloorItem {
+            pos,
+            def: item.to_string(),
+            qty: 1,
+        });
+        Ok(())
+    }
+
+    pub fn pickup_item(&mut self, id: EntityId, item: &str) -> Result<(), SimError> {
+        let pos =
+            self.pos_of(id)
+                .ok_or(SimError::new("unknown_actor", "spawned entity", "missing"))?;
+        let idx = self
+            .floor_items
+            .iter()
+            .position(|f| f.pos == pos && f.def == item && f.qty > 0)
+            .ok_or(SimError::new("no_ground_item", "item on this tile", "none"))?;
+        let def = self
+            .items
+            .get(item)
+            .ok_or(SimError::new("no_item", "known item", "unknown"))?
+            .id
+            .clone();
+        {
+            let b = self.beings.get_mut(&id.0).unwrap();
+            let cap = b.body.carry_grams();
+            if !b.inventory.can_add(&self.items, &def, 1, cap) {
+                return Err(SimError::new("overloaded", "carry capacity", "too heavy"));
+            }
+            b.inventory.add(&self.items, &def, 1)?;
+        }
+        self.floor_items[idx].qty -= 1;
+        if self.floor_items[idx].qty == 0 {
+            self.floor_items.remove(idx);
+        }
+        Ok(())
+    }
+
+    pub fn floor_items_at(&self, pos: Pos) -> Vec<(String, u32)> {
+        self.floor_items
+            .iter()
+            .filter(|f| f.pos == pos)
+            .map(|f| (f.def.clone(), f.qty))
+            .collect()
+    }
+
+    pub fn equipped_dv(&self, id: EntityId) -> u8 {
+        self.inventory(id)
+            .map(|inv| inv.worn_dv(&self.items))
+            .unwrap_or(0)
+    }
+
+    pub fn equipped_weapon(&self, id: EntityId) -> Option<crate::items::ItemDef> {
+        self.inventory(id)
+            .and_then(|inv| inv.weapon(&self.items))
+            .cloned()
     }
 
     /// Apply damage to any being/NPC. Death is a state (`hp == 0`); callers
@@ -1710,6 +1912,56 @@ impl World {
                 }
                 kind = "revived";
             }
+            Verb::Pickup { ref item } => {
+                let pos = b.pos;
+                let idx = self
+                    .floor_items
+                    .iter()
+                    .position(|f| f.pos == pos && f.def == *item && f.qty > 0)
+                    .ok_or(SimError::new("no_ground_item", "item on this tile", "none"))?;
+                let def = self
+                    .items
+                    .get(item)
+                    .ok_or(SimError::new("no_item", "known item", "unknown"))?
+                    .id
+                    .clone();
+                let cap = b.body.carry_grams();
+                if !b.inventory.can_add(&self.items, &def, 1, cap) {
+                    return Err(SimError::new("overloaded", "carry capacity", "too heavy"));
+                }
+                b.inventory.add(&self.items, &def, 1)?;
+                self.floor_items[idx].qty -= 1;
+                if self.floor_items[idx].qty == 0 {
+                    self.floor_items.remove(idx);
+                }
+                kind = "picked_up";
+            }
+            Verb::Drop { ref item } => {
+                b.inventory.remove(item, 1)?;
+                self.floor_items.push(FloorItem {
+                    pos: b.pos,
+                    def: item.clone(),
+                    qty: 1,
+                });
+                kind = "dropped";
+            }
+            Verb::Equip { ref item } => {
+                b.inventory.equip(&self.items, item)?;
+                kind = "equipped";
+            }
+            Verb::Use { ref item } => {
+                let effect = b.inventory.consume(&self.items, item)?;
+                match effect {
+                    crate::items::ItemEffect::Food(n) => b.food = (b.food + n).min(100),
+                    crate::items::ItemEffect::Mood(n) => b.mood = (b.mood + n).min(100),
+                    crate::items::ItemEffect::Heal(n) => {
+                        if let Some(h) = self.health.get_mut(&intent.actor.0) {
+                            h.heal(n);
+                        }
+                    }
+                }
+                kind = "used";
+            }
             Verb::PayFine => {
                 // Settle with the city: cost scales with evidence mass.
                 let mass = self.record.mass();
@@ -2003,6 +2255,9 @@ impl World {
                         "installed",
                     ));
                 }
+                // A stocked item that has a definition is carried gear;
+                // ration/meds/firewall keep their special handling below.
+                let inv_def = self.items.get(item).cloned();
                 // Counters serve adjacent tiles: no pixel-exact standing.
                 // Nearest shop within Chebyshev distance 1 (shops are sparse).
                 let shop = self
@@ -2041,8 +2296,19 @@ impl World {
                 if bank < price - cash {
                     return Err(SimError::new("overdraw", "funds", "short"));
                 }
+                // Capacity is checked before charging so a heavy purchase
+                // never takes money and then fails.
+                if let Some(def) = &inv_def {
+                    let cap = b.body.carry_grams();
+                    if !b.inventory.can_add(&self.items, &def.id, 1, cap) {
+                        return Err(SimError::new("overloaded", "carry capacity", "too heavy"));
+                    }
+                }
                 shop.buy_with_cash(&mut self.ledger, acct, cash, item)?;
                 b.money -= cash;
+                if let Some(def) = &inv_def {
+                    b.inventory.add(&self.items, &def.id, 1)?;
+                }
                 // Restock from sales: the wholesale supplier account fills
                 // lines the till can cover, so shelves refill while you earn.
                 let supplier = match self.supplier {
@@ -2754,6 +3020,87 @@ mod tests {
         let supplier = w.supplier.expect("supplier account opened");
         assert_eq!(w.ledger.balance(supplier).unwrap(), 50);
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn items_buy_equip_use_drop_pickup() {
+        use crate::shop::Shop;
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        let acct = w.open_account(EntityId(1), crate::ids::HostId(2)).unwrap();
+        w.ledger.mint(acct, 1000).unwrap();
+        let mut shop = Shop::new(w.ledger.open(EntityId(9), crate::ids::HostId(9)));
+        shop.add_line("knife", 300, 2, 1, 5, 50);
+        shop.add_line("medkit", 100, 2, 1, 5, 50);
+        w.place_shop(8, 8, shop);
+        // Buy gear: it lands in the inventory, not the ration pack.
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("knife".into()),
+        })
+        .unwrap();
+        assert_eq!(w.inventory(EntityId(1)).unwrap().qty("knife"), 1);
+        assert_eq!(w.carry_weight(EntityId(1)), 300);
+        // Equip: the weapon leaves the stack and reports its damage.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Equip {
+                item: "knife".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.inventory(EntityId(1)).unwrap().qty("knife"), 0);
+        assert_eq!(w.equipped_weapon(EntityId(1)).unwrap().damage, 4);
+        // Buy and use a medkit: heals through the same HP pool.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("medkit".into()),
+        })
+        .unwrap();
+        w.damage(EntityId(1), 10);
+        assert_eq!(w.hp(EntityId(1)), 10);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Use {
+                item: "medkit".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.hp(EntityId(1)), 20);
+        // Drop then pick up the same consumable from the tile.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Buy("medkit".into()),
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Drop {
+                item: "medkit".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.floor_items_at(pos(8, 8)), vec![("medkit".into(), 1)]);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Pickup {
+                item: "medkit".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.inventory(EntityId(1)).unwrap().qty("medkit"), 1);
+        assert!(w.floor_items_at(pos(8, 8)).is_empty());
+        // Over-capacity is refused before charging.
+        let before = w.ledger.live_sum();
+        w.tick = w.next_at(EntityId(1));
+        assert!(w.add_item(EntityId(1), "vest", 1).is_err());
+        assert_eq!(w.ledger.live_sum(), before);
     }
 
     #[test]

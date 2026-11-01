@@ -1,0 +1,56 @@
+# v0.4 item table (design/07). Definitions are validated by
+# sim::parse_items and cross-checked against the code defaults.
+# slot: weapon | armor | consumable | tool
+# effect: food:N | mood:N | heal:N (consumables only)
+- id: knife
+  name: Knife
+  glyph: "/"
+  weight_g: 300
+  hands_req: 1
+  slot: weapon
+  damage: 4
+- id: pipe
+  name: Pipe
+  glyph: "|"
+  weight_g: 600
+  hands_req: 1
+  slot: weapon
+  damage: 3
+- id: pistol
+  name: Pistol
+  glyph: ")"
+  weight_g: 900
+  hands_req: 1
+  slot: weapon
+  damage: 6
+  ranged: true
+- id: jacket
+  name: Jacket
+  glyph: "["
+  weight_g: 800
+  slot: armor
+  dv: 2
+- id: vest
+  name: Armored vest
+  glyph: "["
+  weight_g: 2500
+  slot: armor
+  dv: 4
+- id: medkit
+  name: Medkit
+  glyph: "+"
+  weight_g: 200
+  slot: consumable
+  effect: "heal:10"
+- id: snack
+  name: Snack
+  glyph: "%"
+  weight_g: 100
+  slot: consumable
+  effect: "food:20"
+- id: cable
+  name: Cable
+  glyph: "~"
+  weight_g: 100
+  hands_req: 1
+  slot: tool

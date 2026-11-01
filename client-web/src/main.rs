@@ -27,11 +27,13 @@ fn main() {
     let jobs = sim::parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
     let vulns = sim::parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
     let cards = sim::parse_cards(include_str!("../../data/cards.yaml")).unwrap();
+    let items = sim::parse_items(include_str!("../../data/items.yaml")).unwrap();
 
     // M0.5 survival.
     let mut w = World::new(42);
     w.set_jobs(&jobs);
     w.set_cards(&cards);
+    w.set_items(&items);
     w.spawn(EntityId(1), pos(8, 8), 10);
     let act = |w: &mut World, v: Verb| {
         // Jump the clock like the server scheduler would.
@@ -54,6 +56,19 @@ fn main() {
     println!(
         "survival: {} rations={rations}",
         status_line(food, mood, money)
+    );
+
+    // M6a items: buy/equip/use through the same public API clients use.
+    w.add_item(EntityId(1), "knife", 1).unwrap();
+    w.equip_item(EntityId(1), "knife").unwrap();
+    w.add_item(EntityId(1), "medkit", 1).unwrap();
+    w.damage(EntityId(1), 6);
+    let healed = w.use_item(EntityId(1), "medkit").unwrap();
+    println!(
+        "items: weapon={:?} hp={} healed={healed:?} weight={}g",
+        w.equipped_weapon(EntityId(1)).map(|d| d.name),
+        w.hp(EntityId(1)),
+        w.carry_weight(EntityId(1))
     );
 
     // Timetable + cop duty.

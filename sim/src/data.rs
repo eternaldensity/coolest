@@ -1,4 +1,5 @@
 use crate::error::SimError;
+use crate::items::{ItemDef, ItemEffect, ItemTable, Slot};
 use serde::{Deserialize, Serialize};
 
 /// Data-file loader (design/11 rule 4): content lives in data/*.yaml,
@@ -230,6 +231,66 @@ pub fn parse_cards(s: &str) -> Result<CardTable, SimError> {
     Ok(t)
 }
 
+#[derive(Debug, Deserialize)]
+struct ItemRow {
+    id: String,
+    name: String,
+    glyph: String,
+    weight_g: u32,
+    #[serde(default)]
+    hands_req: u8,
+    slot: String,
+    #[serde(default)]
+    dv: u8,
+    #[serde(default)]
+    damage: u8,
+    #[serde(default)]
+    ranged: bool,
+    #[serde(default)]
+    effect: Option<String>,
+}
+
+pub fn parse_items(s: &str) -> Result<ItemTable, SimError> {
+    let rows: Vec<ItemRow> = serde_yaml::from_str(s)
+        .map_err(|_| SimError::new("data", "items.yaml list", "unparseable"))?;
+    if rows.is_empty() {
+        return Err(SimError::new("data", ">= 1 item", "empty"));
+    }
+    let mut table = ItemTable::new();
+    for r in rows {
+        let slot =
+            Slot::from_name(&r.slot).ok_or(SimError::new("data", "known item slot", "unknown"))?;
+        let effect = match r.effect.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(text) => Some(ItemEffect::parse(text).ok_or(SimError::new(
+                "data",
+                "food|mood|heal effect",
+                "unknown",
+            ))?),
+            None => None,
+        };
+        if effect.is_some() && slot != Slot::Consumable {
+            return Err(SimError::new(
+                "data",
+                "effect only on consumables",
+                "non-consumable",
+            ));
+        }
+        table.insert(ItemDef {
+            id: r.id,
+            name: r.name,
+            glyph: r.glyph,
+            weight_g: r.weight_g,
+            hands_req: r.hands_req,
+            slot,
+            dv: r.dv,
+            damage: r.damage,
+            ranged: r.ranged,
+            effect,
+        })?;
+    }
+    Ok(table)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +389,19 @@ mod tests {
     }
 
     #[test]
+    fn items_file_matches_code_defaults() {
+        let file = parse_items(include_str!("../../data/items.yaml")).unwrap();
+        assert_eq!(file, crate::items::default_items());
+        assert!(file.get("knife").unwrap().damage > 0);
+        assert!(file.get("jacket").unwrap().dv > 0);
+        assert_eq!(
+            file.get("medkit").unwrap().effect,
+            Some(crate::items::ItemEffect::Heal(10))
+        );
+        assert!(file.get("pistol").unwrap().ranged);
+    }
+
+    #[test]
     fn dialogues_file_validates() {
         let ds = parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap();
         assert_eq!(ds.len(), 3);
@@ -380,6 +454,22 @@ mod tests {
         assert!(parse_districts("[]").is_err());
         assert!(parse_cards("negative: []\npositive: []\nmanipulation: []\n").is_err());
         assert!(parse_jobs("not: [valid").is_err());
+        // Items: unknown slot/effect, zero weight, and non-consumable
+        // effects are content bugs.
+        assert!(
+            parse_items("- id: x\n  name: X\n  glyph: x\n  weight_g: 1\n  slot: hat\n").is_err()
+        );
+        assert!(parse_items(
+            "- id: x\n  name: X\n  glyph: x\n  weight_g: 1\n  slot: consumable\n  effect: fly:9\n"
+        )
+        .is_err());
+        assert!(
+            parse_items("- id: x\n  name: X\n  glyph: x\n  weight_g: 0\n  slot: tool\n").is_err()
+        );
+        assert!(parse_items(
+            "- id: x\n  name: X\n  glyph: x\n  weight_g: 1\n  slot: weapon\n  effect: heal:1\n"
+        )
+        .is_err());
         // Duplicate ids are ambiguous on the board.
         assert!(parse_jobs(
             "- id: a\n  payout_cents: 1\n  mood_cost: 1\n  food_cost: 1\n- id: a\n  payout_cents: 2\n  mood_cost: 1\n  food_cost: 1\n"
