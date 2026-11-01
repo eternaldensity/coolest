@@ -29,12 +29,14 @@ fn main() {
     let cards = sim::parse_cards(include_str!("../../data/cards.yaml")).unwrap();
     let items = sim::parse_items(include_str!("../../data/items.yaml")).unwrap();
     let contracts = sim::parse_contracts(include_str!("../../data/contracts.yaml")).unwrap();
+    let kinds = sim::parse_kinds(include_str!("../../data/kinds.yaml")).unwrap();
 
     // M0.5 survival.
     let mut w = World::new(42);
     w.set_jobs(&jobs);
     w.set_cards(&cards);
     w.set_items(&items);
+    w.set_kinds(&kinds);
     w.spawn(EntityId(1), pos(8, 8), 10);
     let act = |w: &mut World, v: Verb| {
         // Jump the clock like the server scheduler would.
@@ -70,6 +72,34 @@ fn main() {
         w.equipped_weapon(EntityId(1)).map(|d| d.name),
         w.hp(EntityId(1)),
         w.carry_weight(EntityId(1))
+    );
+
+    // v0.6 program identity: Scanner reveals, and its data affinity pays +1.
+    let scanner = w.kind_def(sim::ProgramKind::Scanner);
+    w.ensure_host(HostId(1))
+        .load_kind(EntityId(200), EntityId(1), CellPos(0, 0), &scanner)
+        .unwrap();
+    w.tick = w.next_at(EntityId(1));
+    w.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::DeckScan,
+    })
+    .unwrap();
+    w.tick = w.next_at(EntityId(1));
+    w.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::DeckFarmKind {
+            x: 1,
+            y: 0,
+            res: sim::Res::Data,
+            kind: sim::ProgramKind::Scanner,
+        },
+    })
+    .unwrap();
+    println!(
+        "programs: scanned={} data={}",
+        w.host(HostId(1)).unwrap().scanned(EntityId(1)),
+        w.units(EntityId(1), sim::Res::Data)
     );
 
     // Timetable + cop duty.

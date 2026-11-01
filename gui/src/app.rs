@@ -187,6 +187,9 @@ impl Shell {
         if let Ok(contracts) = sim::parse_contracts(include_str!("../../data/contracts.yaml")) {
             server.world.set_contracts(&contracts);
         }
+        if let Ok(kinds) = sim::parse_kinds(include_str!("../../data/kinds.yaml")) {
+            server.world.set_kinds(&kinds);
+        }
         let mut talks = BTreeMap::new();
         for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
         {
@@ -1080,6 +1083,87 @@ impl Shell {
                         }
                     }
                 });
+                // v0.6 loadout: pick a kind with its role stats.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Load kind @selected:");
+                    for kind in [
+                        sim::ProgramKind::Shield,
+                        sim::ProgramKind::Scanner,
+                        sim::ProgramKind::Cracker,
+                        sim::ProgramKind::Connector,
+                        sim::ProgramKind::Cloner,
+                        sim::ProgramKind::Editor,
+                    ] {
+                        let def = self.server.world.kind_def(kind);
+                        if ui
+                            .button(format!("Load {} ({}cpu)", kind.name(), def.cpu_per_seg))
+                            .clicked()
+                        {
+                            let msg = match self.sel {
+                                Some((x, y)) => match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::DeckLoadKind { x, y, kind },
+                                }) {
+                                    Ok((_, events)) => {
+                                        for line in Self::beat_lines(&events) {
+                                            self.say(line);
+                                        }
+                                        format!("loaded {} @({x},{y})", kind.name())
+                                    }
+                                    Err(e) => format!("load {} failed: {e}", kind.name()),
+                                },
+                                None => "click a cell first".to_string(),
+                            };
+                            self.say(msg);
+                        }
+                    }
+                });
+                // Kind actions. They refuse cleanly without the matching program.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Kind actions:");
+                    if ui.button("Scan").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::DeckScan,
+                        }) {
+                            Ok(_) => self.say("host scanned".to_string()),
+                            Err(e) => self.say(format!("scan failed: {e}")),
+                        }
+                    }
+                    if ui.button("Crack lock").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::DeckCrack,
+                        }) {
+                            Ok(_) => self.say("cracker progress".to_string()),
+                            Err(e) => self.say(format!("crack failed: {e}")),
+                        }
+                    }
+                    if ui.button("Clone selected").clicked() {
+                        match self.sel {
+                            Some((x, y)) => match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckClone { x, y },
+                            }) {
+                                Ok(_) => self.say("program cloned".to_string()),
+                                Err(e) => self.say(format!("clone failed: {e}")),
+                            },
+                            None => self.say("click a cell first".to_string()),
+                        }
+                    }
+                    if ui.button("Overwrite selected").clicked() {
+                        match self.sel {
+                            Some((x, y)) => match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckOverwrite { x, y },
+                            }) {
+                                Ok(_) => self.say("segment severed".to_string()),
+                                Err(e) => self.say(format!("overwrite failed: {e}")),
+                            },
+                            None => self.say("click a cell first".to_string()),
+                        }
+                    }
+                });
                 // Producers (design/10): deploy a maker on the selected cell.
                 // It then yields free units every act.
                 ui.horizontal_wrapped(|ui| {
@@ -1093,6 +1177,32 @@ impl Shell {
                                 }) {
                                     Ok(_) => format!("farmed {} @({x},{y})", res.name()),
                                     Err(e) => format!("farm failed: {e}"),
+                                },
+                                None => "click a cell first".to_string(),
+                            };
+                            self.say(msg);
+                        }
+                    }
+                });
+                // Kind-matched producers get +1 yield from affinity.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Synergy farm @selected:");
+                    for (res, kind) in [
+                        (sim::Res::Loop, sim::ProgramKind::Connector),
+                        (sim::Res::Data, sim::ProgramKind::Scanner),
+                        (sim::Res::Algo, sim::ProgramKind::Cracker),
+                    ] {
+                        if ui
+                            .button(format!("Farm {} ({})", res.name(), kind.name()))
+                            .clicked()
+                        {
+                            let msg = match self.sel {
+                                Some((x, y)) => match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::DeckFarmKind { x, y, res, kind },
+                                }) {
+                                    Ok(_) => format!("farmed {} with {}", res.name(), kind.name()),
+                                    Err(e) => format!("synergy farm failed: {e}"),
                                 },
                                 None => "click a cell first".to_string(),
                             };
@@ -1253,11 +1363,23 @@ impl Shell {
                 ui.label(format!("CPU {cpu}/{total}"));
                 if let Some(h) = self.server.world.host(HostId(1)) {
                     ui.label(format!(
-                        "arch {} · vulns {} · breached {}",
+                        "arch {} · vulns {} · breached {} · scanned {}",
                         h.arch().name(),
                         h.vuln_ids().len(),
-                        if h.breached { "yes" } else { "no" }
+                        if h.breached { "yes" } else { "no" },
+                        if h.scanned(self.actor) { "yes" } else { "no" }
                     ));
+                }
+                if let Some((x, y)) = self.sel {
+                    if let Some(kind) = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .and_then(|h| h.prog_at(x, y))
+                        .and_then(|p| self.server.world.host(HostId(1)).and_then(|h| h.program_kind(p)))
+                    {
+                        ui.label(format!("selected: {} @({x},{y})", kind.name()));
+                    }
                 }
                 // Exploit the rig's holes (design/03): needs a program of
                 // yours on the host as the delivery vehicle.
@@ -1273,6 +1395,20 @@ impl Shell {
                     .host(HostId(1))
                     .map(|h| h.breached)
                     .unwrap_or(false);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Patch:");
+                    for v in &vulns {
+                        if ui.button(format!("Patch {v}")).clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckPatch { vuln: v.clone() },
+                            }) {
+                                Ok(_) => self.say(format!("patched {v}")),
+                                Err(e) => self.say(format!("patch failed: {e}")),
+                            }
+                        }
+                    }
+                });
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Exploit:");
                     for v in &vulns {
@@ -2057,6 +2193,26 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn load_scanner_and_scan_through_clicks() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            h.click_last(".");
+            h.click("Load scanner (1cpu)");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("loaded scanner")),
+                "log: {:?}",
+                h.shell.log
+            );
+            h.click("Scan");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("host scanned")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(h.has_text("scanned yes"), "text: {:?}", h.labels());
         }
 
         #[test]

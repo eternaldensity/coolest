@@ -411,7 +411,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(184) {
+    match rng.below(205) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -518,6 +518,48 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
         },
         182 => Verb::DeliverContract,
         183 => Verb::AbandonContract,
+        184..=190 => Verb::DeckLoadKind {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+            kind: [
+                sim::ProgramKind::Killer,
+                sim::ProgramKind::Shield,
+                sim::ProgramKind::Scanner,
+                sim::ProgramKind::Cracker,
+                sim::ProgramKind::Connector,
+                sim::ProgramKind::Cloner,
+                sim::ProgramKind::Editor,
+            ][rng.below(7) as usize],
+        },
+        191 => Verb::DeckScan,
+        192 => Verb::DeckCrack,
+        193..=195 => Verb::DeckPatch {
+            vuln: [
+                "cve-2006-0001",
+                "cve-2006-0002",
+                "cve-2006-0004",
+                "cve-2006-0005",
+            ][rng.below(4) as usize]
+                .to_string(),
+        },
+        196..=198 => Verb::DeckOverwrite {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+        },
+        199..=201 => Verb::DeckClone {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+        },
+        202..=204 => Verb::DeckFarmKind {
+            x: rng.below(12) as u8,
+            y: rng.below(8) as u8,
+            res: sim::Res::from_index(rng.below(3) as u8),
+            kind: [
+                sim::ProgramKind::Connector,
+                sim::ProgramKind::Scanner,
+                sim::ProgramKind::Cracker,
+            ][rng.below(3) as usize],
+        },
         _ => Verb::OpenMail { index: 0 },
     }
 }
