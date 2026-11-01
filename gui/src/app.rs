@@ -287,11 +287,12 @@ impl Shell {
         let cmd = cmd.trim().to_lowercase();
         match cmd.as_str() {
             "help" => self.say(
-                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · farm loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep"
+                "move arrows/hjkl(vi-keys) · eat · work 0-4 · code loop/data/algo · farm loop/data/algo · watch · buy <item> · talk · deposit/withdraw <c> · sleep · revive"
                     .to_string(),
             ),
             "eat" => self.do_verb(Verb::Eat),
             "sleep" => self.do_verb(Verb::Sleep),
+            "revive" => self.do_verb(Verb::Revive),
             _ if cmd.starts_with("buy ") => self.do_verb(Verb::Buy(cmd[4..].trim().to_string())),
             _ if cmd.starts_with("deposit ") => match cmd[8..].trim().parse::<i64>() {
                 Ok(amt) => self.do_verb(Verb::Deposit(amt)),
@@ -488,6 +489,32 @@ impl Shell {
                     .collect::<Vec<_>>()
                     .join(" · ");
                 ui.label(format!("components: {units}"));
+                // Body/health (design/06-07). The clinic is the only way
+                // back from a lethal blow in v0.4.
+                if let Some(h) = self.server.world.health_of(self.actor) {
+                    ui.label(format!("HP {}/{}", h.hp, h.max_hp));
+                    if !h.is_alive() && ui.button("Revive at clinic").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::Revive,
+                        }) {
+                            Ok(_) => self.say("revived at the clinic".to_string()),
+                            Err(e) => self.say(format!("revive failed: {e}")),
+                        }
+                    }
+                }
+                if let Some(body) = self.server.world.body_of(self.actor) {
+                    ui.label(format!(
+                        "PV {} · DV {} · STR {} · DEX {}",
+                        body.pv, body.dv, body.str, body.dex
+                    ));
+                }
+                if let Some(mind) = self.server.world.mind_of(self.actor) {
+                    ui.label(format!(
+                        "mindpower {} · literacy {}",
+                        mind.mindpower, mind.comp_literacy
+                    ));
+                }
                 // Heat (design/05): alignment/standing are pure functions of
                 // the record, so settling the fine clears both.
                 let standing = self.server.world.standing();
@@ -2284,6 +2311,17 @@ mod tests {
             );
             // Farm + two watches are all logged acts.
             assert_eq!(h.shell.server.log.len(), 3);
+        }
+
+        #[test]
+        fn hp_shows_and_clinic_revive_works() {
+            let mut h = Harness::new();
+            assert!(h.has_text("HP 20/20"), "text: {:?}", h.labels());
+            h.shell.server.world.damage(EntityId(1), 999);
+            h.pass_with(vec![]);
+            assert!(h.has_text("HP 0/20"), "text: {:?}", h.labels());
+            h.click("Revive at clinic");
+            assert!(h.has_text("HP 10/20"), "text: {:?}", h.labels());
         }
 
         #[test]

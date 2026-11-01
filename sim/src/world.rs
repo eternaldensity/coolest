@@ -1,3 +1,4 @@
+use crate::body::{Body, Health, Mind, BASE_HP};
 use crate::civic::{cop_duty, role_table, Role};
 use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing};
 use crate::deck::{CellPos, Host};
@@ -138,6 +139,9 @@ pub enum Verb {
     /// Settle with the city (design/05): pay a fine proportional to the
     /// record's evidence mass and clear it, ending any pursuit.
     PayFine,
+    /// Wake at the clinic after a lethal blow (design/07 v0.4: revive, not
+    /// permadeath). Restores part of max HP and returns you home.
+    Revive,
     /// Build a persistent ability into the program at a cell (design/03
     /// `Program.mods`), paying the card's resource cost.
     DeckMod {
@@ -225,6 +229,12 @@ struct Being {
     /// Last game day rent was charged. Default 0 for old saves.
     #[serde(default)]
     last_rent_day: u64,
+    /// Design/06 physical stats. Defaults for old saves.
+    #[serde(default)]
+    body: Body,
+    /// Design/06 mental stats. Defaults for old saves.
+    #[serde(default)]
+    mind: Mind,
 }
 
 /// M1 jobs: (payout_cents, mood_cost, food_cost), tiered ladder in
@@ -328,6 +338,10 @@ pub struct World {
     /// Last game day the zombie net paid out. Default 0 for old saves.
     #[serde(default)]
     spam_day: u64,
+    /// Shared HP pool for beings and NPCs (design/07). Default empty for
+    /// old saves; `normalize` fills it from the spawn tables on load.
+    #[serde(default)]
+    health: BTreeMap<u64, Health>,
     /// Conduct record (design/05 M4): evidence-weighted crimes. Alignment
     /// and standing are pure functions of this, so editing it changes who
     /// the city thinks you are. Default empty for old saves.
@@ -420,6 +434,7 @@ impl World {
             home: None,
             zombies: crate::mailer::ZombieNet::new(),
             spam_day: 0,
+            health: BTreeMap::new(),
             record: Record::new(),
             clans: Clans::new(),
             license: License::new(),
@@ -565,8 +580,11 @@ impl World {
                 rations: 3,
                 // Move-in costs nothing: rent starts accruing tomorrow.
                 last_rent_day: self.tick / DAY_TICKS,
+                body: Body::default(),
+                mind: Mind::default(),
             },
         );
+        self.health.insert(id.0, Health::new(BASE_HP));
         self.sched.schedule(id, 0);
     }
 
@@ -861,6 +879,7 @@ impl World {
                 }
             }
         }
+        self.health.insert(id.0, Health::new(BASE_HP));
         self.npcs.insert(
             id.0,
             Npc {
@@ -1027,6 +1046,84 @@ impl World {
 
     pub fn pos_of(&self, id: EntityId) -> Option<Pos> {
         self.beings.get(&id.0).map(|b| b.pos)
+    }
+
+    // ---- Body / Mind / health (design/06-07) ----
+
+    /// Current HP for a being or NPC. `None` for unknown entities.
+    pub fn health_of(&self, id: EntityId) -> Option<Health> {
+        self.health.get(&id.0).copied()
+    }
+
+    pub fn hp(&self, id: EntityId) -> i32 {
+        self.health_of(id).map(|h| h.hp).unwrap_or(0)
+    }
+
+    pub fn is_alive(&self, id: EntityId) -> bool {
+        self.health_of(id).map(|h| h.is_alive()).unwrap_or(false)
+    }
+
+    pub fn body_of(&self, id: EntityId) -> Option<Body> {
+        self.beings.get(&id.0).map(|b| b.body)
+    }
+
+    pub fn mind_of(&self, id: EntityId) -> Option<Mind> {
+        self.beings.get(&id.0).map(|b| b.mind)
+    }
+
+    /// Apply damage to any being/NPC. Death is a state (`hp == 0`); callers
+    /// decide whether that means revival, loot, or removal.
+    pub fn damage(&mut self, id: EntityId, n: i32) -> crate::body::Damage {
+        let Some(h) = self.health.get_mut(&id.0) else {
+            return crate::body::Damage {
+                applied: 0,
+                died: false,
+            };
+        };
+        h.damage(n)
+    }
+
+    pub fn heal(&mut self, id: EntityId, n: i32) -> i32 {
+        self.health.get_mut(&id.0).map(|h| h.heal(n)).unwrap_or(0)
+    }
+
+    /// Clinic revival (v0.4): dead actors wake at home with part of max HP.
+    /// The fee is handled by the `Verb::Revive` arm so this stays pure.
+    pub fn revive(&mut self, id: EntityId) -> Result<(), SimError> {
+        let h = self.health.get_mut(&id.0).ok_or(SimError::new(
+            "unknown_actor",
+            "spawned entity",
+            "missing",
+        ))?;
+        if h.is_alive() {
+            return Err(SimError::new("not_dead", "dead actor", "alive"));
+        }
+        h.revive();
+        if let Some(home) = self.home {
+            if let Some(b) = self.beings.get_mut(&id.0) {
+                b.pos = home;
+                b.next_at = self.tick;
+            }
+        }
+        Ok(())
+    }
+
+    /// Ensure legacy snapshots gain health entries. New spawns already have
+    /// them, so this is a no-op on current saves.
+    fn normalize_health(&mut self) {
+        for id in self.beings.keys() {
+            self.health
+                .entry(*id)
+                .or_insert_with(|| Health::new(BASE_HP));
+        }
+        for id in self.npcs.keys() {
+            self.health
+                .entry(*id)
+                .or_insert_with(|| Health::new(BASE_HP));
+        }
+        let mut keep: Vec<u64> = self.beings.keys().copied().collect();
+        keep.extend(self.npcs.keys().copied());
+        self.health.retain(|id, _| keep.contains(id));
     }
 
     /// Next-step hint for new players. Pure function of needs state —
@@ -1199,6 +1296,14 @@ impl World {
             "spawned entity",
             "missing",
         ))?;
+        if self
+            .health
+            .get(&intent.actor.0)
+            .is_some_and(|h| !h.is_alive())
+            && !matches!(&intent.verb, Verb::Revive)
+        {
+            return Err(SimError::new("dead", "clinic revival", "dead"));
+        }
         if self.tick < b.next_at {
             return Err(SimError::new("too_early", "tick >= next_at", "acted early"));
         }
@@ -1560,6 +1665,50 @@ impl World {
                 } else {
                     kind = "opened_mail";
                 }
+            }
+            Verb::Revive => {
+                // Clinic (design/07 v0.4): revive at home, pocket-first fee
+                // with the rest as debt. Never blocks the player forever.
+                if self
+                    .health
+                    .get(&intent.actor.0)
+                    .is_some_and(|h| h.is_alive())
+                {
+                    return Err(SimError::new("not_dead", "dead actor", "alive"));
+                }
+                let fee = b.money.clamp(0, crate::body::REVIVE_FEE);
+                b.money -= fee;
+                let mut rest = crate::body::REVIVE_FEE - fee;
+                if rest > 0 {
+                    if let Some(acct) = self.accts.get(&intent.actor.0).copied() {
+                        let bank = self.ledger.balance(acct)?;
+                        let take = bank.max(0).min(rest);
+                        if take > 0 {
+                            let city = match self.city {
+                                Some(id) => id,
+                                None => {
+                                    let id = self.ledger.open(EntityId(u64::MAX - 2), HostId(1));
+                                    self.city = Some(id);
+                                    id
+                                }
+                            };
+                            self.ledger.transfer(acct, city, take)?;
+                            rest -= take;
+                        }
+                    }
+                }
+                if rest > 0 {
+                    b.money -= rest; // medical debt
+                }
+                if let Some(h) = self.health.get_mut(&intent.actor.0) {
+                    h.revive();
+                }
+                if let Some(home) = self.home {
+                    // `pos` is the delta value written back after the match.
+                    pos = home;
+                    b.next_at = self.tick;
+                }
+                kind = "revived";
             }
             Verb::PayFine => {
                 // Settle with the city: cost scales with evidence mass.
@@ -2021,6 +2170,9 @@ impl World {
             SAVE_VERSION => {}
             _ => return Err(SimError::new("load", "snapshot v1-v2", "newer version")),
         }
+        // v0.4 fields are all `#[serde(default)]`, so old snapshots need no
+        // version bump; just fill health from the spawn tables.
+        w.normalize_health();
         w.rebuild_sched();
         Ok(w)
     }
@@ -2099,6 +2251,59 @@ mod tests {
         let w2 = World::load_json(&s).expect("load");
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
         assert!(World::load_json("{bad").is_err());
+    }
+
+    #[test]
+    fn damage_kills_blocks_acts_and_revive_returns_home() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.set_home(pos(2, 2));
+        assert_eq!(w.hp(EntityId(1)), crate::body::BASE_HP);
+        let hit = w.damage(EntityId(1), crate::body::BASE_HP);
+        assert!(hit.died);
+        assert!(!w.is_alive(EntityId(1)));
+        // A dead actor cannot act; only revival gets through.
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Wait,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "dead");
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Revive,
+        })
+        .unwrap();
+        assert!(w.is_alive(EntityId(1)));
+        assert_eq!(w.pos_of(EntityId(1)), Some(pos(2, 2)));
+        assert_eq!(w.hp(EntityId(1)), crate::body::BASE_HP / 2);
+        // The fee is pocket-first; this character had 200c, so 50c of debt.
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, -50);
+    }
+
+    #[test]
+    fn npc_health_is_shared_and_damageable() {
+        let mut w = World::new(1);
+        w.spawn_npc(EntityId(20), Role::Cop, (2, 2), (12, 12), (8, 2), 1);
+        assert!(w.is_alive(EntityId(20)));
+        let hit = w.damage(EntityId(20), 7);
+        assert_eq!(hit.applied, 7);
+        assert!(w.is_alive(EntityId(20)));
+        w.damage(EntityId(20), 99);
+        assert!(!w.is_alive(EntityId(20)));
+    }
+
+    #[test]
+    fn legacy_snapshot_gains_health_on_load() {
+        let mut w = World::new(7);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(20), Role::Cop, (2, 2), (12, 12), (8, 2), 1);
+        let mut v: serde_json::Value = serde_json::from_str(&w.save_json()).unwrap();
+        v.as_object_mut().unwrap().remove("health");
+        let loaded = World::load_json(&serde_json::to_string(&v).unwrap()).unwrap();
+        assert_eq!(loaded.hp(EntityId(1)), crate::body::BASE_HP);
+        assert_eq!(loaded.hp(EntityId(20)), crate::body::BASE_HP);
     }
 
     #[test]

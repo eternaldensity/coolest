@@ -1,4 +1,5 @@
 //! Deterministic sim core. No clock, net, fs, threads. See design/11.
+pub mod body;
 pub mod civic;
 pub mod crime;
 pub mod data;
@@ -19,6 +20,7 @@ pub mod talk;
 pub mod veil;
 pub mod world;
 
+pub use body::{Body, Damage, Health, Mind, BASE_HP, REVIVE_FEE};
 pub use civic::{cop_duty, role_table, Activity, Role, Timetable};
 pub use crime::{
     trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing, LICENSE_KILLS,

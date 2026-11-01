@@ -478,6 +478,7 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
         153..=155 => Verb::SendTrojan {
             to: EntityId(1 + rng.below(11) as u64),
         },
+        156 => Verb::Revive,
         _ => Verb::OpenMail { index: 0 },
     }
 }
