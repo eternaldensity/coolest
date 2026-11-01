@@ -11,7 +11,8 @@
 > floor pickup, Deck scan/crack/clone/patch/sever, Net probe, Veil
 > take/consume). Final polish includes a reduced-motion toggle in the field
 > manual, brighter danger/faint contrast, and explicit empty states for
-> board/Deck/Net/Veil. Scope is the `gui/` shell; the deterministic sim and
+> board/Deck/Net/Veil, plus card hover previews with family, cost, target,
+> and effect text. Scope is the `gui/` shell; the deterministic sim and
 > server stay unchanged except for small interaction verbs.
 
 ## 1. Experience goals

@@ -43,6 +43,45 @@ fn item_blurb(item: &str) -> &'static str {
     }
 }
 
+fn card_family(id: &str) -> (&'static str, egui::Color32) {
+    if matches!(
+        id,
+        "distract" | "freakout" | "stun" | "jam" | "hex" | "decoy" | "downgrade" | "shuffle"
+    ) {
+        ("negative · enemy", crate::theme::DANGER)
+    } else if matches!(id, "spike" | "overload" | "copy" | "farm") {
+        ("manipulation", crate::theme::OLDNET)
+    } else {
+        ("positive · support", crate::theme::SUCCESS)
+    }
+}
+
+fn card_effect_text(def: &sim::CardDef) -> &'static str {
+    match def.effect.as_str() {
+        "SkipNext" => "Target loses its next act.",
+        "DotNext(1)" => "Target loses 1 tail segment next turn.",
+        "DotNext(2)" => "Target loses 2 tail segments next turn.",
+        "RollMinus(2)" => "Target's next attack roll is reduced by 2.",
+        "BanDie(6)" => "Target cannot crit on its next attack.",
+        "DecoyNext" => "The next incoming hit on the target is absorbed.",
+        "DowngradeNext" => "Target's next attack deals half damage.",
+        "RandomTargetNext" => "Target's next attack retargets randomly.",
+        "ShieldNext(1)" => "Absorb 1 incoming damage next turn.",
+        "ShieldNext(2)" => "Absorb 2 incoming damage next turn.",
+        "heal-lowest" => "Heal the lowest paired stat by 2.",
+        "consume-to-damage" => "Spend 2 LOOP for +2 damage.",
+        "consume-all-to-damage" => "Spend the whole LOOP pile for +damage.",
+        "ReflectNext" => "Return the next incoming hit to the attacker's body.",
+        "SplashNext" => "Next attack also deals 1 to adjacent programs.",
+        "ExtraRollNext" => "Roll twice on the next attack; keep the higher face.",
+        "produce" => "Run your producers once.",
+        "clone-segment" => "Clone a segment into a free cell.",
+        "grow" => "Grow the selected program by one segment.",
+        "upgrade-max" => "Raise the selected program's growth cap.",
+        _ => "Deck effect.",
+    }
+}
+
 /// Save slot: a real file on desktop, a browser-local key on web (where
 /// the sandbox has no filesystem).
 #[cfg(not(target_arch = "wasm32"))]
@@ -129,6 +168,8 @@ pub struct Shell {
     help_open: bool,
     net_sel: Option<HostId>,
     reduced_motion: bool,
+    cards: BTreeMap<String, sim::CardDef>,
+    hovered_card: Option<String>,
 }
 
 impl Shell {
@@ -185,8 +226,17 @@ impl Shell {
         if !jobs.is_empty() {
             server.world.set_jobs(&jobs);
         }
-        // Card costs come from data/cards.yaml (design/11 rule 4).
+        // Card costs and previews come from data/cards.yaml.
+        let mut card_defs = BTreeMap::new();
         if let Ok(cards) = sim::parse_cards(include_str!("../../data/cards.yaml")) {
+            for c in cards
+                .negative
+                .iter()
+                .chain(&cards.positive)
+                .chain(&cards.manipulation)
+            {
+                card_defs.insert(c.id.clone(), c.clone());
+            }
             server.world.set_cards(&cards);
         }
         if let Ok(items) = sim::parse_items(include_str!("../../data/items.yaml")) {
@@ -270,6 +320,8 @@ impl Shell {
             help_open: false,
             net_sel: None,
             reduced_motion: false,
+            cards: card_defs,
+            hovered_card: None,
         };
         shell.say_status();
         shell
@@ -2263,38 +2315,38 @@ impl Shell {
                 crate::theme::section(ui, "cards @selected");
                 ui.horizontal_wrapped(|ui| {
                     for card in sim::Host::implemented_cards() {
-                        let negative = matches!(
-                            card,
-                            "distract" | "freakout" | "stun" | "jam" | "hex" | "decoy"
-                                | "downgrade" | "shuffle"
-                        );
-                        let manipulation =
-                            matches!(card, "spike" | "overload" | "copy" | "farm");
-                        let color = if negative {
-                            crate::theme::DANGER
-                        } else if manipulation {
-                            crate::theme::OLDNET
-                        } else {
-                            crate::theme::SUCCESS
-                        };
+                        let (family, color) = card_family(card);
+                        let def = self.cards.get(card).cloned();
                         // Show the resource cost (design/03: cards consume).
                         let label = match self.server.world.card_cost(card) {
                             Some((res, n)) => format!("{card} ({n} {})", res.name()),
                             None => card.to_string(),
                         };
-                        if ui
-                            .add_sized(
-                                [92.0, 38.0],
-                                egui::Button::new(
-                                    egui::RichText::new(label.clone())
-                                        .size(11.0)
-                                        .color(color),
-                                )
-                                .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
-                                .stroke(egui::Stroke::new(1.0, color)),
+                        let mut resp = ui.add_sized(
+                            [92.0, 38.0],
+                            egui::Button::new(
+                                egui::RichText::new(label.clone())
+                                    .size(11.0)
+                                    .color(color),
                             )
-                            .clicked()
-                        {
+                            .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
+                            .stroke(egui::Stroke::new(1.0, color)),
+                        );
+                        if let Some(def) = &def {
+                            resp = resp.on_hover_text(format!(
+                                "{family}\n{}\ncost: {}",
+                                card_effect_text(def),
+                                if def.cost_units == 0 {
+                                    "free".to_string()
+                                } else {
+                                    format!("{} {}", def.cost_units, def.cost_resource)
+                                }
+                            ));
+                        }
+                        if resp.hovered() {
+                            self.hovered_card = Some(card.to_string());
+                        }
+                        if resp.clicked() {
                             let msg = match self.sel {
                                 Some((x, y)) => match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -2318,6 +2370,34 @@ impl Shell {
                         }
                     }
                 });
+                if let Some(id) = self.hovered_card.clone() {
+                    if let Some(def) = self.cards.get(&id) {
+                        let (family, color) = card_family(&id);
+                        crate::theme::section(ui, "card preview");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                egui::RichText::new(&id)
+                                    .size(15.0)
+                                    .strong()
+                                    .color(color),
+                            );
+                            crate::theme::chip(ui, family, color);
+                            crate::theme::chip(
+                                ui,
+                                if def.cost_units == 0 {
+                                    "free".to_string()
+                                } else {
+                                    format!("{} {}", def.cost_units, def.cost_resource)
+                                },
+                                crate::theme::MONEY,
+                            );
+                        });
+                        ui.label(card_effect_text(def));
+                        if let Some(targets) = &def.targets {
+                            crate::theme::label(ui, format!("targets: {targets}"));
+                        }
+                    }
+                }
                 // Get out clean (design/03): scrub your trail on the rig.
                 ui.horizontal(|ui| {
                     let logs = self
@@ -3321,6 +3401,16 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn card_hover_preview_shows_effect_and_cost() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            h.click_last(".");
+            h.click("spike");
+            assert!(h.has_text("CARD PREVIEW"), "text: {:?}", h.labels());
+            assert!(h.has_text("Spend 2 LOOP"), "text: {:?}", h.labels());
         }
 
         #[test]
