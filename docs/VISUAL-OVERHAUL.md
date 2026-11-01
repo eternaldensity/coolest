@@ -1,12 +1,13 @@
 # Visual Overhaul — “Civic Decay / Signal & Static”
 
-> Status: UI-1 foundation, the first Street pass, Deck arena framing, and
-> the Net graph canvas are implemented (`7d19970`, `9f85a8e`): civic-decay
-> theme, IBM Plex fonts, top bar, vitals rail, progress meters, scrollable
-> central pane, painted Street map, PCB-style Deck cells with kind glyphs
-> and CPU/trace rails, and a Net node/link canvas. Still ahead: right
-> inspector, click-to-move, card-hand redesign, command palette, Veil
-> restyle, responsive polish. Scope is the `gui/` shell; the deterministic
+> Status: UI-1..UI-5 are partially landed (`7d19970`, `9f85a8e`, and the
+> current work): civic-decay theme, IBM Plex fonts, top bar, vitals rail,
+> progress meters, scrollable central pane, painted Street map, right
+> inspector, click-to-walk pathing, PCB-style Deck cells with kind glyphs
+> and CPU/trace rails, card-hand colouring, Net node/link canvas, Veil
+> sigil canvas, and a Ctrl-K command palette. Still ahead: responsive
+> drawer, reduced-motion/contrast audit, richer Street contract rail, and
+> deeper inspector actions. Scope is the `gui/` shell; the deterministic
 > sim and server stay unchanged except for small interaction verbs.
 
 ## 1. Experience goals

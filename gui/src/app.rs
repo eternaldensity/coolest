@@ -124,6 +124,8 @@ pub struct Shell {
     frames_left: Option<u32>,
     jobs: Vec<sim::JobDef>,
     themed: bool,
+    palette_open: bool,
+    palette_query: String,
 }
 
 impl Shell {
@@ -260,6 +262,8 @@ impl Shell {
             frames_left: frames,
             jobs,
             themed: false,
+            palette_open: false,
+            palette_query: String::new(),
         };
         shell.say_status();
         shell
@@ -472,6 +476,9 @@ impl Shell {
     }
 
     fn move_key(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+            return;
+        }
         let dir = if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::K))
         {
             Some(Dir::N)
@@ -500,6 +507,361 @@ impl eframe::App for Shell {
 }
 
 impl Shell {
+    fn inspector(&mut self, ui: &mut egui::Ui) {
+        crate::theme::heading(ui, "Inspector");
+        match self.tab {
+            Tab::Street => {
+                let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
+                let (x, y) = self.street_sel.unwrap_or((here.x, here.y));
+                crate::theme::section(ui, "selection");
+                ui.label(
+                    egui::RichText::new(format!("Tile ({x},{y})"))
+                        .size(18.0)
+                        .strong()
+                        .color(crate::theme::TEXT),
+                );
+                let walkable = self
+                    .server
+                    .world
+                    .section_at(here.sx, here.sy)
+                    .map(|s| s.walkable(x, y))
+                    .unwrap_or(true);
+                crate::theme::label(ui, if walkable { "walkable" } else { "blocked" });
+                if (x, y) == (here.x, here.y) {
+                    crate::theme::chip(ui, "you are here", crate::theme::BETANET);
+                }
+                if let Some(role) = self
+                    .server
+                    .world
+                    .npc_positions()
+                    .into_iter()
+                    .find(|(_, nx, ny)| (*nx, *ny) == (x, y))
+                    .and_then(|(id, _, _)| self.server.world.npc_role(id))
+                {
+                    crate::theme::section(ui, "npc");
+                    ui.label(format!("{role:?}"));
+                }
+                if let Some(shop) = self.server.world.shop_at(x, y) {
+                    crate::theme::section(ui, "counter");
+                    for (item, line) in &shop.stock {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{item} — {}c", line.price_cents));
+                            crate::theme::chip(
+                                ui,
+                                format!("x{}", line.qty),
+                                if line.qty == 0 {
+                                    crate::theme::DANGER
+                                } else {
+                                    crate::theme::MUTED
+                                },
+                            );
+                        });
+                    }
+                }
+                if walkable && (x, y) != (here.x, here.y) && ui.button("Walk here").clicked() {
+                    self.walk_to(x, y);
+                }
+            }
+            Tab::Deck => {
+                crate::theme::section(ui, "selection");
+                let Some((x, y)) = self.sel else {
+                    crate::theme::label(ui, "Select a cell in the arena.");
+                    return;
+                };
+                ui.label(
+                    egui::RichText::new(format!("Cell ({x},{y})"))
+                        .size(18.0)
+                        .strong()
+                        .color(crate::theme::TEXT),
+                );
+                if let Some(prog) = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .and_then(|h| h.prog_at(x, y))
+                {
+                    let host = self.server.world.host(HostId(1)).unwrap();
+                    let kind = host.program_kind(prog);
+                    if let Some(kind) = kind {
+                        crate::theme::chip(ui, kind.name(), crate::theme::BETANET);
+                    }
+                    if let Some(p) = host.progs.get(&prog.0) {
+                        ui.label(format!("cpu {} / segment · len {}", p.cpu_per_seg, p.len()));
+                        ui.label(format!("max len {}", p.max_len));
+                    }
+                    if let Some((makes, rate)) = host.maker_info(prog) {
+                        let names = makes
+                            .iter()
+                            .map(|r| format!("{} ×{}", r.name(), rate))
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        ui.label(format!("producer: {names}"));
+                    }
+                    let mods = host.mods_of(prog);
+                    crate::theme::label(
+                        ui,
+                        if mods.is_empty() {
+                            "mods: none".to_string()
+                        } else {
+                            format!("mods: {mods:?}")
+                        },
+                    );
+                } else {
+                    crate::theme::label(ui, "Empty cell — load a program here.");
+                }
+            }
+            Tab::Net => {
+                crate::theme::section(ui, "route preview");
+                match self.server.world.power.powered_route(
+                    &self.server.world.net,
+                    HostId(1),
+                    HostId(3),
+                ) {
+                    Ok(r) => {
+                        ui.label(format!("{:?}", r.path));
+                        ui.label(format!(
+                            "{}ms · toll {}c · cap {} · trace {}",
+                            r.latency_ms,
+                            r.toll_cents,
+                            r.cap_mbps,
+                            r.trace_threshold()
+                        ));
+                    }
+                    Err(e) => crate::theme::label(ui, format!("no route: {e}")),
+                }
+                crate::theme::section(ui, "nodes");
+                for id in self.server.world.net.node_ids() {
+                    if let Some(n) = self.server.world.net.node(id) {
+                        let dark = self.server.world.power.is_host_dark(id);
+                        ui.label(format!(
+                            "{id:?} · {} · {}mb{}{}",
+                            match n.net {
+                                NetKind::Oldnet => "oldnet",
+                                NetKind::Betanet => "betanet",
+                            },
+                            n.modem_mbps,
+                            if n.gateway { " · gateway" } else { "" },
+                            if dark { " · DARK" } else { "" }
+                        ));
+                    }
+                }
+            }
+            Tab::Veil => {
+                crate::theme::section(ui, "helmet");
+                if let Some(area) = self.server.world.veil.area_of(self.actor) {
+                    let name = self
+                        .server
+                        .world
+                        .veil
+                        .area_info(area)
+                        .map(|(n, _, _)| n)
+                        .unwrap_or_else(|| "area".to_string());
+                    ui.label(format!("area: {name}"));
+                    let hazard = self.server.world.veil.area_hazard(area);
+                    if hazard > 0 {
+                        crate::theme::chip(ui, format!("hazard {hazard}"), crate::theme::DANGER);
+                    }
+                    if let Some((host, mp)) = self.server.world.veil.area_host(area) {
+                        ui.label(format!("host {host:?} · mp {mp}"));
+                    }
+                    let files = self.server.world.veil.area_files(area);
+                    crate::theme::section(ui, "mind-files");
+                    if files.is_empty() {
+                        crate::theme::label(ui, "no files in this area");
+                    } else {
+                        for f in files {
+                            ui.label(f);
+                        }
+                    }
+                } else {
+                    crate::theme::label(ui, "Not jacked in.");
+                }
+            }
+        }
+    }
+
+    fn palette(&mut self, ctx: &egui::Context) {
+        if !self.palette_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Command palette")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.palette_query)
+                        .hint_text("jump, act, inspect…"),
+                );
+                resp.request_focus();
+                let q = self.palette_query.to_lowercase();
+                let commands = [
+                    "Street",
+                    "Deck",
+                    "Net",
+                    "Veil",
+                    "Eat",
+                    "Watch",
+                    "Sleep",
+                    "Revive",
+                    "Pay fine",
+                    "Accept first offer",
+                    "Deliver contract",
+                    "Scan",
+                    "Crack",
+                    "Save",
+                    "Load",
+                    "Help",
+                ];
+                let mut picked = None;
+                for cmd in commands {
+                    if (q.is_empty() || cmd.to_lowercase().contains(&q)) && ui.button(cmd).clicked()
+                    {
+                        picked = Some(cmd);
+                    }
+                }
+                if let Some(cmd) = picked {
+                    self.palette_run(cmd);
+                    self.palette_open = false;
+                }
+            });
+        if !open {
+            self.palette_open = false;
+        }
+    }
+
+    fn palette_run(&mut self, cmd: &str) {
+        match cmd {
+            "Street" => self.tab = Tab::Street,
+            "Deck" => self.tab = Tab::Deck,
+            "Net" => self.tab = Tab::Net,
+            "Veil" => self.tab = Tab::Veil,
+            "Eat" => self.do_verb(Verb::Eat),
+            "Watch" => self.do_verb(Verb::Watch),
+            "Sleep" => self.do_verb(Verb::Sleep),
+            "Revive" => self.do_verb(Verb::Revive),
+            "Pay fine" => self.do_verb(Verb::PayFine),
+            "Deliver contract" => self.do_verb(Verb::DeliverContract),
+            "Scan" => self.do_verb(Verb::DeckScan),
+            "Crack" => self.do_verb(Verb::DeckCrack),
+            "Accept first offer" => {
+                if let Some(offer) = self.server.world.offers().first() {
+                    self.do_verb(Verb::AcceptOffer { offer: offer.id });
+                } else {
+                    self.say("no offers on the board".to_string());
+                }
+            }
+            "Save" => {
+                let msg = persist_save(&self.server);
+                self.say(msg);
+            }
+            "Load" => {
+                let msg = persist_load(&mut self.server);
+                self.say(msg);
+            }
+            "Help" => self.say(
+                "Ctrl-K palette · Tab views · arrows/hjkl move · ? for command help".to_string(),
+            ),
+            _ => {}
+        }
+    }
+
+    fn walk_to(&mut self, tx: u8, ty: u8) {
+        let here = match self.server.world.pos_of(self.actor) {
+            Some(p) => p,
+            None => return,
+        };
+        let Some(section) = self.server.world.section_at(here.sx, here.sy) else {
+            return;
+        };
+        if !section.walkable(tx, ty) {
+            self.say("blocked: no path".to_string());
+            return;
+        }
+        let idx = |x: u8, y: u8| y as usize * 16 + x as usize;
+        let mut prev: Vec<Option<(u8, u8)>> = vec![None; 256];
+        let mut queue = std::collections::VecDeque::from([(here.x, here.y)]);
+        prev[idx(here.x, here.y)] = Some((here.x, here.y));
+        while let Some((x, y)) = queue.pop_front() {
+            if (x, y) == (tx, ty) {
+                break;
+            }
+            for (dx, dy) in [(0i16, -1), (0, 1), (1, 0), (-1, 0)] {
+                let (nx, ny) = (x as i16 + dx, y as i16 + dy);
+                if !(1..=14).contains(&nx) || !(1..=14).contains(&ny) {
+                    continue;
+                }
+                let (nx, ny) = (nx as u8, ny as u8);
+                if !section.walkable(nx, ny) || prev[idx(nx, ny)].is_some() {
+                    continue;
+                }
+                prev[idx(nx, ny)] = Some((x, y));
+                queue.push_back((nx, ny));
+            }
+        }
+        if prev[idx(tx, ty)].is_none() {
+            self.say("blocked: no path".to_string());
+            return;
+        }
+        let mut path = Vec::new();
+        let mut cur = (tx, ty);
+        while cur != (here.x, here.y) {
+            path.push(cur);
+            match prev[idx(cur.0, cur.1)] {
+                Some(p) => cur = p,
+                None => break,
+            }
+        }
+        path.reverse();
+        let mut steps = 0;
+        for (nx, ny) in path {
+            let dir = if nx
+                > self
+                    .server
+                    .world
+                    .pos_of(self.actor)
+                    .map(|p| p.x)
+                    .unwrap_or(nx)
+            {
+                Dir::E
+            } else if nx
+                < self
+                    .server
+                    .world
+                    .pos_of(self.actor)
+                    .map(|p| p.x)
+                    .unwrap_or(nx)
+            {
+                Dir::W
+            } else if ny
+                > self
+                    .server
+                    .world
+                    .pos_of(self.actor)
+                    .map(|p| p.y)
+                    .unwrap_or(ny)
+            {
+                Dir::S
+            } else {
+                Dir::N
+            };
+            if self
+                .server
+                .apply_one(Intent {
+                    actor: self.actor,
+                    verb: Verb::Move(dir),
+                })
+                .is_err()
+            {
+                break;
+            }
+            steps += 1;
+        }
+        self.say(format!("walked {steps} steps"));
+    }
+
     /// Frame-free UI root: the runner calls this via [`eframe::App::ui`];
     /// headless tests drive it through `egui::Context::run_ui` with no
     /// window, GPU, or screenshots (see the accesskit harness below).
@@ -515,9 +877,29 @@ impl Shell {
             }
             self.frames_left = Some(left - 1);
         }
-        if self.tab == Tab::Street {
+        let palette_toggle = ui.ctx().input(|i| {
+            i.events.iter().any(|e| {
+                matches!(
+                    e,
+                    egui::Event::Key {
+                        key: egui::Key::K,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if modifiers.command || modifiers.ctrl
+                )
+            })
+        });
+        if palette_toggle {
+            self.palette_open = !self.palette_open;
+            self.palette_query.clear();
+        }
+        if self.tab == Tab::Street && !palette_toggle && !self.palette_open {
             let ctx = ui.ctx().clone();
             self.move_key(&ctx);
+        }
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.palette_open = false;
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -744,6 +1126,10 @@ impl Shell {
                 }
             });
         });
+
+        egui::Panel::right("inspector")
+            .default_size(300.0)
+            .show(ui, |ui| self.inspector(ui));
 
         egui::Panel::bottom("console").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1670,17 +2056,43 @@ impl Shell {
                         }
                     }
                 });
-                // Card table (design/03): play a card at the selected cell.
-                // Self cards target your program; attacks/debuffs the enemy.
+                // Card hand (design/03): colour by family, keep the cost in
+                // the label so keyboard/accesskit users still see it.
+                crate::theme::section(ui, "cards @selected");
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Cards @selected:");
                     for card in sim::Host::implemented_cards() {
+                        let negative = matches!(
+                            card,
+                            "distract" | "freakout" | "stun" | "jam" | "hex" | "decoy"
+                                | "downgrade" | "shuffle"
+                        );
+                        let manipulation =
+                            matches!(card, "spike" | "overload" | "copy" | "farm");
+                        let color = if negative {
+                            crate::theme::DANGER
+                        } else if manipulation {
+                            crate::theme::OLDNET
+                        } else {
+                            crate::theme::SUCCESS
+                        };
                         // Show the resource cost (design/03: cards consume).
                         let label = match self.server.world.card_cost(card) {
                             Some((res, n)) => format!("{card} ({n} {})", res.name()),
                             None => card.to_string(),
                         };
-                        if ui.button(label).clicked() {
+                        if ui
+                            .add_sized(
+                                [92.0, 38.0],
+                                egui::Button::new(
+                                    egui::RichText::new(label.clone())
+                                        .size(11.0)
+                                        .color(color),
+                                )
+                                .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
+                                .stroke(egui::Stroke::new(1.0, color)),
+                            )
+                            .clicked()
+                        {
                             let msg = match self.sel {
                                 Some((x, y)) => match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -2023,6 +2435,69 @@ impl Shell {
                     .mind_of(self.actor)
                     .map(|m| m.mindpower)
                     .unwrap_or(0);
+                // Veil sigil canvas: areas as rooms, exits as fine links.
+                let areas = self.server.world.veil.area_ids();
+                if !areas.is_empty() {
+                    let size = egui::vec2(ui.available_width().min(560.0), 210.0);
+                    let (vresp, vp) = ui.allocate_painter(size, egui::Sense::hover());
+                    let vr = vresp.rect;
+                    vp.rect_filled(vr, 10.0, egui::Color32::from_rgb(0x0C, 0x0B, 0x16));
+                    vp.rect_stroke(
+                        vr,
+                        10.0,
+                        egui::Stroke::new(1.0, crate::theme::LINE),
+                        egui::StrokeKind::Inside,
+                    );
+                    let n = areas.len().max(1);
+                    let mut pos = std::collections::BTreeMap::new();
+                    for (i, a) in areas.iter().enumerate() {
+                        let x = vr.min.x + 80.0
+                            + (vr.width() - 160.0) * i as f32 / (n.saturating_sub(1).max(1) as f32);
+                        let y = vr.center().y + if i % 2 == 0 { -28.0 } else { 28.0 };
+                        pos.insert(*a, egui::pos2(x, y));
+                    }
+                    for a in &areas {
+                        if let Some((_, exits, _)) = self.server.world.veil.area_info(*a) {
+                            for e in exits {
+                                if let (Some(p0), Some(p1)) = (pos.get(a), pos.get(&e)) {
+                                    vp.line_segment(
+                                        [*p0, *p1],
+                                        egui::Stroke::new(1.2, crate::theme::VEIL),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    let current = self.server.world.veil.area_of(self.actor);
+                    for a in &areas {
+                        let Some(p) = pos.get(a) else { continue };
+                        let selected = current == Some(*a);
+                        let color = if selected {
+                            crate::theme::BETANET
+                        } else {
+                            crate::theme::VEIL
+                        };
+                        vp.circle_filled(*p, 24.0, egui::Color32::from_rgb(0x15, 0x11, 0x26));
+                        vp.circle_stroke(*p, 24.0, egui::Stroke::new(2.0, color));
+                        vp.text(
+                            *p,
+                            egui::Align2::CENTER_CENTER,
+                            format!("{a}"),
+                            egui::FontId::monospace(12.0),
+                            color,
+                        );
+                        let hazard = self.server.world.veil.area_hazard(*a);
+                        if hazard > 0 {
+                            vp.text(
+                                *p + egui::vec2(0.0, 34.0),
+                                egui::Align2::CENTER_CENTER,
+                                format!("hazard {hazard}"),
+                                egui::FontId::proportional(9.0),
+                                crate::theme::DANGER,
+                            );
+                        }
+                    }
+                }
                 if !self.server.world.veil.present(self.actor) {
                     ui.label(format!("mindpower {mp} (needs 5+)"));
                     if ui.button("Jack in").clicked() {
@@ -2126,6 +2601,7 @@ impl Shell {
             }
                 });
         });
+        self.palette(ui.ctx());
         ui.ctx().request_repaint();
     }
 }
@@ -2369,7 +2845,8 @@ mod tests {
                 // view before clicking, otherwise egui clips the pointer.
                 for _ in 0..16 {
                     let at = self.button_center(label);
-                    if at.y < 610.0 || at.x < 260.0 {
+                    let overlay = self.has_text("Command palette");
+                    if overlay || at.y < 610.0 || at.x < 260.0 {
                         self.pass_with(vec![egui::Event::PointerButton {
                             pos: at,
                             button: egui::PointerButton::Primary,
@@ -2619,6 +3096,32 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn command_palette_opens_and_runs_help() {
+            let mut h = Harness::new();
+            let mods = egui::Modifiers {
+                command: true,
+                ..Default::default()
+            };
+            let key = |pressed| egui::Event::Key {
+                key: egui::Key::K,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: mods,
+            };
+            h.pass_with(vec![key(true)]);
+            h.pass_with(vec![key(false)]);
+            assert!(h.has_text("Command palette"), "text: {:?}", h.labels());
+            h.click("Help");
+            assert!(
+                h.shell.log.iter().any(|l| l.contains("Ctrl-K palette")),
+                "log: {:?}",
+                h.shell.log
+            );
+            assert!(!h.has_text("Command palette"), "text: {:?}", h.labels());
         }
 
         #[test]
