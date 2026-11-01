@@ -143,6 +143,14 @@ pub enum Verb {
     /// Wake at the clinic after a lethal blow (design/07 v0.4: revive, not
     /// permadeath). Restores part of max HP and returns you home.
     Revive,
+    /// Attack a nearby being/NPC with the equipped weapon (or fists).
+    /// Melee needs adjacency; a ranged weapon needs line of sight.
+    Attack {
+        target: EntityId,
+    },
+    /// Surrender to an adjacent cop while Wanted: pay the fine, or spend
+    /// the night in jail when you cannot (design/05/07).
+    Surrender,
     /// Pick one item up from the actor's tile (design/07).
     Pickup {
         item: String,
@@ -240,6 +248,44 @@ struct Npc {
     home: (u8, u8),
     work: (u8, u8),
     leisure: (u8, u8),
+    /// Combat stats (design/07). Defaults keep old saves harmless.
+    #[serde(default = "npc_pv")]
+    pv: u8,
+    #[serde(default = "npc_dv")]
+    dv: u8,
+    #[serde(default = "npc_attack")]
+    attack: i32,
+    #[serde(default = "npc_damage")]
+    damage: i32,
+    /// Entity this NPC is fighting after being attacked.
+    #[serde(default)]
+    aggro: Option<u64>,
+    /// Item dropped on death (loot table v0.4).
+    #[serde(default)]
+    loot: Option<String>,
+}
+
+fn npc_pv() -> u8 {
+    2
+}
+fn npc_dv() -> u8 {
+    0
+}
+fn npc_attack() -> i32 {
+    1
+}
+fn npc_damage() -> i32 {
+    1
+}
+
+/// Snapshot of a combat target, read before the live `beings` borrow in
+/// `apply` so the attack arm does not need a second borrow of the map.
+#[derive(Debug, Clone)]
+struct AttackTarget {
+    pos: Pos,
+    pv: u8,
+    dv: u8,
+    is_npc: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -377,6 +423,11 @@ pub struct World {
     /// Dropped item stacks on street tiles.
     #[serde(default)]
     floor_items: Vec<FloorItem>,
+    /// Street-combat dice (design/07). Seeded from `seed`; old saves with
+    /// zero state are reseeded on load. Kept separate from host dice so
+    /// street play does not perturb Deck traces.
+    #[serde(default)]
+    rng: u64,
 
     /// Conduct record (design/05 M4): evidence-weighted crimes. Alignment
     /// and standing are pure functions of this, so editing it changes who
@@ -473,6 +524,7 @@ impl World {
             health: BTreeMap::new(),
             items: crate::items::default_items(),
             floor_items: Vec::new(),
+            rng: seed | 1,
             record: Record::new(),
             clans: Clans::new(),
             license: License::new(),
@@ -918,6 +970,11 @@ impl World {
                 }
             }
         }
+        let (pv, dv, attack, damage, loot) = match role {
+            Role::Cop => (4, 1, 3, 3, Some("pistol".to_string())),
+            Role::Shopkeeper => (2, 1, 1, 1, Some("snack".to_string())),
+            Role::Office => (2, 0, 1, 1, Some("cable".to_string())),
+        };
         self.health.insert(id.0, Health::new(BASE_HP));
         self.npcs.insert(
             id.0,
@@ -936,6 +993,12 @@ impl World {
                 home,
                 work,
                 leisure,
+                pv,
+                dv,
+                attack,
+                damage,
+                aggro: None,
+                loot,
             },
         );
     }
@@ -1001,14 +1064,65 @@ impl World {
         None
     }
 
-    pub fn step_npcs(&mut self, hour: u8, wanted: &BTreeMap<u64, Standing>) {
+    /// Advance NPCs whose turn is due. hour drives timetables; wanted maps
+    /// being-id -> standing for cop pursuit (nearest Wanted target).
+    /// NPC moves are free within the tick (M1 LOD, noted in design/05).
+    /// Returns narrative kinds for attacks that landed on the player.
+    pub fn step_npcs(&mut self, hour: u8, wanted: &BTreeMap<u64, Standing>) -> Vec<String> {
+        let mut events = Vec::new();
+        let wanted_target = wanted.keys().next().copied();
         let ids: Vec<u64> = self.npcs.keys().copied().collect();
         for id in ids {
+            if !self.is_alive(EntityId(id)) {
+                continue;
+            }
             let due = self.npcs[&id].next_at;
             if due > self.tick {
                 continue;
             }
-            let table = role_table(self.npcs[&id].role);
+            // Cops pursue Wanted; anyone attacked fights back.
+            let (combat_target, role) = {
+                let n = &self.npcs[&id];
+                let t = n.aggro.or_else(|| {
+                    if n.role == Role::Cop {
+                        wanted_target
+                    } else {
+                        None
+                    }
+                });
+                (t, n.role)
+            };
+            if let Some(tid) = combat_target {
+                let n = &self.npcs[&id];
+                let same = self
+                    .beings
+                    .get(&tid)
+                    .map(|b| {
+                        (b.pos.city, b.pos.sx, b.pos.sy, b.pos.z)
+                            == (n.pos.city, n.pos.sx, n.pos.sy, n.pos.z)
+                    })
+                    .unwrap_or(false);
+                let adjacent = same
+                    && self
+                        .beings
+                        .get(&tid)
+                        .map(|b| {
+                            (b.pos.x as i32 - n.pos.x as i32)
+                                .abs()
+                                .max((b.pos.y as i32 - n.pos.y as i32).abs())
+                                <= 1
+                        })
+                        .unwrap_or(false);
+                if adjacent && self.is_alive(EntityId(tid)) {
+                    if let Some(kind) = self.npc_attack(id, tid) {
+                        events.push(kind);
+                    }
+                    let n = self.npcs.get_mut(&id).unwrap();
+                    n.next_at = self.tick + n.speed.max(1);
+                    continue;
+                }
+            }
+            let table = role_table(role);
             let target = self.npc_target(id, &table, hour, wanted);
             // BFS one step toward the timetable spot so NPCs route around
             // the same walls that block PCs; unreachable targets wait out
@@ -1029,6 +1143,28 @@ impl World {
             // attachment runs here, enslaving the reader's hosts.
             self.npc_open_mail(id);
         }
+        events
+    }
+
+    /// One NPC attack. Returns the event kind (`hurt`/`downed`/`dodged`).
+    fn npc_attack(&mut self, npc: u64, target: u64) -> Option<String> {
+        let (attack, damage) = {
+            let n = self.npcs.get(&npc)?;
+            (n.attack, n.damage)
+        };
+        let (pv, dv) = if let Some(b) = self.beings.get(&target) {
+            (b.body.pv, b.body.dv + b.inventory.worn_dv(&self.items))
+        } else {
+            let n = self.npcs.get(&target)?;
+            (n.pv, n.dv)
+        };
+        let roll = self.roll(20);
+        let out = crate::combat::resolve(roll, attack, pv, damage, 0, dv);
+        if !out.hit {
+            return Some("dodged".to_string());
+        }
+        let died = self.damage(EntityId(target), out.damage).died;
+        Some(if died { "downed" } else { "hurt" }.to_string())
     }
 
     fn npc_target(
@@ -1039,6 +1175,14 @@ impl World {
         wanted: &BTreeMap<u64, Standing>,
     ) -> (u8, u8) {
         let n = &self.npcs[&id];
+        // An attacked NPC chases its attacker before anything else.
+        if let Some(tid) = n.aggro {
+            if let Some(p) = self.beings.get(&tid).map(|b| b.pos) {
+                if (p.city, p.sx, p.sy, p.z) == (n.pos.city, n.pos.sx, n.pos.sy, n.pos.z) {
+                    return (p.x, p.y);
+                }
+            }
+        }
         if n.role == Role::Cop {
             // Nearest Wanted being, if any — pursuit overrides the timetable.
             let mut best: Option<((u8, u8), i32)> = None;
@@ -1273,6 +1417,86 @@ impl World {
             .cloned()
     }
 
+    // ---- Street combat (design/07) ----
+
+    /// xorshift64 face in `1..=sides`. Free function so `apply` can roll
+    /// through a disjoint `&mut self.rng` while `beings` is borrowed.
+    fn next_roll(state: &mut u64, sides: u8) -> u8 {
+        if *state == 0 {
+            *state = 1;
+        }
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        let sides = sides.max(1) as u64;
+        ((x % sides) + 1) as u8
+    }
+
+    pub fn roll(&mut self, sides: u8) -> u8 {
+        Self::next_roll(&mut self.rng, sides)
+    }
+
+    fn attack_target(&self, id: EntityId) -> Option<AttackTarget> {
+        if let Some(n) = self.npcs.get(&id.0) {
+            return Some(AttackTarget {
+                pos: n.pos,
+                pv: n.pv,
+                dv: n.dv,
+                is_npc: true,
+            });
+        }
+        self.beings.get(&id.0).map(|b| AttackTarget {
+            pos: b.pos,
+            pv: b.body.pv,
+            dv: b.body.dv.saturating_add(b.inventory.worn_dv(&self.items)),
+            is_npc: false,
+        })
+    }
+
+    /// Ranged line: same section, and no wall on the sampled cells between
+    /// shooter and target (endpoints excluded). Base cover rules are v0.5.
+    fn line_clear(&self, from: Pos, to: Pos) -> bool {
+        if (from.city, from.sx, from.sy, from.z) != (to.city, to.sx, to.sy, to.z) {
+            return false;
+        }
+        let Some(s) = self.section_at(from.sx, from.sy) else {
+            return false;
+        };
+        let dx = to.x as i32 - from.x as i32;
+        let dy = to.y as i32 - from.y as i32;
+        let steps = dx.abs().max(dy.abs());
+        if steps <= 1 {
+            return true;
+        }
+        for i in 1..steps {
+            let x = from.x as i32 + dx * i / steps;
+            let y = from.y as i32 + dy * i / steps;
+            if !s.walkable(x as u8, y as u8) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Nearest adjacent cop (for the surrender verb and UI).
+    pub fn adjacent_cop(&self, actor: EntityId) -> Option<u64> {
+        let here = self.pos_of(actor)?;
+        self.npcs
+            .iter()
+            .filter(|(_, n)| n.role == Role::Cop)
+            .filter(|(_, n)| {
+                (n.pos.city, n.pos.sx, n.pos.sy, n.pos.z) == (here.city, here.sx, here.sy, here.z)
+                    && (n.pos.x as i32 - here.x as i32)
+                        .abs()
+                        .max((n.pos.y as i32 - here.y as i32).abs())
+                        <= 1
+            })
+            .min_by_key(|(id, _)| **id)
+            .map(|(id, _)| *id)
+    }
+
     /// Apply damage to any being/NPC. Death is a state (`hp == 0`); callers
     /// decide whether that means revival, loot, or removal.
     pub fn damage(&mut self, id: EntityId, n: i32) -> crate::body::Damage {
@@ -1493,6 +1717,18 @@ impl World {
         // because it reads host ownership.
         let deck_foreign = self.is_foreign(intent.actor, HostId(1));
         let deck_range = self.is_range(HostId(1));
+        // Combat reads the target before the live `beings` borrow below.
+        let attack_target = match &intent.verb {
+            Verb::Attack { target } if *target != intent.actor => self.attack_target(*target),
+            _ => None,
+        };
+        let cop_near = self.adjacent_cop(intent.actor);
+        let attacker_pos = self.pos_of(intent.actor);
+        let attack_line = match (&attack_target, attacker_pos) {
+            (Some(t), Some(p)) => self.line_clear(p, t.pos),
+            _ => false,
+        };
+        let fine_due = self.fine_cost();
         let b = self.beings.get_mut(&intent.actor.0).ok_or(SimError::new(
             "unknown_actor",
             "spawned entity",
@@ -1543,6 +1779,8 @@ impl World {
         // Mail sent this act, delivered after the match for the same
         // borrow reason as crimes.
         let mut mails: Vec<(EntityId, String, bool)> = Vec::new();
+        // Jail overrides the normal next-act tick.
+        let mut next_at_override: Option<u64> = None;
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -1911,6 +2149,125 @@ impl World {
                     b.next_at = self.tick;
                 }
                 kind = "revived";
+            }
+            Verb::Attack { target } => {
+                let info = attack_target.clone().ok_or(SimError::new(
+                    "no_target",
+                    "nearby being",
+                    "missing/self",
+                ))?;
+                let here = b.pos;
+                let same_section = (here.city, here.sx, here.sy, here.z)
+                    == (info.pos.city, info.pos.sx, info.pos.sy, info.pos.z);
+                let dist = (here.x as i32 - info.pos.x as i32)
+                    .abs()
+                    .max((here.y as i32 - info.pos.y as i32).abs());
+                let (weapon_damage, ranged) = b
+                    .inventory
+                    .weapon(&self.items)
+                    .map(|d| (d.damage as i32, d.ranged))
+                    .unwrap_or((1, false));
+                let in_melee = same_section && dist <= 1;
+                let in_ranged = same_section && ranged && dist <= 6 && attack_line;
+                if !in_melee && !in_ranged {
+                    return Err(SimError::new(
+                        "out_of_range",
+                        "adjacent or clear line",
+                        "too far/blocked",
+                    ));
+                }
+                let bonus = (b.body.dex / 4) as i32 + 1;
+                let strength = if ranged { 0 } else { b.body.melee_bonus() };
+                let roll = Self::next_roll(&mut self.rng, 20);
+                let out =
+                    crate::combat::resolve(roll, bonus, info.pv, weapon_damage, strength, info.dv);
+                if out.hit {
+                    let died = self
+                        .health
+                        .get_mut(&target.0)
+                        .map(|h| h.damage(out.damage).died)
+                        .unwrap_or(false);
+                    if died {
+                        if info.is_npc {
+                            if let Some(n) = self.npcs.remove(&target.0) {
+                                if let Some(loot) = n.loot {
+                                    self.floor_items.push(FloorItem {
+                                        pos: n.pos,
+                                        def: loot,
+                                        qty: 1,
+                                    });
+                                }
+                            }
+                            self.health.remove(&target.0);
+                        }
+                        crimes.push((Act::Murder, None, Some(target), true));
+                        kind = "killed";
+                    } else {
+                        if info.is_npc {
+                            if let Some(n) = self.npcs.get_mut(&target.0) {
+                                n.aggro = Some(intent.actor.0);
+                            }
+                        }
+                        crimes.push((Act::Attack, None, Some(target), true));
+                        kind = "hit";
+                    }
+                } else {
+                    // A miss still makes the target hostile.
+                    if info.is_npc {
+                        if let Some(n) = self.npcs.get_mut(&target.0) {
+                            n.aggro = Some(intent.actor.0);
+                        }
+                    }
+                    kind = "miss";
+                }
+            }
+            Verb::Surrender => {
+                if self.record.standing() != Standing::Wanted {
+                    return Err(SimError::new("not_wanted", "wanted record", "clean/fined"));
+                }
+                if cop_near.is_none() {
+                    return Err(SimError::new("no_cop", "adjacent cop", "none"));
+                }
+                let mut paid = false;
+                if fine_due <= 0 {
+                    paid = true;
+                } else if let Some(acct) = self.accts.get(&intent.actor.0).copied() {
+                    let bank = self.ledger.balance(acct)?;
+                    let cash = b.money.min(fine_due);
+                    if bank >= fine_due - cash {
+                        if cash > 0 {
+                            b.money -= cash;
+                            self.ledger.mint(acct, cash)?;
+                        }
+                        let city = match self.city {
+                            Some(id) => id,
+                            None => {
+                                let id = self.ledger.open(EntityId(u64::MAX - 2), HostId(1));
+                                self.city = Some(id);
+                                id
+                            }
+                        };
+                        self.ledger.transfer(acct, city, fine_due)?;
+                        paid = true;
+                    }
+                }
+                if paid {
+                    self.record.pardon_all();
+                    kind = "surrendered";
+                } else {
+                    // Cannot pay: serve the night, lose pocket cash.
+                    b.money = 0;
+                    self.record.pardon_all();
+                    let hour = (self.tick / 60) % 24;
+                    let day = self.tick / DAY_TICKS;
+                    let release = if hour < 6 {
+                        day * DAY_TICKS + 360
+                    } else {
+                        (day + 1) * DAY_TICKS + 360
+                    };
+                    next_at_override = Some(release.max(self.tick + 1));
+                    kind = "jailed";
+                }
             }
             Verb::Pickup { ref item } => {
                 let pos = b.pos;
@@ -2349,7 +2706,7 @@ impl World {
         } else {
             b.speed.max(1)
         };
-        b.next_at = self.tick + eff;
+        b.next_at = next_at_override.unwrap_or(self.tick + eff);
         self.sched.schedule(intent.actor, b.next_at);
         // File any crimes this act committed, now that the `beings` borrow
         // is released (the witness lookup reads NPC positions).
@@ -2391,7 +2748,7 @@ impl World {
         // Wanted beings draw cop pursuit (design/05): the record's standing
         // is the only source, so a paid-off record ends the chase.
         let wanted = self.wanted_map();
-        self.step_npcs(hour, &wanted);
+        extra_kinds.extend(self.step_npcs(hour, &wanted));
         let mut events = vec![Event {
             tick: self.tick,
             actor: intent.actor,
@@ -2437,8 +2794,12 @@ impl World {
             _ => return Err(SimError::new("load", "snapshot v1-v2", "newer version")),
         }
         // v0.4 fields are all `#[serde(default)]`, so old snapshots need no
-        // version bump; just fill health from the spawn tables.
+        // version bump; just fill health from the spawn tables and reseed
+        // an absent street RNG.
         w.normalize_health();
+        if w.rng == 0 {
+            w.rng = w.seed | 1;
+        }
         w.rebuild_sched();
         Ok(w)
     }
@@ -3022,6 +3383,114 @@ mod tests {
         assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
     }
 
+    fn make_wanted(w: &mut World) {
+        w.record.report(Crime {
+            act: Act::Murder,
+            at_host: None,
+            tick: 0,
+            victim: None,
+            evidence: 1.0,
+        });
+        assert_eq!(w.standing(), Standing::Wanted);
+    }
+
+    #[test]
+    fn attack_kills_npc_drops_loot_and_files_crime() {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(10), Role::Shopkeeper, (9, 8), (9, 8), (9, 8), 9999);
+        w.add_item(EntityId(1), "knife", 1).unwrap();
+        w.equip_item(EntityId(1), "knife").unwrap();
+        let mut swings = 0;
+        while w.npc_role(10).is_some() && swings < 200 {
+            w.tick = w.next_at(EntityId(1));
+            w.heal(EntityId(1), 999);
+            let _ = w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Attack {
+                    target: EntityId(10),
+                },
+            });
+            swings += 1;
+        }
+        assert!(w.npc_role(10).is_none(), "npc survived {swings} swings");
+        assert!(w
+            .floor_items_at(pos(9, 8))
+            .iter()
+            .any(|(id, _)| id == "snack"));
+        assert!(w.record_mass() > 0.0);
+    }
+
+    #[test]
+    fn melee_attack_refuses_out_of_range() {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(
+            EntityId(10),
+            Role::Shopkeeper,
+            (12, 12),
+            (12, 12),
+            (12, 12),
+            9999,
+        );
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Attack {
+                    target: EntityId(10),
+                },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "out_of_range");
+    }
+
+    #[test]
+    fn wanted_draws_cop_attack_and_surrender_settles() {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(20), Role::Cop, (9, 8), (9, 8), (9, 8), 1);
+        make_wanted(&mut w);
+        let wanted = w.wanted_map();
+        let mut hurt = false;
+        for _ in 0..80 {
+            let _ = w.step_npcs(10, &wanted);
+            if w.hp(EntityId(1)) < crate::body::BASE_HP {
+                hurt = true;
+                break;
+            }
+            w.tick += 1;
+        }
+        assert!(hurt, "cop never hit a Wanted player");
+        // Surrender with funds clears the record and ends pursuit.
+        let acct = w.open_account(EntityId(1), HostId(2)).unwrap();
+        w.ledger.mint(acct, 1000).unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Surrender,
+        })
+        .unwrap();
+        assert_eq!(w.standing(), Standing::Clean);
+        assert_eq!(w.bank_balance(EntityId(1)), Some(400));
+    }
+
+    #[test]
+    fn broke_surrender_serves_the_night_and_clears_record() {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(EntityId(20), Role::Cop, (9, 8), (9, 8), (9, 8), 9999);
+        make_wanted(&mut w);
+        w.tick = 0;
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Surrender,
+        })
+        .unwrap();
+        assert_eq!(w.standing(), Standing::Clean);
+        assert!(w.next_at(EntityId(1)) >= 360);
+        assert_eq!(w.needs(EntityId(1)).unwrap().2, 0);
+    }
+
     #[test]
     fn items_buy_equip_use_drop_pickup() {
         use crate::shop::Shop;
@@ -3206,7 +3675,9 @@ mod tests {
             w.tick += 1;
         }
         let p = w.npc_positions()[0];
-        assert_eq!((p.1, p.2), (8, 8));
+        // The cop now stops adjacent to attack, rather than sharing the tile.
+        let d = (p.1 as i32 - 8).abs().max((p.2 as i32 - 8).abs());
+        assert!(d <= 1, "cop stopped at {:?}, not adjacent", (p.1, p.2));
     }
 
     #[test]

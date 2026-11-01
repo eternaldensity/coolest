@@ -405,7 +405,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(169) {
+    match rng.below(173) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -496,6 +496,10 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
         166..=168 => Verb::Use {
             item: ["medkit", "snack"][rng.below(2) as usize].to_string(),
         },
+        169..=171 => Verb::Attack {
+            target: EntityId(10 + rng.below(2) as u64),
+        },
+        172 => Verb::Surrender,
         _ => Verb::OpenMail { index: 0 },
     }
 }

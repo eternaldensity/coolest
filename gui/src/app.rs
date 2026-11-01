@@ -265,20 +265,7 @@ impl Shell {
             actor: self.actor,
             verb,
         };
-        if let Err(e) = self.server.apply_one(intent) {
-            self.say(format!("rejected: {e}"));
-        }
-        self.say_status();
-    }
-
-    /// Like `do_verb`, but also relays any retaliation beat the act
-    /// triggered (warden kills, traces) — the console code/farm paths
-    /// would otherwise silently lose a producer that died on its first beat.
-    fn act_narrated(&mut self, verb: Verb) {
-        match self.server.apply_one(Intent {
-            actor: self.actor,
-            verb,
-        }) {
+        match self.server.apply_one(intent) {
             Ok((_, events)) => {
                 for line in Self::beat_lines(&events) {
                     self.say(line);
@@ -287,6 +274,13 @@ impl Shell {
             Err(e) => self.say(format!("rejected: {e}")),
         }
         self.say_status();
+    }
+
+    /// Like `do_verb`, but also relays any retaliation beat the act
+    /// triggered (warden kills, traces) — the console code/farm paths
+    /// would otherwise silently lose a producer that died on its first beat.
+    fn act_narrated(&mut self, verb: Verb) {
+        self.do_verb(verb);
     }
 
     fn run_command(&mut self) {
@@ -385,6 +379,18 @@ impl Shell {
                 }
                 "warden_kill" => out.push("warden killed one of your programs".to_string()),
                 "trace_burned" => out.push("trace completed — program burned".to_string()),
+                "hit" => out.push("you hit the target".to_string()),
+                "miss" => out.push("you miss".to_string()),
+                "killed" => out.push("target down — loot dropped".to_string()),
+                "hurt" => out.push("you are hit!".to_string()),
+                "downed" => out.push("you are down — revive at the clinic".to_string()),
+                "dodged" => out.push("attack dodged".to_string()),
+                "picked_up" => out.push("picked up".to_string()),
+                "dropped" => out.push("dropped".to_string()),
+                "equipped" => out.push("equipped".to_string()),
+                "used" => out.push("used".to_string()),
+                "surrendered" => out.push("surrendered — fine paid".to_string()),
+                "jailed" => out.push("spent the night in jail — record cleared".to_string()),
                 _ => {}
             }
         }
@@ -771,6 +777,27 @@ impl Shell {
                             if ui.button(format!("Pick up {name} x{qty}")).clicked() {
                                 self.do_verb(Verb::Pickup { item: id.clone() });
                             }
+                        }
+                    });
+                }
+                // Street combat (design/07): attack an adjacent NPC, or
+                // surrender to an adjacent cop while Wanted.
+                let targets = self.nearby_npcs();
+                if !targets.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Attack:");
+                        for (id, role) in &targets {
+                            if ui.button(format!("Attack {role:?}")).clicked() {
+                                self.do_verb(Verb::Attack {
+                                    target: EntityId(*id),
+                                });
+                            }
+                        }
+                        if self.server.world.standing() == Standing::Wanted
+                            && self.server.world.adjacent_cop(self.actor).is_some()
+                            && ui.button("Surrender").clicked()
+                        {
+                            self.do_verb(Verb::Surrender);
                         }
                     });
                 }
@@ -2387,6 +2414,26 @@ mod tests {
             );
             // Farm + two watches are all logged acts.
             assert_eq!(h.shell.server.log.len(), 3);
+        }
+
+        #[test]
+        fn attack_adjacent_npc_through_click() {
+            let mut h = Harness::new();
+            h.shell.server.world.spawn_npc(
+                EntityId(99),
+                sim::Role::Office,
+                (9, 8),
+                (9, 8),
+                (9, 8),
+                9999,
+            );
+            h.pass_with(vec![]);
+            h.click("Attack Office");
+            assert!(
+                h.has_text("you hit") || h.has_text("you miss"),
+                "text: {:?}",
+                h.labels()
+            );
         }
 
         #[test]
