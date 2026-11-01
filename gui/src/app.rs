@@ -766,7 +766,14 @@ impl Shell {
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
+            let scroll_id = match self.tab {
+                Tab::Street => "street-scroll",
+                Tab::Deck => "deck-scroll",
+                Tab::Net => "net-scroll",
+                Tab::Veil => "veil-scroll",
+            };
             egui::ScrollArea::vertical()
+                .id_salt(scroll_id)
                 .auto_shrink([false, false])
                 .show(ui, |ui| match self.tab {
             Tab::Street => {
@@ -1252,10 +1259,58 @@ impl Shell {
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
-                let (heads, tails, prod, cpu, total) = match self.server.world.host(HostId(1)) {
+                if let Some(h) = self.server.world.host(HostId(1)) {
+                    ui.horizontal_wrapped(|ui| {
+                        crate::theme::chip(
+                            ui,
+                            format!("arch {}", h.arch().name()),
+                            crate::theme::OLDNET,
+                        );
+                        crate::theme::chip(
+                            ui,
+                            if h.monitor() { "monitor armed" } else { "quiet" },
+                            if h.monitor() {
+                                crate::theme::DANGER
+                            } else {
+                                crate::theme::MUTED
+                            },
+                        );
+                        crate::theme::chip(
+                            ui,
+                            if h.firewall() { "filter on" } else { "filter off" },
+                            if h.firewall() {
+                                crate::theme::BETANET
+                            } else {
+                                crate::theme::MUTED
+                            },
+                        );
+                        crate::theme::chip(
+                            ui,
+                            if h.scanned(self.actor) {
+                                "scanned"
+                            } else {
+                                "unscanned"
+                            },
+                            crate::theme::BETANET,
+                        );
+                    });
+                    if let Some((progress, threshold)) = h.trace_progress() {
+                        let frac = progress as f32 / threshold.max(1) as f32;
+                        ui.add(
+                            egui::ProgressBar::new(frac)
+                                .desired_width(ui.available_width().min(520.0))
+                                .fill(crate::theme::DANGER)
+                                .text(format!(
+                                    "TRACE {progress}/{threshold} — scrub or outrun"
+                                )),
+                        );
+                    }
+                }
+                let (heads, tails, head_kinds, prod, cpu, total) = match self.server.world.host(HostId(1)) {
                     Some(h) => {
                         let mut heads = std::collections::BTreeMap::new();
                         let mut tails = std::collections::BTreeSet::new();
+                        let mut head_kinds = std::collections::BTreeMap::new();
                         for p in h.progs.values() {
                             if p.owner == self.actor {
                                 if let Some((makes, _)) = h.maker_info(p.id) {
@@ -1269,15 +1324,17 @@ impl Shell {
                                 }
                             }
                             heads.insert((p.head.0, p.head.1), None);
+                            head_kinds.insert((p.head.0, p.head.1), p.kind);
                             for t in &p.tail {
                                 tails.insert((t.0, t.1));
                             }
                         }
-                        (heads, tails, h.producer_summary(self.actor), h.cpu_load(), h.cpu_total)
+                        (heads, tails, head_kinds, h.producer_summary(self.actor), h.cpu_load(), h.cpu_total)
                     }
                     None => (
                         std::collections::BTreeMap::new(),
                         std::collections::BTreeSet::new(),
+                        std::collections::BTreeMap::new(),
                         vec![],
                         0,
                         0,
@@ -1286,7 +1343,7 @@ impl Shell {
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
-                            let (glyph, color) = if let Some(Some(res)) = heads.get(&(x, y)) {
+                            let (glyph, color, fill) = if let Some(Some(res)) = heads.get(&(x, y)) {
                                 // Producer head: P in the resource's color.
                                 (
                                     "P",
@@ -1295,18 +1352,47 @@ impl Shell {
                                         sim::Res::Data => egui::Color32::from_rgb(110, 190, 230),
                                         sim::Res::Algo => egui::Color32::from_rgb(220, 150, 240),
                                     },
+                                    egui::Color32::from_rgb(0x16, 0x21, 0x1B),
                                 )
-                            } else if heads.contains_key(&(x, y)) {
-                                ("H", egui::Color32::LIGHT_RED)
+                            } else if let Some(kind) = head_kinds.get(&(x, y)) {
+                                let color = match kind {
+                                    sim::ProgramKind::Killer => crate::theme::OLDNET,
+                                    sim::ProgramKind::Shield => crate::theme::SUCCESS,
+                                    sim::ProgramKind::Scanner => crate::theme::BETANET,
+                                    sim::ProgramKind::Cracker => crate::theme::VEIL,
+                                    sim::ProgramKind::Connector => crate::theme::MUTED,
+                                    sim::ProgramKind::Cloner => crate::theme::MONEY,
+                                    sim::ProgramKind::Editor => crate::theme::PAPER,
+                                };
+                                let glyph = match kind {
+                                    sim::ProgramKind::Killer => "K",
+                                    sim::ProgramKind::Shield => "S",
+                                    sim::ProgramKind::Scanner => "Sc",
+                                    sim::ProgramKind::Cracker => "Cr",
+                                    sim::ProgramKind::Connector => "Co",
+                                    sim::ProgramKind::Cloner => "Cl",
+                                    sim::ProgramKind::Editor => "E",
+                                };
+                                (glyph, color, egui::Color32::from_rgb(0x16, 0x1F, 0x29))
                             } else if tails.contains(&(x, y)) {
-                                ("o", egui::Color32::GRAY)
+                                ("o", crate::theme::FAINT, egui::Color32::from_rgb(0x11, 0x18, 0x20))
                             } else if Some((x, y)) == self.sel {
-                                ("X", egui::Color32::YELLOW)
+                                ("X", crate::theme::OLDNET, egui::Color32::from_rgb(0x2A, 0x21, 0x14))
                             } else {
-                                (".", egui::Color32::DARK_GRAY)
+                                (".", crate::theme::FAINT, egui::Color32::from_rgb(0x0D, 0x14, 0x1A))
                             };
                             if ui
-                                .button(egui::RichText::new(glyph).monospace().color(color))
+                                .add_sized(
+                                    [30.0, 30.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(glyph)
+                                            .monospace()
+                                            .size(11.0)
+                                            .color(color),
+                                    )
+                                    .fill(fill)
+                                    .stroke(egui::Stroke::new(1.0, crate::theme::LINE)),
+                                )
                                 .clicked()
                             {
                                 self.sel = Some((x, y));
@@ -1316,6 +1402,14 @@ impl Shell {
                     }
                 });
                 ui.label(format!("CPU {cpu}/{total}"));
+                if total > 0 {
+                    ui.add(
+                        egui::ProgressBar::new(cpu as f32 / total as f32)
+                            .desired_width(ui.available_width().min(520.0))
+                            .fill(crate::theme::BETANET)
+                            .text(format!("CPU {cpu}/{total}")),
+                    );
+                }
                 if let Some(h) = self.server.world.host(HostId(1)) {
                     ui.label(format!(
                         "arch {} · vulns {} · breached {} · scanned {}",
@@ -1709,8 +1803,99 @@ impl Shell {
             Tab::Net => {
                 crate::theme::heading(ui, "Net — world graph (Oldnet/Betanet)");
                 ui.label("More hops = safer trace, higher tolls. Laser is fast but tolled. Dark sections drop their hosts.");
-                // Graph snapshot: nodes (with net kind + power state) and links.
+                // Graph canvas: nodes on a transit-diagram strip, edges as
+                // Oldnet copper or Betanet laser lines. Controls stay below.
                 let node_ids = self.server.world.net.node_ids();
+                let graph_size = egui::vec2(ui.available_width().min(720.0), 200.0);
+                let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::hover());
+                let grect = gresp.rect;
+                gp.rect_filled(grect, 8.0, egui::Color32::from_rgb(0x0D, 0x14, 0x1A));
+                gp.rect_stroke(
+                    grect,
+                    8.0,
+                    egui::Stroke::new(1.0, crate::theme::LINE),
+                    egui::StrokeKind::Inside,
+                );
+                let mut npos = std::collections::BTreeMap::new();
+                let n = node_ids.len().max(1);
+                for (i, id) in node_ids.iter().enumerate() {
+                    let x = grect.min.x + 90.0
+                        + (grect.width() - 180.0) * i as f32 / (n.saturating_sub(1).max(1) as f32);
+                    let y = grect.center().y + if i % 2 == 0 { -34.0 } else { 34.0 };
+                    npos.insert(id.0, egui::pos2(x, y));
+                }
+                for l in self.server.world.net.links() {
+                    let (Some(a), Some(b)) = (npos.get(&l.from.0), npos.get(&l.to.0)) else {
+                        continue;
+                    };
+                    let dark = self.server.world.power.is_host_dark(l.from)
+                        || self.server.world.power.is_host_dark(l.to);
+                    let (color, dash) = match l.kind {
+                        LinkKind::Laser => (crate::theme::BETANET, false),
+                        LinkKind::Wireless { .. } => (crate::theme::VEIL, true),
+                        LinkKind::Wired { damaged } => {
+                            (if damaged { crate::theme::FAINT } else { crate::theme::OLDNET }, damaged)
+                        }
+                    };
+                    let color = if dark { crate::theme::FAINT } else { color };
+                    if dash {
+                        let steps = 10;
+                        for s in 0..steps {
+                            if s % 2 == 0 {
+                                let t0 = s as f32 / steps as f32;
+                                let t1 = (s + 1) as f32 / steps as f32;
+                                gp.line_segment(
+                                    [*a + (*b - *a) * t0, *a + (*b - *a) * t1],
+                                    egui::Stroke::new(2.0, color),
+                                );
+                            }
+                        }
+                    } else {
+                        gp.line_segment([*a, *b], egui::Stroke::new(2.0, color));
+                    }
+                    let mid = *a + (*b - *a) * 0.5;
+                    gp.text(
+                        mid,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{}ms", l.latency_ms),
+                        egui::FontId::monospace(9.0),
+                        color,
+                    );
+                }
+                for id in &node_ids {
+                    let Some(n) = self.server.world.net.node(*id) else {
+                        continue;
+                    };
+                    let Some(p) = npos.get(&id.0) else { continue };
+                    let dark = self.server.world.power.is_host_dark(*id);
+                    let color = if dark {
+                        crate::theme::FAINT
+                    } else {
+                        match n.net {
+                            NetKind::Oldnet => crate::theme::OLDNET,
+                            NetKind::Betanet => crate::theme::BETANET,
+                        }
+                    };
+                    gp.circle_filled(*p, 23.0, egui::Color32::from_rgb(0x12, 0x1B, 0x22));
+                    gp.circle_stroke(*p, 23.0, egui::Stroke::new(1.8, color));
+                    gp.text(
+                        *p,
+                        egui::Align2::CENTER_CENTER,
+                        format!("{}", id.0),
+                        egui::FontId::monospace(12.0),
+                        color,
+                    );
+                    if n.gateway {
+                        gp.text(
+                            *p + egui::vec2(0.0, 34.0),
+                            egui::Align2::CENTER_CENTER,
+                            "gateway",
+                            egui::FontId::proportional(9.0),
+                            crate::theme::MUTED,
+                        );
+                    }
+                }
+                // Graph snapshot: nodes (with net kind + power state) and links.
                 let mut lines: Vec<String> = Vec::new();
                 for id in &node_ids {
                     if let Some(n) = self.server.world.net.node(*id) {

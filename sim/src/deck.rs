@@ -975,6 +975,15 @@ impl Host {
         self.monitor_armed = armed;
     }
 
+    pub fn monitor(&self) -> bool {
+        self.monitor_armed
+    }
+
+    /// Active trace (progress, threshold), if any.
+    pub fn trace_progress(&self) -> Option<(u32, u32)> {
+        self.trace.as_ref().map(|t| (t.progress, t.threshold))
+    }
+
     /// Claim this rig for a defender (or release it with None). Only a
     /// monitored, owned rig retaliates; see `retaliate`.
     pub fn set_owner(&mut self, owner: Option<EntityId>) {
