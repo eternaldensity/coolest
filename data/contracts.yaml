@@ -1,0 +1,74 @@
+# v0.5 local contract templates (docs/JOB-BOARD-ACCEPT.md).
+# kind: deliver_item | deliver_resource | courier | bounty | hack
+# employer_role: shopkeeper | office | cop (resolved to a local NPC on the board)
+# risk: legal | grey | illegal | combat
+# deadline_hours is measured from posting, so late acceptance has less time.
+- id: clinic-medkit
+  title: Clinic medkit run
+  kind: deliver_item
+  employer_role: shopkeeper
+  payout_cents: 220
+  deposit_cents: 20
+  deadline_hours: 12
+  risk: legal
+  min_rep: 0
+  item: medkit
+  qty: 2
+- id: data-drop
+  title: Data drop
+  kind: deliver_resource
+  employer_role: shopkeeper
+  payout_cents: 160
+  deadline_hours: 12
+  risk: legal
+  min_rep: 0
+  resource: data
+  units: 4
+- id: office-loop
+  title: Office loop refill
+  kind: deliver_resource
+  employer_role: office
+  payout_cents: 180
+  deadline_hours: 24
+  risk: legal
+  min_rep: 0
+  resource: loop
+  units: 6
+- id: counter-run
+  title: Counter run
+  kind: courier
+  employer_role: shopkeeper
+  payout_cents: 90
+  deadline_hours: 6
+  risk: legal
+  min_rep: 0
+  tile: [12, 8]
+- id: night-drop
+  title: Night drop
+  kind: courier
+  employer_role: office
+  payout_cents: 140
+  deadline_hours: 8
+  risk: grey
+  min_rep: 0
+  tile: [13, 8]
+- id: snack-stock
+  title: Snack restock
+  kind: deliver_item
+  employer_role: shopkeeper
+  payout_cents: 100
+  deadline_hours: 6
+  risk: legal
+  min_rep: 0
+  item: snack
+  qty: 3
+- id: range-breach
+  title: Range breach
+  kind: hack
+  employer_role: office
+  payout_cents: 420
+  deposit_cents: 40
+  deadline_hours: 24
+  risk: illegal
+  min_rep: 0
+  host: 1

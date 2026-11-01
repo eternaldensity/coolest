@@ -2,6 +2,7 @@
 pub mod body;
 pub mod civic;
 pub mod combat;
+pub mod contracts;
 pub mod crime;
 pub mod data;
 pub mod deck;
@@ -25,13 +26,16 @@ pub mod world;
 pub use body::{Body, Damage, Health, Mind, BASE_HP, REVIVE_FEE};
 pub use civic::{cop_duty, role_table, Activity, Role, Timetable};
 pub use combat::resolve as resolve_attack;
+pub use contracts::{
+    Contract, ContractState, ContractTemplate, JobOffer, OfferKind, OfferSource, Risk, TemplateKind,
+};
 pub use crime::{
     trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing, LICENSE_KILLS,
     WARRANT_AT,
 };
 pub use data::{
-    parse_cards, parse_dialogues, parse_districts, parse_items, parse_jobs, parse_vulns, CardDef,
-    CardTable, DistrictDef, JobDef, VulnDef,
+    parse_cards, parse_contracts, parse_dialogues, parse_districts, parse_items, parse_jobs,
+    parse_vulns, CardDef, CardTable, DistrictDef, JobDef, VulnDef,
 };
 pub use deck::{AttackOutcome, CellPos, Fx, Host, HostArch, Mod, Res};
 pub use error::SimError;

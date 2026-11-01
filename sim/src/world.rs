@@ -1,5 +1,8 @@
 use crate::body::{Body, Health, Mind, BASE_HP};
 use crate::civic::{cop_duty, role_table, Role};
+use crate::contracts::{
+    offer_from_template, Contract, ContractState, ContractTemplate, JobOffer, OfferKind, Risk,
+};
 use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing};
 use crate::deck::{CellPos, Host};
 use crate::error::SimError;
@@ -36,6 +39,14 @@ pub enum Verb {
     Wait,
     Eat,
     Work(u8),
+    /// Reserve a local contract-board offer (v0.5). One active contract.
+    AcceptOffer {
+        offer: u64,
+    },
+    /// Claim the active contract once its completion condition is met.
+    DeliverContract,
+    /// Give up the active contract; the deposit is forfeited.
+    AbandonContract,
     Watch,
     /// Buy an item from the shop at the actor's tile (ledgered).
     Buy(String),
@@ -298,6 +309,14 @@ struct AttackTarget {
     is_npc: bool,
 }
 
+/// Contract work is applied after the live `beings` borrow ends, so the
+/// arm can share the same ledger/board helpers as the rest of the world.
+enum ContractOp {
+    Accept(u64),
+    Deliver,
+    Abandon,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Being {
     pos: Pos,
@@ -467,6 +486,21 @@ pub struct World {
     /// attach a trojan to mail. Default false.
     #[serde(default)]
     mailer_plus: bool,
+    /// v0.5 local contract board. Templates come from data/contracts.yaml;
+    /// the board refreshes once per game day.
+    #[serde(default = "crate::contracts::default_contracts")]
+    contract_templates: Vec<ContractTemplate>,
+    #[serde(default)]
+    board_day: Option<u64>,
+    #[serde(default)]
+    offers: Vec<JobOffer>,
+    #[serde(default)]
+    contract: Option<Contract>,
+    #[serde(default)]
+    employer_rep: BTreeMap<u64, i32>,
+    /// Lazily opened system account holding payout + player deposit.
+    #[serde(default)]
+    escrow: Option<u64>,
 }
 
 /// Card costs matching data/cards.yaml (design/03: cards consume to fire).
@@ -542,6 +576,12 @@ impl World {
             card_costs: default_card_costs(),
             mailboxes: BTreeMap::new(),
             mailer_plus: false,
+            contract_templates: crate::contracts::default_contracts(),
+            board_day: None,
+            offers: Vec::new(),
+            contract: None,
+            employer_rep: BTreeMap::new(),
+            escrow: None,
         }
     }
 
@@ -566,6 +606,281 @@ impl World {
             return None;
         }
         Some((crate::deck::Res::from_index(idx), units))
+    }
+
+    // ---- v0.5 local contract board ----
+
+    /// Override board templates from data/contracts.yaml.
+    pub fn set_contracts(&mut self, defs: &[ContractTemplate]) {
+        if !defs.is_empty() {
+            self.contract_templates = defs.to_vec();
+            self.board_day = None;
+            self.offers.clear();
+        }
+    }
+
+    pub fn offers(&self) -> &[JobOffer] {
+        &self.offers
+    }
+
+    pub fn active_contract(&self) -> Option<&Contract> {
+        self.contract.as_ref()
+    }
+
+    pub fn employer_reputation(&self, employer: EntityId) -> i32 {
+        self.employer_rep.get(&employer.0).copied().unwrap_or(0)
+    }
+
+    pub fn contract_ticks_left(&self) -> Option<u64> {
+        self.contract
+            .as_ref()
+            .map(|c| c.deadline_tick.saturating_sub(self.tick))
+    }
+
+    /// Force a board refresh (GUI startup and tests).
+    pub fn refresh_board(&mut self) {
+        self.board_day = None;
+        self.ensure_board();
+    }
+
+    fn ensure_board(&mut self) {
+        let day = self.tick / DAY_TICKS;
+        if self.board_day == Some(day) {
+            return;
+        }
+        self.board_day = Some(day);
+        self.offers.clear();
+        let mut order: Vec<usize> = (0..self.contract_templates.len()).collect();
+        order.sort_by_key(|i| Self::mix(self.seed ^ day ^ *i as u64));
+        for i in order.into_iter().take(5) {
+            let t = self.contract_templates[i].clone();
+            let employer = t
+                .employer_role
+                .as_deref()
+                .and_then(crate::contracts::parse_role)
+                .and_then(|role| {
+                    self.npcs
+                        .iter()
+                        .find(|(_, n)| n.role == role)
+                        .map(|(id, _)| EntityId(*id))
+                })
+                .or_else(|| self.npcs.keys().next().map(|id| EntityId(*id)))
+                .unwrap_or(EntityId(0));
+            if self.employer_reputation(employer) < t.min_rep {
+                continue;
+            }
+            if let Ok(offer) = offer_from_template(&t, day * 1000 + i as u64, employer, self.tick) {
+                self.offers.push(offer);
+            }
+        }
+    }
+
+    fn mix(mut x: u64) -> u64 {
+        x ^= x >> 33;
+        x = x.wrapping_mul(0xff51afd7ed558ccd);
+        x ^= x >> 33;
+        x = x.wrapping_mul(0xc4ceb9fe1a85ec53);
+        x ^ (x >> 33)
+    }
+
+    fn city_account(&mut self) -> u64 {
+        match self.city {
+            Some(id) => id,
+            None => {
+                let id = self.ledger.open(EntityId(u64::MAX - 2), HostId(1));
+                self.city = Some(id);
+                id
+            }
+        }
+    }
+
+    fn escrow_account(&mut self) -> u64 {
+        match self.escrow {
+            Some(id) => id,
+            None => {
+                let id = self.ledger.open(EntityId(u64::MAX - 3), HostId(1));
+                self.escrow = Some(id);
+                id
+            }
+        }
+    }
+
+    fn refund_escrow(&mut self, c: &Contract) -> Result<(), SimError> {
+        let Some(escrow) = self.escrow else {
+            return Ok(());
+        };
+        let dest = match self.accts.get(&c.employer.0).copied() {
+            Some(acct) => acct,
+            None => self.city_account(),
+        };
+        if c.escrow_cents > 0 {
+            self.ledger.transfer(escrow, dest, c.escrow_cents)?;
+        }
+        Ok(())
+    }
+
+    fn expire_contract(&mut self) -> bool {
+        let Some(c) = self.contract.clone() else {
+            return false;
+        };
+        if self.tick < c.deadline_tick {
+            return false;
+        }
+        self.contract = None;
+        let _ = self.refund_escrow(&c);
+        *self.employer_rep.entry(c.employer.0).or_insert(0) -= 1;
+        true
+    }
+
+    fn accept_offer(&mut self, actor: EntityId, offer_id: u64) -> Result<(), SimError> {
+        if self.contract.is_some() {
+            return Err(SimError::new(
+                "contract_active",
+                "one active contract",
+                "busy",
+            ));
+        }
+        let idx = self
+            .offers
+            .iter()
+            .position(|o| o.id == offer_id)
+            .ok_or(SimError::new("no_offer", "posted offer", "missing"))?;
+        let offer = self.offers[idx].clone();
+        if self.tick >= offer.deadline_tick {
+            self.offers.remove(idx);
+            return Err(SimError::new("offer_expired", "live offer", "expired"));
+        }
+        if self.employer_reputation(offer.employer) < offer.min_rep {
+            return Err(SimError::new("reputation", "employer trust", "too low"));
+        }
+        let employer_acct = self
+            .accts
+            .get(&offer.employer.0)
+            .copied()
+            .ok_or(SimError::new(
+                "no_employer_account",
+                "employer bank",
+                "unbanked",
+            ))?;
+        let actor_acct = self.accts.get(&actor.0).copied().ok_or(SimError::new(
+            "no_account",
+            "open account",
+            "unbanked",
+        ))?;
+        if self.ledger.balance(employer_acct)? < offer.payout_cents {
+            return Err(SimError::new("escrow_short", "employer funds", "short"));
+        }
+        if offer.deposit_cents > 0 && self.ledger.balance(actor_acct)? < offer.deposit_cents {
+            return Err(SimError::new("deposit_short", "deposit funds", "short"));
+        }
+        let escrow = self.escrow_account();
+        self.ledger
+            .transfer(employer_acct, escrow, offer.payout_cents)?;
+        if offer.deposit_cents > 0 {
+            self.ledger
+                .transfer(actor_acct, escrow, offer.deposit_cents)?;
+        }
+        self.offers.remove(idx);
+        self.contract = Some(Contract {
+            offer: offer.id,
+            title: offer.title,
+            employer: offer.employer,
+            kind: offer.kind,
+            accepted_tick: self.tick,
+            deadline_tick: offer.deadline_tick,
+            risk: offer.risk,
+            escrow_cents: offer.payout_cents + offer.deposit_cents,
+            deposit_cents: offer.deposit_cents,
+            state: ContractState::Accepted,
+            progress: 0,
+        });
+        Ok(())
+    }
+
+    fn complete_contract(&mut self, actor: EntityId) -> Result<Risk, SimError> {
+        let c =
+            self.contract
+                .clone()
+                .ok_or(SimError::new("no_contract", "active contract", "none"))?;
+        if self.tick >= c.deadline_tick {
+            self.contract = None;
+            let _ = self.refund_escrow(&c);
+            *self.employer_rep.entry(c.employer.0).or_insert(0) -= 1;
+            return Err(SimError::new(
+                "contract_expired",
+                "live contract",
+                "expired",
+            ));
+        }
+        match &c.kind {
+            OfferKind::DeliverItem { item, qty } => {
+                let have = self.inventory(actor).map(|i| i.qty(item)).unwrap_or(0);
+                if have < *qty {
+                    return Err(SimError::new("items_short", "contract items", "short"));
+                }
+            }
+            OfferKind::DeliverResource { res, units } => {
+                let have = self
+                    .hosts
+                    .get(&1)
+                    .map(|h| h.stock(actor, *res))
+                    .unwrap_or(0);
+                if have < *units {
+                    return Err(SimError::new("units_short", "contract units", "short"));
+                }
+            }
+            OfferKind::Courier { tile } => {
+                if self.pos_of(actor) != Some(*tile) {
+                    return Err(SimError::new("not_there", "courier target", "elsewhere"));
+                }
+            }
+            OfferKind::Bounty { target } => {
+                if self.npcs.contains_key(&target.0) || self.beings.contains_key(&target.0) {
+                    return Err(SimError::new("target_alive", "bounty target", "alive"));
+                }
+            }
+            OfferKind::Hack { host } => {
+                if !self.hosts.get(&host.0).map(|h| h.breached).unwrap_or(false) {
+                    return Err(SimError::new("not_breached", "breached host", "closed"));
+                }
+            }
+        }
+        // Consume the delivery only after every condition passed.
+        match &c.kind {
+            OfferKind::DeliverItem { item, qty } => {
+                self.remove_item(actor, item, *qty)?;
+            }
+            OfferKind::DeliverResource { res, units } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                host.consume(actor, *res, *units)?;
+            }
+            _ => {}
+        }
+        let acct = self.accts.get(&actor.0).copied().ok_or(SimError::new(
+            "no_account",
+            "open account",
+            "unbanked",
+        ))?;
+        let escrow = self.escrow_account();
+        if c.escrow_cents > 0 {
+            self.ledger.transfer(escrow, acct, c.escrow_cents)?;
+        }
+        *self.employer_rep.entry(c.employer.0).or_insert(0) += 1;
+        self.contract = None;
+        Ok(c.risk)
+    }
+
+    fn abandon_contract(&mut self, _actor: EntityId) -> Result<(), SimError> {
+        let c =
+            self.contract
+                .take()
+                .ok_or(SimError::new("no_contract", "active contract", "none"))?;
+        self.refund_escrow(&c)?;
+        *self.employer_rep.entry(c.employer.0).or_insert(0) -= 1;
+        Ok(())
     }
 
     /// Override the card cost table from data/cards.yaml (design/11 rule 4).
@@ -1581,6 +1896,14 @@ impl World {
         if b.mood < 30 {
             return "Mood low: Watch a show (-$0.30)".to_string();
         }
+        if let Some(c) = &self.contract {
+            let left = c.deadline_tick.saturating_sub(self.tick);
+            return format!(
+                "Contract: {} ({left} ticks left) — {}",
+                c.title,
+                c.kind.summary()
+            );
+        }
         if b.money < 0 {
             return "In debt: work to climb out".to_string();
         }
@@ -1725,6 +2048,8 @@ impl World {
     pub fn apply(&mut self, intent: &Intent) -> Result<(Delta, Vec<Event>), SimError> {
         // Deck acts land on world host 1; computed before the being borrow
         // because it reads host ownership.
+        self.ensure_board();
+        let expired_contract = self.expire_contract();
         let deck_foreign = self.is_foreign(intent.actor, HostId(1));
         let deck_range = self.is_range(HostId(1));
         // Combat reads the target before the live `beings` borrow below.
@@ -1793,6 +2118,8 @@ impl World {
         let mut next_at_override: Option<u64> = None;
         // Veil users ejected by a blackout, drained after the match.
         let mut veil_ejections: Vec<EntityId> = Vec::new();
+        // Contract mutations run after the live `beings` borrow ends.
+        let mut contract_op: Option<ContractOp> = None;
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -1878,6 +2205,18 @@ impl World {
                 b.food = b.food.saturating_sub(food_c);
                 b.money += pay;
                 kind = "worked";
+            }
+            Verb::AcceptOffer { offer } => {
+                contract_op = Some(ContractOp::Accept(offer));
+                kind = "contract";
+            }
+            Verb::DeliverContract => {
+                contract_op = Some(ContractOp::Deliver);
+                kind = "contract";
+            }
+            Verb::AbandonContract => {
+                contract_op = Some(ContractOp::Abandon);
+                kind = "contract";
             }
             Verb::Watch => {
                 if b.money < WATCH_COST {
@@ -2784,6 +3123,27 @@ impl World {
         };
         b.next_at = next_at_override.unwrap_or(self.tick + eff);
         self.sched.schedule(intent.actor, b.next_at);
+        if expired_contract {
+            extra_kinds.push("contract_expired".to_string());
+        }
+        match contract_op {
+            Some(ContractOp::Accept(offer)) => {
+                self.accept_offer(intent.actor, offer)?;
+                kind = "contract_accepted";
+            }
+            Some(ContractOp::Deliver) => {
+                let risk = self.complete_contract(intent.actor)?;
+                kind = "contract_done";
+                if risk == Risk::Illegal {
+                    crimes.push((Act::Theft, None, None, true));
+                }
+            }
+            Some(ContractOp::Abandon) => {
+                self.abandon_contract(intent.actor)?;
+                kind = "contract_abandoned";
+            }
+            None => {}
+        }
         // Blackout ejections drain mindpower (design/08).
         for id in veil_ejections {
             if let Some(bb) = self.beings.get_mut(&id.0) {
@@ -3572,6 +3932,145 @@ mod tests {
         assert_eq!(w.standing(), Standing::Clean);
         assert!(w.next_at(EntityId(1)) >= 360);
         assert_eq!(w.needs(EntityId(1)).unwrap().2, 0);
+    }
+
+    fn contract_world() -> World {
+        let mut w = World::new(3);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.spawn_npc(
+            EntityId(10),
+            Role::Shopkeeper,
+            (3, 3),
+            (12, 4),
+            (8, 12),
+            9999,
+        );
+        w.open_account(EntityId(1), HostId(1)).unwrap();
+        w.open_account(EntityId(10), HostId(1)).unwrap();
+        w.ledger.mint(w.account(EntityId(1)).unwrap(), 100).unwrap();
+        w.ledger
+            .mint(w.account(EntityId(10)).unwrap(), 1000)
+            .unwrap();
+        w.set_contracts(&[crate::contracts::default_contracts()[0].clone()]);
+        w.refresh_board();
+        w
+    }
+
+    #[test]
+    fn contract_accept_deliver_escrow_roundtrip() {
+        let mut w = contract_world();
+        let offer = w.offers()[0].id;
+        w.add_item(EntityId(1), "medkit", 2).unwrap();
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::AcceptOffer { offer },
+        })
+        .unwrap();
+        assert!(w.active_contract().is_some());
+        assert_eq!(w.bank_balance(EntityId(1)), Some(80)); // 20c deposit held
+        assert!(w.offers().is_empty(), "accepted offer must be reserved");
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeliverContract,
+        })
+        .unwrap();
+        assert!(w.active_contract().is_none());
+        assert_eq!(w.bank_balance(EntityId(1)), Some(320)); // deposit back + 220c
+        assert_eq!(w.inventory(EntityId(1)).unwrap().qty("medkit"), 0);
+        assert_eq!(w.employer_reputation(EntityId(10)), 1);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn contract_abandon_and_expiry_refund_employer() {
+        let mut w = contract_world();
+        let offer = w.offers()[0].id;
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::AcceptOffer { offer },
+        })
+        .unwrap();
+        let employer_before = w.bank_balance(EntityId(10)).unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::AbandonContract,
+        })
+        .unwrap();
+        assert!(w.active_contract().is_none());
+        assert_eq!(w.employer_reputation(EntityId(10)), -1);
+        assert_eq!(w.bank_balance(EntityId(10)), Some(employer_before + 240));
+
+        // Expiry: accepted, then time jumps past the deadline.
+        w.employer_rep.insert(10, 0); // abandon lowered rep below the offer gate
+        w.refresh_board();
+        let offer = w.offers()[0].id;
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::AcceptOffer { offer },
+        })
+        .unwrap();
+        let deadline = w.active_contract().unwrap().deadline_tick;
+        w.tick = deadline;
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::Wait,
+            })
+            .unwrap();
+        assert!(events.iter().any(|e| e.kind == "contract_expired"));
+        assert!(w.active_contract().is_none());
+        assert_eq!(w.employer_reputation(EntityId(10)), -1);
+        assert_eq!(w.ledger.live_sum(), w.ledger.audit_sum());
+    }
+
+    #[test]
+    fn contract_accept_requires_employer_funds_and_one_active_slot() {
+        let mut w = contract_world();
+        let offer = w.offers()[0].id;
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::AcceptOffer { offer },
+        })
+        .unwrap();
+        // Second accept is refused while the first is active.
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::AcceptOffer { offer },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "contract_active");
+        // A fresh board offer cannot be accepted by a broke employer.
+        w.contract = None;
+        w.refresh_board();
+        let acct = w.account(EntityId(10)).unwrap();
+        let bal = w.ledger.balance(acct).unwrap();
+        w.ledger.burn(acct, bal).unwrap();
+        let offer = w.offers()[0].id;
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::AcceptOffer { offer },
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "escrow_short");
+    }
+
+    #[test]
+    fn contract_board_is_seeded_and_refreshes_daily() {
+        let a = contract_world();
+        let b = contract_world();
+        let ta: Vec<(u64, String)> = a.offers().iter().map(|o| (o.id, o.title.clone())).collect();
+        let tb: Vec<(u64, String)> = b.offers().iter().map(|o| (o.id, o.title.clone())).collect();
+        assert_eq!(ta, tb);
+        assert!(!ta.is_empty());
+        let mut c = contract_world();
+        c.tick = DAY_TICKS;
+        c.refresh_board();
+        assert!(c.offers().iter().all(|o| o.id >= 1000));
     }
 
     #[test]

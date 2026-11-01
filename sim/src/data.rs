@@ -291,6 +291,42 @@ pub fn parse_items(s: &str) -> Result<ItemTable, SimError> {
     Ok(table)
 }
 
+pub fn parse_contracts(s: &str) -> Result<Vec<crate::contracts::ContractTemplate>, SimError> {
+    use std::collections::BTreeSet;
+    let rows: Vec<crate::contracts::ContractTemplate> = serde_yaml::from_str(s)
+        .map_err(|_| SimError::new("data", "contracts.yaml list", "unparseable"))?;
+    if rows.is_empty() {
+        return Err(SimError::new("data", ">= 1 contract", "empty"));
+    }
+    let items = crate::items::default_items();
+    let mut ids = BTreeSet::new();
+    for (i, t) in rows.iter().enumerate() {
+        if !ids.insert(t.id.clone()) {
+            return Err(SimError::new("data", "unique contract id", "duplicate"));
+        }
+        if t.payout_cents <= 0 || t.deadline_hours == 0 || t.deposit_cents < 0 {
+            return Err(SimError::new(
+                "data",
+                "payout > 0, deadline > 0, deposit >= 0",
+                "bad contract tuning",
+            ));
+        }
+        if let Some(role) = &t.employer_role {
+            if crate::contracts::parse_role(role).is_none() {
+                return Err(SimError::new("data", "known employer_role", "unknown"));
+            }
+        }
+        if let Some(item) = &t.item {
+            if items.get(item).is_none() {
+                return Err(SimError::new("data", "known contract item", "unknown item"));
+            }
+        }
+        crate::contracts::offer_from_template(t, i as u64, crate::ids::EntityId(1), 0)
+            .map_err(|_| SimError::new("data", "valid contract template", "bad fields"))?;
+    }
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,6 +438,19 @@ mod tests {
     }
 
     #[test]
+    fn contracts_file_matches_code_defaults() {
+        let file = parse_contracts(include_str!("../../data/contracts.yaml")).unwrap();
+        assert_eq!(file.len(), crate::contracts::default_contracts().len());
+        for (a, b) in file.iter().zip(crate::contracts::default_contracts()) {
+            assert_eq!(a.id, b.id);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.payout_cents, b.payout_cents);
+            assert_eq!(a.deadline_hours, b.deadline_hours);
+            assert_eq!(a.risk, b.risk);
+        }
+    }
+
+    #[test]
     fn dialogues_file_validates() {
         let ds = parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap();
         assert_eq!(ds.len(), 3);
@@ -468,6 +517,23 @@ mod tests {
         );
         assert!(parse_items(
             "- id: x\n  name: X\n  glyph: x\n  weight_g: 1\n  slot: weapon\n  effect: heal:1\n"
+        )
+        .is_err());
+        // Contracts: missing kind fields, unknown roles/items, duplicate ids.
+        assert!(parse_contracts(
+            "- id: a\n  title: A\n  kind: deliver_item\n  payout_cents: 10\n  deadline_hours: 1\n"
+        )
+        .is_err());
+        assert!(parse_contracts(
+            "- id: a\n  title: A\n  kind: deliver_resource\n  payout_cents: 10\n  deadline_hours: 1\n  resource: mana\n"
+        )
+        .is_err());
+        assert!(parse_contracts(
+            "- id: a\n  title: A\n  kind: courier\n  payout_cents: 10\n  deadline_hours: 1\n  employer_role: wizard\n  tile: [1, 1]\n"
+        )
+        .is_err());
+        assert!(parse_contracts(
+            "- id: a\n  title: A\n  kind: courier\n  payout_cents: 10\n  deadline_hours: 1\n  tile: [1, 1]\n- id: a\n  title: B\n  kind: courier\n  payout_cents: 10\n  deadline_hours: 1\n  tile: [2, 2]\n"
         )
         .is_err());
         // Duplicate ids are ambiguous on the board.
