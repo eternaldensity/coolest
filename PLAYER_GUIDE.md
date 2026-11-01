@@ -48,6 +48,27 @@ both bars down:
   (ration 150c, meds 600c) for the graveyard shift.
 - Talk to the shopkeeper: `Trade` routes to the counter, no haggling.
 
+## Contracts and the job board
+
+The Street tab now has a daily **contract board** in addition to the
+always-available Work buttons.
+
+- Offers show title, pay, requirements, risk, and time left. `Accept`
+  reserves one offer and escrows the employer’s reward.
+- You can hold **one active contract**. Complete it with
+  `Deliver contract`; give up with `Abandon contract` (the deposit is
+  forfeited and employer reputation drops).
+- Delivery contracts consume medkits/snacks or loop/data/algo components.
+  Courier contracts require standing on the target tile. Hack contracts
+  require the target host to be breached. Bounty contracts require the
+  target to be gone.
+- Escrow is real ledger money: completing pays the employer’s reward plus
+  your deposit back; failing/expiring returns the reward to the employer
+  and costs reputation.
+- Illegal contracts file crimes when completed; legal employers may
+  refuse you after too many failures.
+- The board refreshes once per game day.
+
 ## Health, gear, and danger
 
 - You have **HP** (20), **PV** (evade) and **DV** (soak). The status panel
@@ -66,9 +87,18 @@ both bars down:
 
 ## Deck, Net, and Veil acts
 
-- **Deck:** click a cell, `Load killer` a program, `Strike` heads/tails.
-  The warden defends host 1 — intrusions draw a trace, and kills count
-  toward your record. Every act is logged; replays reproduce the arena.
+- **Deck:** click a cell, then choose a program kind and `Load` it.
+  Killer/Shield/Scanner/Cracker/Connector/Cloner/Editor have different
+  CPU, length, and role abilities. `Strike` heads/tails; the warden
+  defends host 1, intrusions draw a trace, and kills count toward your
+  record.
+  - `Scan` (Scanner) reveals the host.
+  - `Crack lock` (Cracker) takes three beats to drop the filter/monitor.
+  - `Patch <vuln>` (Editor) closes a hole.
+  - `Overwrite` (Editor) severs a tail segment without a headshot.
+  - `Clone selected` (Cloner) copies a program to a free cell.
+  - Kind-matched `Synergy farm` producers yield +1 of their affinity
+    resource.
   The rig is an `office-ws` with its own vulns: `Exploit` one (needs a
   program of yours there) to breach it. `Scrub log` erases your trail —
   a program on the host, or a privilege vuln, gets you in.
@@ -92,9 +122,9 @@ both bars down:
 
 | View | What | Verbs wired today |
 |------|------|-------------------|
-| Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / attack / pickup / drop / equip / use / surrender / revive / deposit / withdraw |
+| Street | Tile streets, doors, shops | move / eat / work / contracts (accept/deliver/abandon) / watch / sleep / buy / talk / attack / pickup / drop / equip / use / surrender / revive / deposit / withdraw |
 | Net | Host graph, latency, tolls | route (preview) / damage wire / cut+restore power / firewall filter |
-| Deck | Inside world host 1: RAM arena | load killer / strike / farm producers / play cards / exploit + trojan / scrub log (warden answers) |
+| Deck | Inside world host 1: RAM arena | load kinds / strike / scan / crack / patch / overwrite / clone / farm (kind synergy) / play cards / exploit + trojan / scrub log (warden answers) |
 | Veil | Helmet space over the same rules | jack in / move / seize / transfer / carry+read files / eject |
 
 The Deck tab also plays the **closed card table** (design/03): 8 negative,
@@ -165,7 +195,7 @@ are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (228 test executions)
+cargo test --workspace      # prove the rules hold (241 test executions)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the

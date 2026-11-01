@@ -1,11 +1,10 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Refreshed 2026-11-01 for v0.4. Branch `main`, head after the v0.4
-> commits, 228 test executions (200 unique `#[test]` fns), `./gate.sh`
-> and `./nightly.sh` both green. Read `README.md` and `PLAYER_GUIDE.md`
-> first for the game itself; `docs/NEXT-STATE.md` is the v0.4 plan,
-> `docs/V0.5-V0.6-PLAN.md` is the current roadmap, and this file is the
-> engineering state and the traps.
+> Refreshed 2026-11-01 for v0.5/v0.6. Branch `main`, 241 test executions
+> (211 unique `#[test]` fns), `./gate.sh` and `./nightly.sh` green. Read
+> `README.md` and `PLAYER_GUIDE.md` first for the game itself;
+> `docs/NEXT-STATE.md` is the v0.4 history, `docs/V0.5-V0.6-PLAN.md` is
+> the current roadmap, and this file is the engineering state and traps.
 
 ## 1. What this is
 
@@ -132,6 +131,17 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 7. What is done (recent units, newest first)
 
+- **v0.6 Programs with Identity (M2.5 core)**: Killer/Shield/Scanner/
+  Cracker/Connector/Cloner/Editor kinds, `Program.kind`, kind stats from
+  `data/kinds.yaml`, `DeckLoadKind`, `DeckScan`, `DeckCrack`, `DeckPatch`,
+  `DeckOverwrite`, `DeckClone`, and kind-matched `DeckFarmKind` producers
+  (+1 affinity yield). Old programs default to Killer. The formal M2
+  balance gate and Connector's remote-chain ability are still pending.
+- **v0.5 Contracts & Consequence**: local daily board, `AcceptOffer`,
+  escrow, one active contract, delivery/hack/courier/bounty completion,
+  `DeliverContract`, `AbandonContract`, expiry, employer reputation, and
+  the Street board/tracker. `data/contracts.yaml` is validated and mirrored
+  by code defaults.
 - **v0.4 Embodied City (design/06-07, plus M5 close)**: shared HP/health,
   Body/Mind, clinic revival, data-driven items + inventory + worn gear,
   shop gear, d20/PV/DV street combat, NPC aggro/loot, cop attacks,
@@ -168,18 +178,16 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 v0.4 (Body/Mind, items, street combat, M5 Veil) is done; see section 7.
 The current roadmap is `docs/V0.5-V0.6-PLAN.md`.
 
-### v0.5 — Contracts & Consequence (local-first)
-Replace infinite `Work` with a daily contract board: offers, `Accept`,
-one active contract, deadlines, employer escrow, delivery/hack/courier
-completion, abandon/expiry, and employer reputation. No ATProto. See
-`docs/JOB-BOARD-ACCEPT.md` for the design rationale.
+### v0.5 — Contracts & Consequence. DONE.
+Local board, escrow, deadlines, completion, abandon/expiry, reputation.
+See `docs/JOB-BOARD-ACCEPT.md`.
 
-### v0.6 — Programs with Identity (M2.5)
-`Program` still has no kind: `DeckLoad` installs the same generic killer.
-Add Killer/Shield/Scanner/Cracker/Connector/Cloner/Editor kinds, loadout
-choice, scan/crack/patch/overwrite/clone verbs, and bounded type synergy.
-Host zones/files/accounts are the leading v0.7 candidate; PDS bridge is
-also v0.7+ (requirements ready in `docs/PDS-BRIDGE-REQUIREMENTS.md`).
+### v0.6 — Programs with Identity. CORE DONE.
+Kinds, loadout, scan/crack/patch/overwrite/clone, producer affinity.
+Still open: the formal M2 success-rate gate and Connector's remote-chain
+ability. Host zones/files/accounts are the leading v0.7 candidate; PDS
+bridge is also v0.7+ (requirements ready in
+`docs/PDS-BRIDGE-REQUIREMENTS.md`).
 
 ### Later
 - PDS Bridge Mode A: operated PDS + polling; then firehose/OAuth.
