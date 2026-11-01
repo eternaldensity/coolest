@@ -36,6 +36,18 @@ fn pos(x: u8, y: u8) -> Pos {
 
 /// One-line effect blurb for stocked items whose benefit is otherwise
 /// unstated. No entry means no promised effect.
+fn kind_hint(kind: sim::ProgramKind) -> &'static str {
+    match kind {
+        sim::ProgramKind::Killer => "Killer: attacks heads and tails.",
+        sim::ProgramKind::Shield => "Shield: absorbs incoming hits.",
+        sim::ProgramKind::Scanner => "Scanner: scans a host to reveal vulns and trace.",
+        sim::ProgramKind::Cracker => "Cracker: cracks locks over three beats.",
+        sim::ProgramKind::Connector => "Connector: probes routed hosts and reveals scan reports.",
+        sim::ProgramKind::Cloner => "Cloner: copies a program into a free cell.",
+        sim::ProgramKind::Editor => "Editor: patches vulns and severs tails.",
+    }
+}
+
 fn alignment_label(a: sim::Alignment) -> &'static str {
     match a {
         sim::Alignment::HonestPassive => "honest · passive",
@@ -602,6 +614,9 @@ impl Shell {
                             .size(18.0)
                             .strong()
                             .color(crate::theme::TEXT),
+                    )
+                    .on_hover_text(
+                        "Selected tile. Click the map or a nearby landmark to inspect it.",
                     );
                     ui.horizontal_wrapped(|ui| {
                         crate::theme::chip(
@@ -612,12 +627,22 @@ impl Shell {
                             } else {
                                 crate::theme::DANGER
                             },
+                        )
+                        .on_hover_text(
+                            "Walkable tiles can be entered; blocked tiles are walls or obstacles.",
                         );
                         if (x, y) == (here.x, here.y) {
-                            crate::theme::chip(ui, "you are here", crate::theme::BETANET);
+                            crate::theme::chip(ui, "you are here", crate::theme::BETANET)
+                                .on_hover_text("This is your current tile.");
                         }
                     });
-                    if walkable && (x, y) != (here.x, here.y) && ui.button("Walk here").clicked() {
+                    if walkable
+                        && (x, y) != (here.x, here.y)
+                        && ui
+                            .button("Walk here")
+                            .on_hover_text("Pathfind to this tile one act at a time.")
+                            .clicked()
+                    {
                         self.walk_to(x, y);
                     }
                 });
@@ -649,14 +674,23 @@ impl Shell {
                             egui::RichText::new("click to inspect")
                                 .size(10.0)
                                 .color(crate::theme::FAINT),
-                        );
+                        )
+                        .on_hover_text("Landmarks within five tiles of you.");
                         for (role, nx, ny) in near_npcs {
-                            if ui.button(format!("{role:?} ({nx},{ny})")).clicked() {
+                            if ui
+                                .button(format!("{role:?} ({nx},{ny})"))
+                                .on_hover_text("Select this landmark to inspect it.")
+                                .clicked()
+                            {
                                 self.street_sel = Some((nx, ny));
                             }
                         }
                         for (nx, ny) in near_shops {
-                            if ui.button(format!("counter ({nx},{ny})")).clicked() {
+                            if ui
+                                .button(format!("counter ({nx},{ny})"))
+                                .on_hover_text("Select this counter to inspect its stock.")
+                                .clicked()
+                            {
                                 self.street_sel = Some((nx, ny));
                             }
                         }
@@ -676,12 +710,23 @@ impl Shell {
                     });
                 if let Some((id, role)) = npc {
                     crate::theme::card(ui, "npc", crate::theme::SUCCESS, |ui| {
-                        ui.label(format!("{role:?}"));
+                        ui.label(format!("{role:?}"))
+                            .on_hover_text("NPC on the selected tile.");
                         ui.horizontal_wrapped(|ui| {
-                            if ui.button(format!("Talk to {role:?}")).clicked() {
+                            if ui
+                                .button(format!("Talk to {role:?}"))
+                                .on_hover_text("Start a conversation.")
+                                .clicked()
+                            {
                                 self.start_talk_with(role);
                             }
-                            if ui.button("Attack target").clicked() {
+                            if ui
+                                .button("Attack target")
+                                .on_hover_text(
+                                    "Attack this NPC. Witnessed crimes raise your record.",
+                                )
+                                .clicked()
+                            {
                                 self.do_verb(Verb::Attack { target: id });
                             }
                         });
@@ -708,7 +753,14 @@ impl Shell {
                                         crate::theme::MUTED
                                     },
                                 );
-                                if adjacent && qty > 0 && ui.button(format!("Buy {item}")).clicked()
+                                if adjacent
+                                    && qty > 0
+                                    && ui
+                                        .button(format!("Buy {item}"))
+                                        .on_hover_text(format!(
+                                            "Buy one for {price}c. Counters serve adjacent tiles."
+                                        ))
+                                        .clicked()
                                 {
                                     self.do_verb(Verb::Buy(item.clone()));
                                 }
@@ -723,7 +775,11 @@ impl Shell {
                 if !floor.is_empty() {
                     crate::theme::card(ui, "on floor", crate::theme::MUTED, |ui| {
                         for (item, qty) in floor {
-                            if ui.button(format!("Take {item} x{qty}")).clicked() {
+                            if ui
+                                .button(format!("Take {item} x{qty}"))
+                                .on_hover_text("Pick up from the selected tile.")
+                                .clicked()
+                            {
                                 self.do_verb(Verb::Pickup { item });
                             }
                         }
@@ -748,16 +804,20 @@ impl Shell {
                             .size(18.0)
                             .strong()
                             .color(crate::theme::TEXT),
-                    );
+                    )
+                    .on_hover_text("Selected arena cell.");
                     if let Some(prog) = prog {
                         let host = self.server.world.host(HostId(1)).unwrap();
                         let kind = host.program_kind(prog);
                         if let Some(kind) = kind {
-                            crate::theme::chip(ui, kind.name(), crate::theme::BETANET);
+                            crate::theme::chip(ui, kind.name(), crate::theme::BETANET)
+                                .on_hover_text(kind_hint(kind));
                         }
                         if let Some(p) = host.progs.get(&prog.0) {
-                            ui.label(format!("cpu {} / segment · len {}", p.cpu_per_seg, p.len()));
-                            ui.label(format!("max len {}", p.max_len));
+                            ui.label(format!("cpu {} / segment · len {}", p.cpu_per_seg, p.len()))
+                                .on_hover_text("CPU cost per segment and current length.");
+                            ui.label(format!("max len {}", p.max_len))
+                                .on_hover_text("Growth cap for this program.");
                         }
                         if let Some((makes, rate)) = host.maker_info(prog) {
                             let names = makes
@@ -765,7 +825,8 @@ impl Shell {
                                 .map(|r| format!("{} ×{}", r.name(), rate))
                                 .collect::<Vec<_>>()
                                 .join(" · ");
-                            ui.label(format!("producer: {names}"));
+                            ui.label(format!("producer: {names}"))
+                                .on_hover_text("Component yielded each act.");
                         }
                         let mods = host.mods_of(prog);
                         crate::theme::label(
@@ -775,24 +836,42 @@ impl Shell {
                             } else {
                                 format!("mods: {mods:?}")
                             },
-                        );
+                        )
+                        .on_hover_text("Persistent mods built into this program.");
                     } else {
-                        crate::theme::label(ui, "Empty cell — load a program here.");
+                        crate::theme::label(ui, "Empty cell — load a program here.")
+                            .on_hover_text("Pick a program kind in Loadout to fill this cell.");
                     }
                 });
                 crate::theme::card(ui, "actions", crate::theme::OLDNET, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button("Scan host").clicked() {
+                        if ui
+                            .button("Scan host")
+                            .on_hover_text("Scanner: reveal vulns, logs, trace, and breach state.")
+                            .clicked()
+                        {
                             self.do_verb(Verb::DeckScan);
                         }
-                        if ui.button("Crack lock").clicked() {
+                        if ui
+                            .button("Crack lock")
+                            .on_hover_text("Cracker: three beats to drop the filter/monitor.")
+                            .clicked()
+                        {
                             self.do_verb(Verb::DeckCrack);
                         }
                         if prog.is_some() {
-                            if ui.button("Clone program").clicked() {
+                            if ui
+                                .button("Clone program")
+                                .on_hover_text("Cloner: copy this program into a free cell.")
+                                .clicked()
+                            {
                                 self.do_verb(Verb::DeckClone { x, y });
                             }
-                            if ui.button("Sever segment").clicked() {
+                            if ui
+                                .button("Sever segment")
+                                .on_hover_text("Editor: sever a tail segment.")
+                                .clicked()
+                            {
                                 self.do_verb(Verb::DeckOverwrite { x, y });
                             }
                         }
@@ -806,7 +885,11 @@ impl Shell {
                     if !vulns.is_empty() {
                         ui.horizontal_wrapped(|ui| {
                             for v in vulns {
-                                if ui.button(format!("Close {v}")).clicked() {
+                                if ui
+                                    .button(format!("Close {v}"))
+                                    .on_hover_text("Patch this vulnerability.")
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::DeckPatch { vuln: v });
                                 }
                             }
@@ -828,7 +911,8 @@ impl Shell {
                                 } else {
                                     crate::theme::BETANET
                                 }),
-                        );
+                        )
+                        .on_hover_text("Selected host.");
                         ui.label(format!(
                             "{} · {}mb · {}{}",
                             match n.net {
@@ -838,8 +922,15 @@ impl Shell {
                             n.modem_mbps,
                             if n.gateway { "gateway" } else { "no gateway" },
                             if dark { " · DARK" } else { "" }
-                        ));
-                        if ui.button(format!("Route 1→{}", target.0)).clicked() {
+                        ))
+                        .on_hover_text("Net kind · modem speed · gateway · power state.");
+                        if ui
+                            .button(format!("Route 1→{}", target.0))
+                            .on_hover_text(
+                                "Preview a powered route from host 1 to this host, with tolls and trace threshold.",
+                            )
+                            .clicked()
+                        {
                             match self.server.world.power.powered_route(
                                 &self.server.world.net,
                                 HostId(1),
@@ -855,7 +946,13 @@ impl Shell {
                                 Err(e) => self.say(format!("no route: {e}")),
                             }
                         }
-                        if ui.button(format!("Probe {}", target.0)).clicked() {
+                        if ui
+                            .button(format!("Probe {}", target.0))
+                            .on_hover_text(
+                                "Connector: probe this host, reveal its scan report, and log the transit.",
+                            )
+                            .clicked()
+                        {
                             self.do_verb(Verb::DeckConnect { host: target });
                         }
                     }
@@ -908,7 +1005,11 @@ impl Shell {
                             for f in files {
                                 ui.horizontal(|ui| {
                                     ui.label(&f);
-                                    if ui.button(format!("Take {f}")).clicked() {
+                                    if ui
+                                        .button(format!("Take {f}"))
+                                        .on_hover_text("Carry this mind-file.")
+                                        .clicked()
+                                    {
                                         self.do_verb(Verb::VeilCarry { name: f.clone() });
                                     }
                                 });
@@ -918,7 +1019,11 @@ impl Shell {
                         if !carried.is_empty() {
                             crate::theme::section(ui, "carried");
                             for (i, f) in carried.iter().enumerate() {
-                                if ui.button(format!("Consume {f}")).clicked() {
+                                if ui
+                                    .button(format!("Consume {f}"))
+                                    .on_hover_text("Read and consume this mind-file.")
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::VeilRead { index: i });
                                 }
                             }
@@ -1164,6 +1269,9 @@ impl Shell {
                 crate::theme::label(
                     ui,
                     "@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy",
+                )
+                .on_hover_text(
+                    "Gold corner ticks mark doors, egress, and computers. Click a tile to inspect it; hover for details.",
                 );
                 // Let the map grow into wide windows and centre it in the
                 // card, so the primary spatial surface is the visual anchor.
@@ -1347,7 +1455,14 @@ impl Shell {
                         }
                         None => format!("Work {i}: {id} {pay}c"),
                     };
-                    if ui.button(label).clicked() {
+                    let tip = match req {
+                        Some((res, need, _)) => format!(
+                            "Pays {pay}c. Needs {need} {}; the work act also spends mood and food.",
+                            res.name()
+                        ),
+                        None => format!("Pays {pay}c. The work act also spends mood and food."),
+                    };
+                    if ui.button(label).on_hover_text(tip).clicked() {
                         self.do_verb(Verb::Work(i as u8));
                     }
                 }
@@ -1371,10 +1486,22 @@ impl Shell {
                             c.kind.summary(),
                             self.server.world.employer_reputation(c.employer)
                         ));
-                        if ui.button("Deliver contract").clicked() {
+                        if ui
+                            .button("Deliver contract")
+                            .on_hover_text(
+                                "Complete the active contract if its requirement is met; pays escrow.",
+                            )
+                            .clicked()
+                        {
                             self.do_verb(Verb::DeliverContract);
                         }
-                        if ui.button("Abandon contract").clicked() {
+                        if ui
+                            .button("Abandon contract")
+                            .on_hover_text(
+                                "Give up the contract. Your deposit is forfeited and employer reputation drops.",
+                            )
+                            .clicked()
+                        {
                             self.do_verb(Verb::AbandonContract);
                         }
                     });
@@ -1409,10 +1536,12 @@ impl Shell {
                                     .stroke(egui::Stroke::new(1.0, color)),
                                 )
                                 .on_hover_text(format!(
-                                    "{} · {} · {}",
+                                    "{} · pays {}c · {} · {} risk · {}t left. Accepting escrows the reward and holds one contract.",
                                     o.title,
+                                    o.payout_cents,
                                     o.kind.summary(),
-                                    o.risk.name()
+                                    o.risk.name(),
+                                    left
                                 ))
                                 .clicked()
                             {
@@ -1489,6 +1618,9 @@ impl Shell {
                         egui::RichText::new(format!("S({},{})", here.sx, here.sy))
                             .size(11.0)
                             .color(crate::theme::MUTED),
+                    )
+                    .on_hover_text(
+                        "Section coordinates. The city is a 16×16 tile grid per section.",
                     );
                     let tick = self.server.world.tick;
                     ui.separator();
@@ -1502,13 +1634,17 @@ impl Shell {
                         .size(11.0)
                         .monospace()
                         .color(crate::theme::MUTED),
-                    );
+                    )
+                    .on_hover_text("Game clock. Acts advance time; shops and police keep hours.");
                     ui.separator();
                     ui.label(
                         egui::RichText::new(format!("${:.2}", money as f64 / 100.0))
                             .size(12.0)
                             .strong()
                             .color(crate::theme::MONEY),
+                    )
+                    .on_hover_text(
+                        "Pocket cash. Fines take pocket money first; bank it with `deposit <c>`.",
                     );
                     let standing = self.server.world.standing();
                     let heat_color = if standing == Standing::Wanted {
@@ -1520,19 +1656,29 @@ impl Shell {
                         egui::RichText::new(format!("{standing:?}"))
                             .size(11.0)
                             .color(heat_color),
+                    )
+                    .on_hover_text(
+                        "Clean or Wanted. Wanted draws police; pay the fine to clear your record.",
                     );
                     let mail = self.server.world.inbox(self.actor).len();
                     ui.label(
                         egui::RichText::new(format!("mail {mail}"))
                             .size(11.0)
                             .color(crate::theme::BETANET),
-                    );
+                    )
+                    .on_hover_text("Unread mail. Open it from the Street tab's Mail card.");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.selectable_value(&mut self.tab, Tab::Veil, "Veil");
-                    ui.selectable_value(&mut self.tab, Tab::Net, "Net");
-                    ui.selectable_value(&mut self.tab, Tab::Deck, "Deck");
-                    ui.selectable_value(&mut self.tab, Tab::Street, "Street");
+                    ui.selectable_value(&mut self.tab, Tab::Veil, "Veil")
+                        .on_hover_text("Mind space: jack in, move areas, seize hosts, read files.");
+                    ui.selectable_value(&mut self.tab, Tab::Net, "Net")
+                        .on_hover_text("Network graph: routes, tolls, power, firewalls.");
+                    ui.selectable_value(&mut self.tab, Tab::Deck, "Deck")
+                        .on_hover_text(
+                            "Your rig: load programs, fight the warden, farm components.",
+                        );
+                    ui.selectable_value(&mut self.tab, Tab::Street, "Street")
+                        .on_hover_text("City streets: move, work, shop, take contracts, talk.");
                     ui.label(
                         egui::RichText::new("VIEWS")
                             .size(9.0)
@@ -1559,20 +1705,32 @@ impl Shell {
                         } else {
                             crate::theme::BETANET
                         };
-                        crate::theme::meter(ui, "Food", food as f32, 100.0, food_color);
-                        crate::theme::meter(ui, "Mood", mood as f32, 100.0, mood_color);
+                        crate::theme::meter(ui, "Food", food as f32, 100.0, food_color)
+                            .on_hover_text(
+                                "Food drains every act. Eat a ration for +30; at 0 jobs lock and time slows.",
+                            );
+                        crate::theme::meter(ui, "Mood", mood as f32, 100.0, mood_color)
+                            .on_hover_text(
+                                "Mood drains with work and stress. Watch (+15 for $0.30) or sleep to recover.",
+                            );
                         let bank = self
                             .server
                             .world
                             .bank_balance(self.actor)
                             .map(|b| format!("${:.2}", b as f64 / 100.0))
                             .unwrap_or_else(|| "—".to_string());
-                        crate::theme::stat_row(ui, "bank", bank, crate::theme::MONEY);
+                        crate::theme::stat_row(ui, "bank", bank, crate::theme::MONEY)
+                            .on_hover_text(
+                                "Banked cash. Fines take pocket money first; use `deposit` / `withdraw` in the console.",
+                            );
                         ui.add_space(2.0);
                         ui.label(
                             egui::RichText::new("components")
                                 .size(10.0)
                                 .color(crate::theme::FAINT),
+                        )
+                        .on_hover_text(
+                            "Components stock the job board and program/card costs. Farm them on the Deck or Code them here.",
                         );
                         ui.horizontal_wrapped(|ui| {
                             for r in sim::Res::ALL {
@@ -1584,7 +1742,12 @@ impl Shell {
                                         self.server.world.units(self.actor, r)
                                     ),
                                     crate::theme::resource_color(r),
-                                );
+                                )
+                                .on_hover_text(match r {
+                                    sim::Res::Loop => "LOOP: common job and card fuel. Producers yield it on the Deck.",
+                                    sim::Res::Data => "DATA: office/scanner jobs and upgrades. Produced on the Deck.",
+                                    sim::Res::Algo => "ALGO: crafting and high-tier jobs. Produced on the Deck.",
+                                });
                             }
                         });
                     });
@@ -1600,7 +1763,10 @@ impl Shell {
                             } else {
                                 crate::theme::SUCCESS
                             };
-                            crate::theme::meter(ui, "HP", h.hp as f32, h.max_hp as f32, hp_color);
+                            crate::theme::meter(ui, "HP", h.hp as f32, h.max_hp as f32, hp_color)
+                                .on_hover_text(
+                                    "Health. At 0 you go down; revive at the clinic. Green → amber → red as it falls.",
+                                );
                             if !h.is_alive() && ui.button("Revive at clinic").clicked() {
                                 match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -1622,7 +1788,13 @@ impl Shell {
                                             ui,
                                             format!("{label} {value}"),
                                             crate::theme::MUTED,
-                                        );
+                                        )
+                                        .on_hover_text(match label {
+                                            "PV" => "PV: attack power.",
+                                            "DV" => "DV: defence against incoming attacks.",
+                                            "STR" => "STR: physical strength.",
+                                            _ => "DEX: agility and precision.",
+                                        });
                                     }
                                 });
                             }
@@ -1633,12 +1805,18 @@ impl Shell {
                                     mind.mindpower as f32,
                                     20.0,
                                     crate::theme::VEIL,
+                                )
+                                .on_hover_text(
+                                    "Mindpower. 5+ is required to jack into the Veil; hazards and death drain it.",
                                 );
                                 crate::theme::stat_row(
                                     ui,
                                     "literacy",
                                     mind.comp_literacy.to_string(),
                                     crate::theme::MUTED,
+                                )
+                                .on_hover_text(
+                                    "Computer literacy: your working knowledge of hosts and programs.",
                                 );
                             }
                         });
@@ -1657,17 +1835,26 @@ impl Shell {
                             } else {
                                 crate::theme::MUTED
                             },
+                        )
+                        .on_hover_text(
+                            "Weight of your criminal record. Severity 6+ makes you Wanted; pay the fine to clear it.",
                         );
                         crate::theme::stat_row(
                             ui,
                             "alignment",
                             alignment_label(self.server.world.alignment()),
                             crate::theme::MUTED,
+                        )
+                        .on_hover_text(
+                            "How the city reads your record, from honest through untrusted to evil.",
                         );
                         if mass > 0.0 {
                             let cost = self.server.world.fine_cost();
                             if ui
                                 .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
+                                .on_hover_text(
+                                    "Settle your record (100c per severity point, pocket first). Clears Wanted and the chase.",
+                                )
                                 .clicked()
                             {
                                 match self.server.apply_one(Intent {
@@ -1697,8 +1884,18 @@ impl Shell {
                             } else {
                                 crate::theme::MUTED
                             },
+                        )
+                        .on_hover_text(
+                            "Hack license: 3 threat kills with a clean record. Licensed entry to honest hosts is legal until you hit a defender.",
                         );
-                        if !lic.granted && ui.button("Apply license").clicked() {
+                        if !lic.granted
+                            && ui
+                                .button("Apply license")
+                                .on_hover_text(
+                                    "Apply for a license. Needs 3 threat kills and a spotless record.",
+                                )
+                                .clicked()
+                        {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
                                 verb: Verb::ApplyLicense,
@@ -1714,8 +1911,18 @@ impl Shell {
                             "clan",
                             if in_clan { "member of 1" } else { "none" },
                             crate::theme::MUTED,
+                        )
+                        .on_hover_text(
+                            "Clan membership. Clans offer backup but charge dues; hitting a clanmate makes a lifetime enemy.",
                         );
-                        if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
+                        if !in_clan
+                            && ui
+                                .button("Join clan 1 ($5.00)")
+                                .on_hover_text(
+                                    "Join clan 1: pay a $5.00 fee and initiation, gain clan backup.",
+                                )
+                                .clicked()
+                        {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
                                 verb: Verb::JoinClan { clan: 1 },
@@ -1733,6 +1940,9 @@ impl Shell {
                                     .size(12.0)
                                     .strong()
                                     .color(crate::theme::TEXT),
+                            )
+                            .on_hover_text(
+                                "A suggested next step, not a lock. Follow it or pursue your own plan.",
                             );
                         }
                         if food < 30 || mood < 30 {
@@ -1740,6 +1950,9 @@ impl Shell {
                                 ui,
                                 "! needs low — Eat / Watch soon",
                                 crate::theme::DANGER,
+                            )
+                            .on_hover_text(
+                                "Low food or mood locks jobs; starving also slows every act.",
                             );
                         }
                         crate::theme::stat_row(
@@ -1747,6 +1960,9 @@ impl Shell {
                             "rations",
                             rations.to_string(),
                             crate::theme::TEXT,
+                        )
+                        .on_hover_text(
+                            "Rations in your pack. Eat consumes one for +30 food; buy more at a counter.",
                         );
                         let cop = Timetable::cop_day();
                         crate::theme::stat_row(
@@ -1757,6 +1973,9 @@ impl Shell {
                                 format!("{:?}", cop_duty(&cop, 10, Standing::Clean)).to_lowercase()
                             ),
                             crate::theme::MUTED,
+                        )
+                        .on_hover_text(
+                            "Police duty for this hour. Wanted players are pursued even off shift.",
                         );
                     });
                 }
@@ -1765,6 +1984,7 @@ impl Shell {
                 ui.horizontal(|ui| {
                     if ui
                         .add_sized([button_w, 26.0], egui::Button::new("Save"))
+                        .on_hover_text("Write this run to the local save slot.")
                         .clicked()
                     {
                         let msg = persist_save(&self.server);
@@ -1772,6 +1992,7 @@ impl Shell {
                     }
                     if ui
                         .add_sized([button_w, 26.0], egui::Button::new("Load"))
+                        .on_hover_text("Restore the last local save.")
                         .clicked()
                     {
                         let msg = persist_load(&mut self.server);
@@ -1804,10 +2025,14 @@ impl Shell {
                     );
                 });
                 ui.horizontal(|ui| {
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.input)
-                            .hint_text("eat | work 0/1 | watch | help"),
-                    );
+                    let resp = ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.input)
+                                .hint_text("eat | work 0/1 | watch | help"),
+                        )
+                        .on_hover_text(
+                            "Type a command and press Enter. Try `help`, `eat`, `work 0`, or `code loop`.",
+                        );
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         self.run_command();
                     }
@@ -1865,24 +2090,45 @@ impl Shell {
                 }
                 crate::theme::card(ui, "daily actions", crate::theme::BETANET, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button("Eat").clicked() {
+                        if ui
+                            .button("Eat")
+                            .on_hover_text("Consume one ration for +30 food.")
+                            .clicked()
+                        {
                             self.do_verb(Verb::Eat);
                         }
-                        if ui.button("Watch").clicked() {
+                        if ui
+                            .button("Watch")
+                            .on_hover_text("Spend $0.30 and one act for +15 mood.")
+                            .clicked()
+                        {
                             self.do_verb(Verb::Watch);
                         }
-                        if ui.button("Sleep").clicked() {
+                        if ui
+                            .button("Sleep")
+                            .on_hover_text(
+                                "Sleep in your rented room until 06:00. Refused away from home.",
+                            )
+                            .clicked()
+                        {
                             self.do_verb(Verb::Sleep);
                         }
                     });
                     // Manual coding (design/10): one unit per click, at a mood
                     // cost. Producers come later; this is the slow path.
                     ui.horizontal(|ui| {
-                        ui.label("Code:");
+                        ui.label("Code:")
+                            .on_hover_text(
+                                "Manual component production: one unit per act for a small mood cost.",
+                            );
                         for res in sim::Res::ALL {
                             let have = self.server.world.units(self.actor, res);
                             if ui
                                 .button(format!("Code {} ({have})", res.name()))
+                                .on_hover_text(format!(
+                                    "Spend one act and some mood to gain 1 {}.",
+                                    res.name()
+                                ))
                                 .clicked()
                             {
                                 self.do_verb(Verb::Code { res });
@@ -1933,11 +2179,13 @@ impl Shell {
                         if !carried.is_empty() || !worn.is_empty() {
                             let weight = inv.total_weight(&items);
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(format!("Pack {weight}/{cap}g"));
+                                ui.label(format!("Pack {weight}/{cap}g"))
+                                    .on_hover_text("Carried weight / capacity.");
                                 for (slot, id) in &worn {
                                     let name =
                                         items.get(id).map(|d| d.name.as_str()).unwrap_or(id);
-                                    ui.label(format!("{slot:?}: {name}"));
+                                    ui.label(format!("{slot:?}: {name}"))
+                                        .on_hover_text("Worn gear in this slot.");
                                 }
                                 for (id, qty) in &carried {
                                     let def = items.get(id);
@@ -1945,17 +2193,29 @@ impl Shell {
                                     ui.label(format!("{name} x{qty}"));
                                     if let Some(def) = def {
                                         if def.is_gear()
-                                            && ui.button(format!("Equip {name}")).clicked()
+                                            && ui
+                                                .button(format!("Equip {name}"))
+                                                .on_hover_text(
+                                                    "Equip this gear into its body slot.",
+                                                )
+                                                .clicked()
                                         {
                                             self.do_verb(Verb::Equip { item: id.clone() });
                                         }
                                         if def.effect.is_some()
-                                            && ui.button(format!("Use {name}")).clicked()
+                                            && ui
+                                                .button(format!("Use {name}"))
+                                                .on_hover_text("Consume this item for its effect.")
+                                                .clicked()
                                         {
                                             self.do_verb(Verb::Use { item: id.clone() });
                                         }
                                     }
-                                    if ui.button(format!("Drop {name}")).clicked() {
+                                    if ui
+                                        .button(format!("Drop {name}"))
+                                        .on_hover_text("Drop one on this tile.")
+                                        .clicked()
+                                    {
                                         self.do_verb(Verb::Drop { item: id.clone() });
                                     }
                                 }
@@ -1967,7 +2227,11 @@ impl Shell {
                                 for (id, qty) in floor {
                                     let name =
                                         items.get(&id).map(|d| d.name.as_str()).unwrap_or(&id);
-                                    if ui.button(format!("Pick up {name} x{qty}")).clicked() {
+                                    if ui
+                                        .button(format!("Pick up {name} x{qty}"))
+                                        .on_hover_text("Pick up from this tile.")
+                                        .clicked()
+                                    {
                                         self.do_verb(Verb::Pickup { item: id.clone() });
                                     }
                                 }
@@ -1983,7 +2247,11 @@ impl Shell {
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Talk:");
                             for (id, role) in &targets {
-                                if ui.button(format!("Talk {role:?}")).clicked() {
+                                if ui
+                                    .button(format!("Talk {role:?}"))
+                                    .on_hover_text("Start a conversation.")
+                                    .clicked()
+                                {
                                     if let Some(dlg) = self.dialogue_for(*role) {
                                         let t = sim::Conversation::new(dlg, None);
                                         self.say(format!("[{id}] {}", t.text()));
@@ -1993,9 +2261,16 @@ impl Shell {
                             }
                         });
                         ui.horizontal_wrapped(|ui| {
-                            ui.label("Attack:");
+                            ui.label("Attack:")
+                                .on_hover_text("Witnessed attacks add to your criminal record.");
                             for (id, role) in &targets {
-                                if ui.button(format!("Attack {role:?}")).clicked() {
+                                if ui
+                                    .button(format!("Attack {role:?}"))
+                                    .on_hover_text(
+                                        "Attack this NPC. Witnessed crimes raise your record.",
+                                    )
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::Attack {
                                         target: EntityId(*id),
                                     });
@@ -2003,7 +2278,12 @@ impl Shell {
                             }
                             if self.server.world.standing() == Standing::Wanted
                                 && self.server.world.adjacent_cop(self.actor).is_some()
-                                && ui.button("Surrender").clicked()
+                                && ui
+                                    .button("Surrender")
+                                    .on_hover_text(
+                                        "Surrender to the adjacent cop: pay a fine and end the chase.",
+                                    )
+                                    .clicked()
                             {
                                 self.do_verb(Verb::Surrender);
                             }
@@ -2016,8 +2296,14 @@ impl Shell {
                 let has_plus = self.server.world.has_mailer_plus();
                 crate::theme::card(ui, "mail", crate::theme::BETANET, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("Mail — inbox {inbox}"));
-                    if inbox > 0 && ui.button("Open mail").clicked() {
+                    ui.label(format!("Mail — inbox {inbox}"))
+                        .on_hover_text("Unread messages. Opened mail can contain trojans.");
+                    if inbox > 0
+                        && ui
+                            .button("Open mail")
+                            .on_hover_text("Open the oldest message.")
+                            .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::OpenMail { index: 0 },
@@ -2026,7 +2312,14 @@ impl Shell {
                             Err(e) => self.say(format!("open failed: {e}")),
                         }
                     }
-                    if !has_plus && ui.button("Craft Mailer+ (3 algo)").clicked() {
+                    if !has_plus
+                        && ui
+                            .button("Craft Mailer+ (3 algo)")
+                            .on_hover_text(
+                                "Spend 3 ALGO to craft Mailer+. Unlocks trojan attachments.",
+                            )
+                            .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::CraftMailerPlus,
@@ -2037,7 +2330,13 @@ impl Shell {
                     }
                     if has_plus {
                         for (id, role) in self.nearby_npcs() {
-                            if ui.button(format!("Trojan {role:?}")).clicked() {
+                            if ui
+                                .button(format!("Trojan {role:?}"))
+                                .on_hover_text(
+                                    "Mail a trojan. It activates only when the recipient reads their mail.",
+                                )
+                                .clicked()
+                            {
                                 match self.server.apply_one(Intent {
                                     actor: self.actor,
                                     verb: Verb::SendTrojan { to: EntityId(id) },
@@ -2116,7 +2415,10 @@ impl Shell {
                 // Trade panel: counter sale when standing on a shop tile.
                 if !counter.is_empty() {
                     crate::theme::card(ui, "counter", crate::theme::OLDNET, |ui| {
-                        ui.label("Counter — type buy <item> or click:");
+                        ui.label("Counter — type buy <item> or click:")
+                            .on_hover_text(
+                                "Counters serve adjacent tiles. Stand next to the $ counter to buy.",
+                            );
                         for (item, price, qty) in counter {
                             ui.horizontal(|ui| {
                                 ui.label(format!(
@@ -2126,7 +2428,13 @@ impl Shell {
                                     qty,
                                     item_blurb(&item)
                                 ));
-                                if ui.button("Buy").clicked() {
+                                if ui
+                                    .button("Buy")
+                                    .on_hover_text(format!(
+                                        "Buy one for {price}c. {qty} left at this counter."
+                                    ))
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::Buy(item.clone()));
                                 }
                             });
@@ -2156,6 +2464,9 @@ impl Shell {
                             ui,
                             format!("arch {}", h.arch().name()),
                             crate::theme::OLDNET,
+                        )
+                        .on_hover_text(
+                            "Host architecture. Determines the host's native vulnerabilities.",
                         );
                         crate::theme::chip(
                             ui,
@@ -2165,6 +2476,9 @@ impl Shell {
                             } else {
                                 crate::theme::MUTED
                             },
+                        )
+                        .on_hover_text(
+                            "An armed monitor flags exploits and traces; it can retaliate.",
                         );
                         crate::theme::chip(
                             ui,
@@ -2174,6 +2488,9 @@ impl Shell {
                             } else {
                                 crate::theme::MUTED
                             },
+                        )
+                        .on_hover_text(
+                            "Filter blocks unauthorised entry. Crack the lock to drop it, or exploit a hole.",
                         );
                         crate::theme::chip(
                             ui,
@@ -2183,6 +2500,9 @@ impl Shell {
                                 "unscanned"
                             },
                             crate::theme::BETANET,
+                        )
+                        .on_hover_text(
+                            "Scan with a Scanner to reveal vulns, logs, trace, and breach state.",
                         );
                     });
                     if let Some((progress, threshold)) = h.trace_progress() {
@@ -2194,6 +2514,9 @@ impl Shell {
                                 .text(format!(
                                     "TRACE {progress}/{threshold} — scrub or outrun"
                                 )),
+                        )
+                        .on_hover_text(
+                            "Trace progress. At the threshold your program burns; scrub the log or outrun it.",
                         );
                     }
                 }
@@ -2236,44 +2559,69 @@ impl Shell {
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
-                            let (glyph, color, fill) = if let Some(Some(res)) = heads.get(&(x, y)) {
-                                // Producer head: P in the resource's color.
-                                (
-                                    "P",
-                                    match res {
-                                        sim::Res::Loop => egui::Color32::from_rgb(120, 200, 120),
-                                        sim::Res::Data => egui::Color32::from_rgb(110, 190, 230),
-                                        sim::Res::Algo => egui::Color32::from_rgb(220, 150, 240),
-                                    },
-                                    egui::Color32::from_rgb(0x16, 0x21, 0x1B),
-                                )
-                            } else if let Some(kind) = head_kinds.get(&(x, y)) {
-                                let color = match kind {
-                                    sim::ProgramKind::Killer => crate::theme::OLDNET,
-                                    sim::ProgramKind::Shield => crate::theme::SUCCESS,
-                                    sim::ProgramKind::Scanner => crate::theme::BETANET,
-                                    sim::ProgramKind::Cracker => crate::theme::VEIL,
-                                    sim::ProgramKind::Connector => crate::theme::MUTED,
-                                    sim::ProgramKind::Cloner => crate::theme::MONEY,
-                                    sim::ProgramKind::Editor => crate::theme::PAPER,
+                            let (glyph, color, fill, tip) =
+                                if let Some(Some(res)) = heads.get(&(x, y)) {
+                                    // Producer head: P in the resource's color.
+                                    (
+                                        "P",
+                                        crate::theme::resource_color(*res),
+                                        egui::Color32::from_rgb(0x16, 0x21, 0x1B),
+                                        format!(
+                                            "{} producer head. Yields components each act and costs CPU.",
+                                            res.name().to_uppercase()
+                                        ),
+                                    )
+                                } else if let Some(kind) = head_kinds.get(&(x, y)) {
+                                    let color = match kind {
+                                        sim::ProgramKind::Killer => crate::theme::OLDNET,
+                                        sim::ProgramKind::Shield => crate::theme::SUCCESS,
+                                        sim::ProgramKind::Scanner => crate::theme::BETANET,
+                                        sim::ProgramKind::Cracker => crate::theme::VEIL,
+                                        sim::ProgramKind::Connector => crate::theme::MUTED,
+                                        sim::ProgramKind::Cloner => crate::theme::MONEY,
+                                        sim::ProgramKind::Editor => crate::theme::PAPER,
+                                    };
+                                    let glyph = match kind {
+                                        sim::ProgramKind::Killer => "K",
+                                        sim::ProgramKind::Shield => "S",
+                                        sim::ProgramKind::Scanner => "Sc",
+                                        sim::ProgramKind::Cracker => "Cr",
+                                        sim::ProgramKind::Connector => "Co",
+                                        sim::ProgramKind::Cloner => "Cl",
+                                        sim::ProgramKind::Editor => "E",
+                                    };
+                                    (
+                                        glyph,
+                                        color,
+                                        egui::Color32::from_rgb(0x16, 0x1F, 0x29),
+                                        format!(
+                                            "{} head. Strike the head to kill the program.",
+                                            kind.name()
+                                        ),
+                                    )
+                                } else if tails.contains(&(x, y)) {
+                                    (
+                                        "o",
+                                        crate::theme::FAINT,
+                                        egui::Color32::from_rgb(0x11, 0x18, 0x20),
+                                        "Program tail. Strikes shrink it; hit the head to kill it."
+                                            .to_string(),
+                                    )
+                                } else if Some((x, y)) == self.sel {
+                                    (
+                                        "X",
+                                        crate::theme::OLDNET,
+                                        egui::Color32::from_rgb(0x2A, 0x21, 0x14),
+                                        "Selected cell. Load a program here.".to_string(),
+                                    )
+                                } else {
+                                    (
+                                        ".",
+                                        crate::theme::FAINT,
+                                        egui::Color32::from_rgb(0x0D, 0x14, 0x1A),
+                                        "Empty cell. Click to select.".to_string(),
+                                    )
                                 };
-                                let glyph = match kind {
-                                    sim::ProgramKind::Killer => "K",
-                                    sim::ProgramKind::Shield => "S",
-                                    sim::ProgramKind::Scanner => "Sc",
-                                    sim::ProgramKind::Cracker => "Cr",
-                                    sim::ProgramKind::Connector => "Co",
-                                    sim::ProgramKind::Cloner => "Cl",
-                                    sim::ProgramKind::Editor => "E",
-                                };
-                                (glyph, color, egui::Color32::from_rgb(0x16, 0x1F, 0x29))
-                            } else if tails.contains(&(x, y)) {
-                                ("o", crate::theme::FAINT, egui::Color32::from_rgb(0x11, 0x18, 0x20))
-                            } else if Some((x, y)) == self.sel {
-                                ("X", crate::theme::OLDNET, egui::Color32::from_rgb(0x2A, 0x21, 0x14))
-                            } else {
-                                (".", crate::theme::FAINT, egui::Color32::from_rgb(0x0D, 0x14, 0x1A))
-                            };
                             if ui
                                 .add_sized(
                                     [30.0, 30.0],
@@ -2286,6 +2634,7 @@ impl Shell {
                                     .fill(fill)
                                     .stroke(egui::Stroke::new(1.0, crate::theme::LINE)),
                                 )
+                                .on_hover_text(tip)
                                 .clicked()
                             {
                                 self.sel = Some((x, y));
@@ -2294,14 +2643,16 @@ impl Shell {
                         ui.end_row();
                     }
                 });
-                ui.label(format!("CPU {cpu}/{total}"));
+                ui.label(format!("CPU {cpu}/{total}"))
+                    .on_hover_text("CPU used / total. Over budget blocks new loads and growth.");
                 if total > 0 {
                     ui.add(
                         egui::ProgressBar::new(cpu as f32 / total as f32)
                             .desired_width(ui.available_width().min(520.0))
                             .fill(crate::theme::BETANET)
                             .text(format!("CPU {cpu}/{total}")),
-                    );
+                    )
+                    .on_hover_text("Rig CPU load. Producers and programs both consume it.");
                 }
                 if let Some(h) = self.server.world.host(HostId(1)) {
                     ui.label(format!(
@@ -2310,7 +2661,10 @@ impl Shell {
                         h.vuln_ids().len(),
                         if h.breached { "yes" } else { "no" },
                         if h.scanned(self.actor) { "yes" } else { "no" }
-                    ));
+                    ))
+                    .on_hover_text(
+                        "Architecture · known vulnerabilities · breach state · scan state.",
+                    );
                     if h.scanned(self.actor) {
                         ui.label(format!("scan: {}", h.scan_report(self.actor)));
                     }
@@ -2344,9 +2698,14 @@ impl Shell {
                     .map(|h| h.breached)
                     .unwrap_or(false);
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Exploit:");
+                    ui.label("Exploit:")
+                        .on_hover_text("Needs one of your programs on this host.");
                     for v in &vulns {
-                        if ui.button(v).clicked() {
+                        if ui
+                            .button(v)
+                            .on_hover_text("Exploit this hole to breach the host.")
+                            .clicked()
+                        {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
                                 verb: Verb::Exploit { vuln: v.clone() },
@@ -2356,7 +2715,12 @@ impl Shell {
                             }
                         }
                     }
-                    if breached && ui.button("Send trojan").clicked() {
+                    if breached
+                        && ui
+                            .button("Send trojan")
+                            .on_hover_text("Mail a trojan to the host owner.")
+                            .clicked()
+                    {
                         let to = self
                             .server
                             .world
@@ -2373,9 +2737,14 @@ impl Shell {
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Patch:");
+                    ui.label("Patch:")
+                        .on_hover_text("Close a hole; a patched hole stays shut.");
                     for v in &vulns {
-                        if ui.button(format!("Patch {v}")).clicked() {
+                        if ui
+                            .button(format!("Patch {v}"))
+                            .on_hover_text("Patch this vulnerability.")
+                            .clicked()
+                        {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
                                 verb: Verb::DeckPatch { vuln: v.clone() },
@@ -2389,7 +2758,13 @@ impl Shell {
                 });
                 crate::theme::card(ui, "loadout", crate::theme::SUCCESS, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Load killer @selected").clicked() {
+                    if ui
+                        .button("Load killer @selected")
+                        .on_hover_text(
+                            "Load a Killer on the selected cell. Costs CPU; the warden will answer.",
+                        )
+                        .clicked()
+                    {
                         let (msg, beat) = match self.sel {
                             Some((x, y)) => match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -2408,7 +2783,11 @@ impl Shell {
                             self.say(line);
                         }
                     }
-                    if ui.button("Strike selected").clicked() {
+                    if ui
+                        .button("Strike selected")
+                        .on_hover_text("Strike the selected program: heads kill, tails shrink.")
+                        .clicked()
+                    {
                         let (msg, beat) = match self.sel {
                             Some((x, y)) => match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -2433,7 +2812,8 @@ impl Shell {
                 });
                 // v0.6 loadout: pick a kind with its role stats.
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Load kind @selected:");
+                    ui.label("Load kind @selected:")
+                        .on_hover_text("Each kind has a role and a per-segment CPU cost.");
                     for kind in [
                         sim::ProgramKind::Shield,
                         sim::ProgramKind::Scanner,
@@ -2445,6 +2825,11 @@ impl Shell {
                         let def = self.server.world.kind_def(kind);
                         if ui
                             .button(format!("Load {} ({}cpu)", kind.name(), def.cpu_per_seg))
+                            .on_hover_text(format!(
+                                "{} · {} CPU per segment.",
+                                kind_hint(kind),
+                                def.cpu_per_seg
+                            ))
                             .clicked()
                         {
                             let msg = match self.sel {
@@ -2470,8 +2855,13 @@ impl Shell {
                 // Kind actions. They refuse cleanly without the matching program.
                 crate::theme::card(ui, "kind actions", crate::theme::VEIL, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Kind actions:");
-                    if ui.button("Scan").clicked() {
+                    ui.label("Kind actions:")
+                        .on_hover_text("Each action needs its matching program kind on this rig.");
+                    if ui
+                        .button("Scan")
+                        .on_hover_text("Scanner: reveal vulns, logs, trace, and breach state.")
+                        .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::DeckScan,
@@ -2480,7 +2870,11 @@ impl Shell {
                             Err(e) => self.say(format!("scan failed: {e}")),
                         }
                     }
-                    if ui.button("Crack lock").clicked() {
+                    if ui
+                        .button("Crack lock")
+                        .on_hover_text("Cracker: three beats to drop the filter/monitor.")
+                        .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::DeckCrack,
@@ -2489,7 +2883,11 @@ impl Shell {
                             Err(e) => self.say(format!("crack failed: {e}")),
                         }
                     }
-                    if ui.button("Clone selected").clicked() {
+                    if ui
+                        .button("Clone selected")
+                        .on_hover_text("Cloner: copy the selected program into a free cell.")
+                        .clicked()
+                    {
                         match self.sel {
                             Some((x, y)) => match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -2501,7 +2899,11 @@ impl Shell {
                             None => self.say("click a cell first".to_string()),
                         }
                     }
-                    if ui.button("Overwrite selected").clicked() {
+                    if ui
+                        .button("Overwrite selected")
+                        .on_hover_text("Editor: sever a tail segment without a headshot.")
+                        .clicked()
+                    {
                         match self.sel {
                             Some((x, y)) => match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -2513,7 +2915,13 @@ impl Shell {
                             None => self.say("click a cell first".to_string()),
                         }
                     }
-                    if ui.button("Connect host 3").clicked() {
+                    if ui
+                        .button("Connect host 3")
+                        .on_hover_text(
+                            "Connector: probe host 3, reveal its scan report, and log the transit.",
+                        )
+                        .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::DeckConnect { host: HostId(3) },
@@ -2528,9 +2936,19 @@ impl Shell {
                 // It then yields free units every act.
                 crate::theme::card(ui, "producers", crate::theme::OLDNET, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Farm @selected:");
+                    ui.label("Farm @selected:")
+                        .on_hover_text(
+                            "Deploy a producer on the selected cell. It yields components each act and costs CPU; the warden ignores it.",
+                        );
                     for res in sim::Res::ALL {
-                        if ui.button(format!("Farm {}", res.name())).clicked() {
+                        if ui
+                            .button(format!("Farm {}", res.name()))
+                            .on_hover_text(format!(
+                                "Deploy a {} producer. It yields components every act and costs CPU.",
+                                res.name()
+                            ))
+                            .clicked()
+                        {
                             let msg = match self.sel {
                                 Some((x, y)) => match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -2547,7 +2965,10 @@ impl Shell {
                 });
                 // Kind-matched producers get +1 yield from affinity.
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Synergy farm @selected:");
+                    ui.label("Synergy farm @selected:")
+                        .on_hover_text(
+                            "A kind-matched producer yields +1 of its affinity resource every act.",
+                        );
                     for (res, kind) in [
                         (sim::Res::Loop, sim::ProgramKind::Connector),
                         (sim::Res::Data, sim::ProgramKind::Scanner),
@@ -2555,6 +2976,11 @@ impl Shell {
                     ] {
                         if ui
                             .button(format!("Farm {} ({})", res.name(), kind.name()))
+                            .on_hover_text(format!(
+                                "Deploy a {} producer with {} affinity: +1 yield per act.",
+                                res.name(),
+                                kind.name()
+                            ))
                             .clicked()
                         {
                             let msg = match self.sel {
@@ -2670,8 +3096,17 @@ impl Shell {
                         .host(HostId(1))
                         .map(|h| h.logs_visible(self.actor).len())
                         .unwrap_or(0);
-                    ui.label(format!("your trail on this rig: {logs}"));
-                    if ui.button("Scrub log").clicked() {
+                    ui.label(format!("your trail on this rig: {logs}"))
+                        .on_hover_text(
+                            "Visible log entries linking you to this host. Traces and crimes use them.",
+                        );
+                    if ui
+                        .button("Scrub log")
+                        .on_hover_text(
+                            "Erase your trail here. Needs one of your programs on the host or a privilege vuln.",
+                        )
+                        .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::ScrubLog,
@@ -2687,7 +3122,10 @@ impl Shell {
                 // exchange rather than once.
                 crate::theme::card(ui, "mods @selected", crate::theme::BETANET, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Mods @selected:");
+                    ui.label("Mods @selected:")
+                        .on_hover_text(
+                            "Persistent mods built into the selected program. They fire every exchange.",
+                        );
                     for card in ["tank", "plating", "reflect", "splash", "extra"] {
                         // "Mod " prefix keeps these distinct from the
                         // one-shot cards of the same name.
@@ -2695,7 +3133,12 @@ impl Shell {
                             Some((res, n)) => format!("Mod {card} ({n} {})", res.name()),
                             None => format!("Mod {card}"),
                         };
-                        if ui.button(label).clicked() {
+                        let tip = self
+                            .cards
+                            .get(card)
+                            .map(card_effect_text)
+                            .unwrap_or("Persistent program mod.");
+                        if ui.button(label).on_hover_text(tip).clicked() {
                             let msg = match self.sel {
                                 Some((x, y)) => match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -2775,6 +3218,9 @@ impl Shell {
                 crate::theme::card(ui, "topology", crate::theme::BETANET, |ui| {
                 let graph_size = egui::vec2(ui.available_width().min(720.0), 200.0);
                 let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::click());
+                let gresp = gresp.on_hover_text(
+                    "Click a node to inspect it. Dark nodes are in unpowered sections.",
+                );
                 let grect = gresp.rect;
                 gp.rect_filled(grect, 8.0, egui::Color32::from_rgb(0x0D, 0x14, 0x1A));
                 gp.rect_stroke(
@@ -2924,7 +3370,13 @@ impl Shell {
                 }
                 });
                 crate::theme::card(ui, "net actions", crate::theme::OLDNET, |ui| {
-                if ui.button("Route 1→3").clicked() {
+                if ui
+                    .button("Route 1→3")
+                    .on_hover_text(
+                        "Preview a powered route from host 1 to host 3. More hops mean more latency and tolls, but a harder trace.",
+                    )
+                    .clicked()
+                {
                     // Blackout-aware: routing avoids hosts in dark sections.
                     match self
                         .server
@@ -2940,7 +3392,11 @@ impl Shell {
                         Err(e) => self.say(format!("no route: {e}")),
                     }
                 }
-                if ui.button("Damage wire 1-2").clicked() {
+                if ui
+                    .button("Damage wire 1-2")
+                    .on_hover_text("Damage the 1–2 wire. Files a crime; routing reroutes around it.")
+                    .clicked()
+                {
                     // Server-routed act: logged for replay, refused with
                     // the link's reason when there is nothing to damage.
                     match self.server.apply_one(Intent {
@@ -2954,7 +3410,11 @@ impl Shell {
                 ui.horizontal(|ui| {
                     // Power grid (design/02): dark a section or heal it. Both
                     // are logged acts, so replays reproduce the reroute.
-                    if ui.button("Cut power sec (1,0)").clicked() {                        match self.server.apply_one(Intent {
+                    if ui
+                        .button("Cut power sec (1,0)")
+                        .on_hover_text("Cut power to section (1,0). Dark hosts drop off the network.")
+                        .clicked()
+                    {                        match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::SetPower { sx: 1, sy: 0, up: false },
                         }) {
@@ -2962,7 +3422,11 @@ impl Shell {
                             Err(e) => self.say(format!("power cut failed: {e}")),
                         }
                     }
-                    if ui.button("Restore power").clicked() {
+                    if ui
+                        .button("Restore power")
+                        .on_hover_text("Restore power to section (1,0).")
+                        .clicked()
+                    {
                         match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::SetPower { sx: 1, sy: 0, up: true },
@@ -2980,9 +3444,17 @@ impl Shell {
                         "firewall: host 2 blocks host 1"
                     } else {
                         "firewall: open"
-                    });
+                    })
+                    .on_hover_text(
+                        "A firewall filter on host 2 blocks host 1 and partitions the 1→3 route.",
+                    );
                     if ui
                         .button(if blocked { "Unblock" } else { "Block 1 on 2" })
+                        .on_hover_text(if blocked {
+                            "Remove the filter and reopen the direct route."
+                        } else {
+                            "Filter host 1 on host 2. Logged act; reroutes traffic."
+                        })
                         .clicked()
                     {
                         match self.server.apply_one(Intent {
@@ -3020,6 +3492,9 @@ impl Shell {
                 if !areas.is_empty() {
                     let size = egui::vec2(ui.available_width().min(560.0), 210.0);
                     let (vresp, vp) = ui.allocate_painter(size, egui::Sense::hover());
+                    let vresp = vresp.on_hover_text(
+                        "Area map: links are exits, and red labels mark hazards.",
+                    );
                     let vr = vresp.rect;
                     vp.rect_filled(vr, 10.0, egui::Color32::from_rgb(0x0C, 0x0B, 0x16));
                     vp.rect_stroke(
@@ -3081,8 +3556,17 @@ impl Shell {
                 });
                 crate::theme::card(ui, "helmet", crate::theme::BETANET, |ui| {
                 if !self.server.world.veil.present(self.actor) {
-                    ui.label(format!("mindpower {mp} (needs 5+)"));
-                    if ui.button("Jack in").clicked() {
+                    ui.label(format!("mindpower {mp} (needs 5+)"))
+                        .on_hover_text(
+                            "Mindpower gates Veil entry. Below 5 you cannot jack back in.",
+                        );
+                    if ui
+                        .button("Jack in")
+                        .on_hover_text(
+                            "Enter the Veil. Death ejects you with heavy mindpower drain.",
+                        )
+                        .clicked()
+                    {
                         let msg = match self.server.apply_one(Intent {
                             actor: self.actor,
                             verb: Verb::VeilEnter,
@@ -3111,7 +3595,11 @@ impl Shell {
                     ui.horizontal_wrapped(|ui| {
                         for a in exits {
                             let label = self.server.world.veil.area_info(a).map(|(n, _, x)| format!("{n}{}", if x { " [exit]" } else { "" })).unwrap_or_else(|| format!("area {a}"));
-                            if ui.button(format!("→ {label}")).clicked() {
+                            if ui
+                                .button(format!("→ {label}"))
+                                .on_hover_text("Move to this area. Hazards drain mindpower on entry.")
+                                .clicked()
+                            {
                                 let msg = match self.server.apply_one(Intent {
                                     actor: self.actor,
                                     verb: Verb::VeilMove { area: a },
@@ -3126,7 +3614,13 @@ impl Shell {
                     // Host seizure + transfer to a nearby weaker NPC.
                     ui.horizontal_wrapped(|ui| {
                         if let Some((host, hmp)) = self.server.world.veil.area_host(area) {
-                            if ui.button(format!("Seize host {host:?} (mp {hmp})")).clicked() {
+                            if ui
+                                .button(format!("Seize host {host:?} (mp {hmp})"))
+                                .on_hover_text(
+                                    "Seize this area's bound host. Needs mindpower and files a crime.",
+                                )
+                                .clicked()
+                            {
                                 let msg = match self.server.apply_one(Intent {
                                     actor: self.actor,
                                     verb: Verb::VeilSeize,
@@ -3138,7 +3632,13 @@ impl Shell {
                             }
                         }
                         for (id, role) in self.nearby_npcs() {
-                            if ui.button(format!("Transfer {role:?}")).clicked() {
+                            if ui
+                                .button(format!("Transfer {role:?}"))
+                                .on_hover_text(
+                                    "Transfer control into a nearby weaker NPC. Files a crime.",
+                                )
+                                .clicked()
+                            {
                                 let msg = match self.server.apply_one(Intent {
                                     actor: self.actor,
                                     verb: Verb::VeilTransfer { host: EntityId(id) },
@@ -3149,7 +3649,11 @@ impl Shell {
                                 self.say(msg);
                             }
                         }
-                        if ui.button("Eject").clicked() {
+                        if ui
+                            .button("Eject")
+                            .on_hover_text("Leave the Veil with a light mindpower drain.")
+                            .clicked()
+                        {
                             let msg = match self.server.apply_one(Intent {
                                 actor: self.actor,
                                 verb: Verb::VeilEject,
@@ -3166,14 +3670,25 @@ impl Shell {
                     let carried = self.server.world.veil.carried_files(self.actor);
                     if !area_files.is_empty() || !carried.is_empty() {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(format!("mind {}/{} files", carried.len(), mp));
+                            ui.label(format!("mind {}/{} files", carried.len(), mp))
+                                .on_hover_text(
+                                    "Carried mind-files / mindpower capacity.",
+                                );
                             for f in area_files {
-                                if ui.button(format!("Carry {f}")).clicked() {
+                                if ui
+                                    .button(format!("Carry {f}"))
+                                    .on_hover_text("Carry this mind-file with you.")
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::VeilCarry { name: f.clone() });
                                 }
                             }
                             for (i, f) in carried.iter().enumerate() {
-                                if ui.button(format!("Read {f}")).clicked() {
+                                if ui
+                                    .button(format!("Read {f}"))
+                                    .on_hover_text("Read and consume this mind-file.")
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::VeilRead { index: i });
                                 }
                             }

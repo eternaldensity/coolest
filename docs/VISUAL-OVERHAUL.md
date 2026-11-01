@@ -19,8 +19,10 @@
 > work/contract rail share one row; narrower windows stack them. The rail
 > uses meters, stat rows, and component chips instead of repeated prose,
 > and the Street inspector lists nearby landmarks so it is never a dead
-> panel. Scope is the `gui/` shell; the deterministic sim and server stay
-> unchanged except for small interaction verbs.
+> panel. Hover tooltips on vitals, costs, jobs, host state, actions, and
+> inspector landmarks explain the rule behind each number. Scope is the
+> `gui/` shell; the deterministic sim and server stay unchanged except for
+> small interaction verbs.
 
 ## 1. Experience goals
 

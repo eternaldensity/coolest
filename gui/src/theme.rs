@@ -157,11 +157,17 @@ pub fn section(ui: &mut egui::Ui, label: &str) {
     );
 }
 
-pub fn label(ui: &mut egui::Ui, s: impl Into<String>) {
-    ui.label(RichText::new(s.into()).size(12.0).color(MUTED));
+pub fn label(ui: &mut egui::Ui, s: impl Into<String>) -> egui::Response {
+    ui.label(RichText::new(s.into()).size(12.0).color(MUTED))
 }
 
-pub fn meter(ui: &mut egui::Ui, label: &str, value: f32, max: f32, color: Color32) {
+pub fn meter(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: f32,
+    max: f32,
+    color: Color32,
+) -> egui::Response {
     let frac = if max <= 0.0 {
         0.0
     } else {
@@ -176,16 +182,21 @@ pub fn meter(ui: &mut egui::Ui, label: &str, value: f32, max: f32, color: Color3
                     .size(10.0)
                     .color(TEXT),
             ),
-    );
+    )
 }
 
-pub fn chip(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) {
-    ui.label(RichText::new(text.into()).size(10.5).strong().color(color));
+pub fn chip(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) -> egui::Response {
+    ui.label(RichText::new(text.into()).size(10.5).strong().color(color))
 }
 
 /// A compact label/value row for the narrow rail: quiet label on the left,
 /// tabular value on the right. Keeps long prose from wrapping mid-number.
-pub fn stat_row(ui: &mut egui::Ui, label: &str, value: impl Into<String>, color: Color32) {
+pub fn stat_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: impl Into<String>,
+    color: Color32,
+) -> egui::Response {
     ui.horizontal(|ui| {
         ui.label(RichText::new(label).size(10.5).color(FAINT));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -196,7 +207,8 @@ pub fn stat_row(ui: &mut egui::Ui, label: &str, value: impl Into<String>, color:
                     .color(color),
             );
         });
-    });
+    })
+    .response
 }
 
 pub fn heading(ui: &mut egui::Ui, text: impl Into<String>) {
