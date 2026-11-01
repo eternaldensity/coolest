@@ -190,9 +190,11 @@ takeover/clone verbs, and host zones/files/accounts. This is what makes
   uses them — that is the multiplayer seam (design/08).
 
 ### Blocked / external
-- **ATProto PDS relay.** Lexicons validate (`server/src/atproto.rs`) but
-  there is no PDS bridge, so nightly's PDS chaos is skipped and noted. Do
-  not fake it.
+- **ATProto PDS bridge.** Lexicons validate (`server/src/atproto.rs`) but
+  there is no PDS transport, identity, auth, or queue, so nightly's PDS
+  chaos is skipped and noted. Do not fake it. The requirements and OSS
+  shortlist are in `docs/PDS-BRIDGE-REQUIREMENTS.md`; start with P0
+  (Mode A: operated PDS + polling) before firehose/federation.
 
 ## 9. Verification checklist before you commit
 
