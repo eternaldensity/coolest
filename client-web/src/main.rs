@@ -185,6 +185,104 @@ fn main() {
     println!("veil: present after death = {}", v.present(EntityId(1)));
     let _ = Dir::N;
 
+    // v0.4 embodied tour, all through the intent pipeline: fight, get
+    // Wanted, surrender, then use the real mindpower Veil.
+    let mut s = World::new(7);
+    s.spawn(EntityId(1), pos(8, 8), 1);
+    s.spawn_npc(
+        EntityId(10),
+        sim::Role::Shopkeeper,
+        (9, 8),
+        (9, 8),
+        (9, 8),
+        9999,
+    );
+    // A cop in earshot turns the kill into a full-evidence crime.
+    s.spawn_npc(EntityId(20), sim::Role::Cop, (9, 9), (9, 9), (9, 9), 9999);
+    s.add_item(EntityId(1), "knife", 1).unwrap();
+    s.equip_item(EntityId(1), "knife").unwrap();
+    let mut swings = 0;
+    while s.npc_role(10).is_some() && swings < 100 {
+        s.tick = s.next_at(EntityId(1));
+        s.heal(EntityId(1), 999);
+        let _ = s.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::Attack {
+                target: EntityId(10),
+            },
+        });
+        swings += 1;
+    }
+    println!(
+        "fight: down={} swings={swings} hp={} loot={:?}",
+        s.npc_role(10).is_none(),
+        s.hp(EntityId(1)),
+        s.floor_items_at(pos(9, 8))
+    );
+
+    let acct = s.open_account(EntityId(1), HostId(2)).unwrap();
+    s.ledger.mint(acct, 5000).unwrap();
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::Surrender,
+    })
+    .unwrap();
+    println!(
+        "arrest: standing={:?} bank={:?}",
+        s.standing(),
+        s.bank_balance(EntityId(1))
+    );
+
+    s.veil.add_area(1, "lobby", vec![2], false);
+    s.veil.add_area(2, "ops", vec![1, 3], false);
+    s.veil.add_area(3, "roof", vec![2], true);
+    s.veil.set_host(2, EntityId(70), 3);
+    s.veil.set_hazard(3, 2);
+    s.veil.set_files(2, vec!["plans".into()]);
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::VeilEnter,
+    })
+    .unwrap();
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::VeilMove { area: 2 },
+    })
+    .unwrap();
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::VeilCarry {
+            name: "plans".into(),
+        },
+    })
+    .unwrap();
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::VeilSeize,
+    })
+    .unwrap();
+    s.tick = s.next_at(EntityId(1));
+    s.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::SetPower {
+            sx: 0,
+            sy: 0,
+            up: false,
+        },
+    })
+    .unwrap();
+    println!(
+        "veil: present={} mp={} files={}",
+        s.veil.present(EntityId(1)),
+        s.mind_of(EntityId(1)).unwrap().mindpower,
+        s.veil.carried_files(EntityId(1)).len()
+    );
+
     println!("funnel: {}", w.funnel_line());
     println!("demo ok, log lines = {}", ui.log.len());
 }
