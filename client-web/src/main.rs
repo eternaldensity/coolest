@@ -28,6 +28,7 @@ fn main() {
     let vulns = sim::parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
     let cards = sim::parse_cards(include_str!("../../data/cards.yaml")).unwrap();
     let items = sim::parse_items(include_str!("../../data/items.yaml")).unwrap();
+    let contracts = sim::parse_contracts(include_str!("../../data/contracts.yaml")).unwrap();
 
     // M0.5 survival.
     let mut w = World::new(42);
@@ -281,6 +282,44 @@ fn main() {
         s.veil.present(EntityId(1)),
         s.mind_of(EntityId(1)).unwrap().mindpower,
         s.veil.carried_files(EntityId(1)).len()
+    );
+
+    // v0.5 local contract board: accept a delivery offer, escrow, deliver.
+    let mut cw = World::new(8);
+    cw.spawn(EntityId(1), pos(8, 8), 1);
+    cw.spawn_npc(
+        EntityId(10),
+        sim::Role::Shopkeeper,
+        (9, 8),
+        (9, 8),
+        (9, 8),
+        9999,
+    );
+    let buyer = cw.open_account(EntityId(1), HostId(1)).unwrap();
+    cw.ledger.mint(buyer, 500).unwrap();
+    let till = cw.open_account(EntityId(10), HostId(1)).unwrap();
+    cw.ledger.mint(till, 1000).unwrap();
+    cw.set_contracts(&[contracts[0].clone()]);
+    cw.refresh_board();
+    cw.add_item(EntityId(1), "medkit", 2).unwrap();
+    let offer = cw.offers()[0].id;
+    cw.tick = cw.next_at(EntityId(1));
+    cw.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::AcceptOffer { offer },
+    })
+    .unwrap();
+    cw.tick = cw.next_at(EntityId(1));
+    cw.apply(&Intent {
+        actor: EntityId(1),
+        verb: Verb::DeliverContract,
+    })
+    .unwrap();
+    println!(
+        "contract: done={} bank={:?} rep={}",
+        cw.active_contract().is_none(),
+        cw.bank_balance(EntityId(1)),
+        cw.employer_reputation(EntityId(10))
     );
 
     println!("funnel: {}", w.funnel_line());

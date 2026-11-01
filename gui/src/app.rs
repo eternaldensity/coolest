@@ -184,6 +184,9 @@ impl Shell {
         if let Ok(items) = sim::parse_items(include_str!("../../data/items.yaml")) {
             server.world.set_items(&items);
         }
+        if let Ok(contracts) = sim::parse_contracts(include_str!("../../data/contracts.yaml")) {
+            server.world.set_contracts(&contracts);
+        }
         let mut talks = BTreeMap::new();
         for d in sim::parse_dialogues(include_str!("../../data/dialogues.yaml")).unwrap_or_default()
         {
@@ -212,6 +215,9 @@ impl Shell {
         let buyer = server.world.open_account(actor, HostId(1)).unwrap();
         server.world.ledger.mint(buyer, 500).unwrap();
         let till = server.world.open_account(EntityId(10), HostId(1)).unwrap();
+        // Contract employers escrow from their account; seed the demo shop's
+        // float so the board is playable without waiting for sales.
+        server.world.ledger.mint(till, 5000).unwrap();
         let mut shop = sim::Shop::new(till);
         shop.add_line("ration", 100, 5, 2, 5, 200);
         shop.add_line("meds", 400, 2, 1, 3, 900);
@@ -224,6 +230,7 @@ impl Shell {
         // Night store three doors down: always open, steeper prices for
         // the graveyard shift. Same till owner, separate account.
         let night_till = server.world.open_account(EntityId(10), HostId(1)).unwrap();
+        server.world.ledger.mint(night_till, 5000).unwrap();
         let mut night = sim::Shop::new(night_till);
         night.add_line("ration", 150, 3, 2, 3, 300);
         night.add_line("meds", 600, 2, 1, 2, 1200);
@@ -232,6 +239,8 @@ impl Shell {
         server.world.place_shop(13, 8, night);
         // Rented room above the noodle shop (design/01): sleep here.
         server.world.set_home(pos(8, 8));
+        // Populate the local board after employers exist.
+        server.world.refresh_board();
         let mut shell = Self {
             server,
             actor,
@@ -396,6 +405,12 @@ impl Shell {
                 "used" => out.push("used".to_string()),
                 "surrendered" => out.push("surrendered — fine paid".to_string()),
                 "jailed" => out.push("spent the night in jail — record cleared".to_string()),
+                "contract_accepted" => out.push("contract accepted".to_string()),
+                "contract_done" => out.push("contract complete — escrow paid".to_string()),
+                "contract_abandoned" => {
+                    out.push("contract abandoned — deposit forfeited".to_string())
+                }
+                "contract_expired" => out.push("contract expired".to_string()),
                 _ => {}
             }
         }
@@ -726,6 +741,47 @@ impl Shell {
                         }
                     }
                 });
+                // v0.5 contract board: local offers, one active contract.
+                let offers = self.server.world.offers().to_vec();
+                let active = self.server.world.active_contract().cloned();
+                let tick = self.server.world.tick;
+                if !offers.is_empty() || active.is_some() {
+                    ui.separator();
+                    if let Some(c) = &active {
+                        let left = c.deadline_tick.saturating_sub(tick);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!(
+                                "Contract: {} · {} · {left}t left · {} rep",
+                                c.title,
+                                c.kind.summary(),
+                                self.server.world.employer_reputation(c.employer)
+                            ));
+                            if ui.button("Deliver contract").clicked() {
+                                self.do_verb(Verb::DeliverContract);
+                            }
+                            if ui.button("Abandon contract").clicked() {
+                                self.do_verb(Verb::AbandonContract);
+                            }
+                        });
+                    } else {
+                        ui.label("Contract board:");
+                        ui.horizontal_wrapped(|ui| {
+                            for o in &offers {
+                                let left = o.deadline_tick.saturating_sub(tick);
+                                let label = format!(
+                                    "Accept: {} · {}c · {} · {} left",
+                                    o.title,
+                                    o.payout_cents,
+                                    o.kind.summary(),
+                                    left
+                                );
+                                if ui.button(label).clicked() {
+                                    self.do_verb(Verb::AcceptOffer { offer: o.id });
+                                }
+                            }
+                        });
+                    }
+                }
                 ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 // Pack (design/07): carried stacks, worn gear, and items on
@@ -2461,6 +2517,32 @@ mod tests {
             );
             // Farm + two watches are all logged acts.
             assert_eq!(h.shell.server.log.len(), 3);
+        }
+
+        #[test]
+        fn contract_board_accept_and_deliver_through_clicks() {
+            let mut h = Harness::new();
+            h.shell
+                .server
+                .world
+                .set_contracts(&[sim::contracts::default_contracts()[0].clone()]);
+            h.shell.server.world.refresh_board();
+            h.shell
+                .server
+                .world
+                .add_item(EntityId(1), "medkit", 2)
+                .unwrap();
+            h.pass_with(vec![]);
+            let before = h.shell.server.world.bank_balance(EntityId(1)).unwrap_or(0);
+            h.click_prefix("Accept: ");
+            assert!(h.has_text("Contract:"), "text: {:?}", h.labels());
+            h.click("Deliver contract");
+            assert!(
+                h.shell.server.world.active_contract().is_none(),
+                "contract did not complete"
+            );
+            let after = h.shell.server.world.bank_balance(EntityId(1)).unwrap_or(0);
+            assert!(after > before, "contract did not pay: {before} -> {after}");
         }
 
         #[test]

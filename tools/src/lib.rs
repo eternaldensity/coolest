@@ -384,6 +384,7 @@ pub fn fuzz_world(seed: u64) -> World {
     let buyer = w.open_account(EntityId(1), HostId(1)).unwrap();
     w.ledger.mint(buyer, 5000).unwrap();
     let till = w.open_account(EntityId(10), HostId(1)).unwrap();
+    w.ledger.mint(till, 5000).unwrap();
     let mut shop = sim::Shop::new(till);
     shop.add_line("ration", 100, 5, 2, 5, 200);
     shop.add_line("meds", 400, 2, 1, 3, 900);
@@ -402,13 +403,15 @@ pub fn fuzz_world(seed: u64) -> World {
     w.add_item(EntityId(1), "medkit", 2).ok();
     w.add_item(EntityId(1), "snack", 1).ok();
     w.drop_item(EntityId(1), "snack").ok();
+    w.set_contracts(&sim::contracts::default_contracts());
+    w.refresh_board();
     w
 }
 
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(179) {
+    match rng.below(184) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -510,6 +513,11 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
         178 => Verb::VeilTransfer {
             host: EntityId(10 + rng.below(2) as u64),
         },
+        179..=181 => Verb::AcceptOffer {
+            offer: rng.below(7) as u64,
+        },
+        182 => Verb::DeliverContract,
+        183 => Verb::AbandonContract,
         _ => Verb::OpenMail { index: 0 },
     }
 }
