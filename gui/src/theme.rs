@@ -270,18 +270,35 @@ pub fn card<R>(
     accent: Color32,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
+    // Use last frame's rect for hover: the frame's own rect is only known
+    // after the content has been laid out. The shell repaints every frame,
+    // so the light follows the cursor immediately.
+    let hover_id = ui.id().with(("card_hover", title));
+    let previous: Option<egui::Rect> = ui.data(|d| d.get_temp(hover_id));
+    let hot = previous.is_some_and(|r| ui.rect_contains_pointer(r));
+    let fill = if hot { PANEL_HOT } else { PANEL };
+    let border = if hot {
+        Stroke::new(1.0, alpha(accent, 220))
+    } else {
+        Stroke::new(1.0, alpha(LINE, 220))
+    };
+    let shadow = egui::epaint::Shadow {
+        offset: [0, 2],
+        blur: if hot { 18 } else { 10 },
+        spread: 0,
+        color: if hot {
+            alpha(accent, 42)
+        } else {
+            Color32::from_black_alpha(110)
+        },
+    };
     let response = egui::Frame::new()
-        .fill(PANEL)
-        .stroke(Stroke::new(1.0, alpha(LINE, 220)))
+        .fill(fill)
+        .stroke(border)
         .corner_radius(egui::CornerRadius::ZERO)
         .inner_margin(egui::Margin::symmetric(12, 9))
         .outer_margin(egui::Margin::symmetric(0, 3))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 2],
-            blur: 10,
-            spread: 0,
-            color: Color32::from_black_alpha(110),
-        })
+        .shadow(shadow)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -313,19 +330,33 @@ pub fn card<R>(
         });
 
     let rect = response.response.rect;
+    ui.data_mut(|d| d.insert_temp(hover_id, rect));
     let p = ui.painter();
     p.line_segment(
         [rect.left_top(), rect.right_top()],
-        Stroke::new(1.0, alpha(accent, 190)),
+        Stroke::new(1.0, alpha(accent, if hot { 255 } else { 190 })),
     );
     p.line_segment(
         [
             rect.left_top() + egui::vec2(0.0, 1.0),
-            rect.left_top() + egui::vec2(54.0, 1.0),
+            rect.left_top() + egui::vec2(if hot { 84.0 } else { 54.0 }, 1.0),
         ],
         Stroke::new(2.0, accent),
     );
-    corner_marks(p, rect, alpha(accent, 135), 7.0);
+    corner_marks(
+        p,
+        rect,
+        if hot { accent } else { alpha(accent, 135) },
+        if hot { 9.0 } else { 7.0 },
+    );
+    if hot {
+        p.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, alpha(accent, 90)),
+            StrokeKind::Inside,
+        );
+    }
     response.inner
 }
 
