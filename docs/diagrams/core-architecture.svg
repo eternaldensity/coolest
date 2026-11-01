@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+<title id="title">FIDOM proposed core architecture</title>
+<desc id="desc">Deterministic sim and server, separate ATProto bridge, PDS edge, and the trust boundary between them.</desc>
+<defs>
+<marker id="arrow-ink" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#0f172a"/></marker>
+<marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#475569"/></marker>
+<marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+<marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#ea580c"/></marker>
+<marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+<marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#e11d48"/></marker>
+<marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#059669"/></marker>
+</defs>
+<rect width="1600" height="1000" fill="#ffffff"/>
+<text x="40.0" y="44.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="28" font-weight="800" fill="#0f172a">FIDOM — proposed core architecture</text>
+<text x="40.0" y="72.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="400" fill="#475569">v0.4 deterministic sim + proposed PDS bridge. The bridge can submit intents; it never holds &amp;mut World.</text>
+<rect x="30.0" y="100.0" width="280.0" height="800.0" rx="20" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="50.0" y="130.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#475569">CLIENTS</text>
+<text x="50.0" y="148.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="500" fill="#94a3b8">render-only</text>
+<rect x="340.0" y="100.0" width="750.0" height="800.0" rx="20" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="360.0" y="130.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#475569">AUTHORITATIVE FIDOM HOST</text>
+<text x="360.0" y="148.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="500" fill="#94a3b8">one clock · one state · one log</text>
+<rect x="1130.0" y="100.0" width="440.0" height="800.0" rx="20" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="1150.0" y="130.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#475569">ATPROTO EDGE</text>
+<text x="1150.0" y="148.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="500" fill="#94a3b8">asynchronous · untrusted input</text>
+<rect x="55.0" y="160.0" width="230.0" height="120.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="170.0" y="187.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">egui client</text>
+<text x="170.0" y="209.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="170.0" dy="0.0">desktop + web</tspan><tspan x="170.0" dy="16.9">Street · Deck · Net · Veil</tspan></text>
+<rect x="55.0" y="310.0" width="230.0" height="100.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="170.0" y="337.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">client-web / tools</text>
+<text x="170.0" y="359.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="170.0" dy="0.0">scripted tour</tspan><tspan x="170.0" dy="16.9">fuzz · replay · soak</tspan></text>
+<rect x="55.0" y="450.0" width="230.0" height="90.0" rx="14" fill="#fff1f2" stroke="#e11d48" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="170.0" y="477.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">render-only</text>
+<text x="170.0" y="499.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="170.0" dy="0.0">submit Intent</tspan><tspan x="170.0" dy="16.9">render Delta + Events</tspan></text>
+<rect x="370.0" y="160.0" width="310.0" height="130.0" rx="14" fill="#e0e7ff" stroke="#4f46e5" stroke-width="1.6" opacity="1.0"/>
+<text x="525.0" y="187.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">server::Server</text>
+<text x="525.0" y="209.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="525.0" dy="0.0">intent queue · clock</tspan><tspan x="525.0" dy="16.9">snapshot · replay</tspan></text>
+<rect x="740.0" y="160.0" width="310.0" height="130.0" rx="14" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.6" opacity="1.0"/>
+<text x="895.0" y="187.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">Intent log + snapshot</text>
+<text x="895.0" y="209.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="895.0" dy="0.0">source of truth for replay</tspan><tspan x="895.0" dy="16.9">accepted + refused intents</tspan></text>
+<rect x="370.0" y="340.0" width="680.0" height="200.0" rx="14" fill="#dcfce7" stroke="#16a34a" stroke-width="1.6" opacity="1.0"/>
+<text x="710.0" y="367.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="17" font-weight="700" fill="#0f172a">sim::World — deterministic</text>
+<text x="710.0" y="389.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="710.0" dy="0.0">no clock · no network · no filesystem · no threads</tspan></text>
+<rect x="395.0" y="430.0" width="145.0" height="70.0" rx="14" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" opacity="1.0"/>
+<text x="467.5" y="457.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#0f172a">Street</text>
+<text x="467.5" y="479.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10.5" font-weight="400" fill="#475569"><tspan x="467.5" dy="0.0">needs · jobs</tspan><tspan x="467.5" dy="13.7">contracts · combat</tspan><tspan x="467.5" dy="13.7">items</tspan></text>
+<rect x="555.0" y="430.0" width="145.0" height="70.0" rx="14" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" opacity="1.0"/>
+<text x="627.5" y="457.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#0f172a">Deck</text>
+<text x="627.5" y="479.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569"><tspan x="627.5" dy="0.0">hosts · cards</tspan><tspan x="627.5" dy="14.3">trace · warden</tspan></text>
+<rect x="715.0" y="430.0" width="145.0" height="70.0" rx="14" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" opacity="1.0"/>
+<text x="787.5" y="457.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#0f172a">Net</text>
+<text x="787.5" y="479.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569"><tspan x="787.5" dy="0.0">routes · power</tspan><tspan x="787.5" dy="14.3">firewalls</tspan></text>
+<rect x="875.0" y="430.0" width="145.0" height="70.0" rx="14" fill="#ffffff" stroke="#16a34a" stroke-width="1.6" opacity="1.0"/>
+<text x="947.5" y="457.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="700" fill="#0f172a">Veil</text>
+<text x="947.5" y="479.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569"><tspan x="947.5" dy="0.0">mindpower · files</tspan><tspan x="947.5" dy="14.3">hazards</tspan></text>
+<rect x="360.0" y="575.0" width="690.0" height="14.0" rx="7" fill="#334155" stroke="#334155" stroke-width="1.6" opacity="1.0"/>
+<text x="705.0" y="566.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="700" fill="#ea580c">privileged bridge queue</text>
+<rect x="370.0" y="625.0" width="310.0" height="150.0" rx="14" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="525.0" y="652.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">ATProto bridge — proposed</text>
+<text x="525.0" y="674.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="525.0" dy="0.0">identity · lexicon</tspan><tspan x="525.0" dy="16.9">outbox/inbox · policy</tspan></text>
+<rect x="740.0" y="625.0" width="310.0" height="150.0" rx="14" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="895.0" y="652.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">Bridge DB — proposed</text>
+<text x="895.0" y="674.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="895.0" dy="0.0">cursor · queue</tspan><tspan x="895.0" dy="16.9">DID map · board/offer index</tspan></text>
+<text x="705.0" y="882.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#ea580c">Bridge may submit Intents and receive BridgeEvents; it never holds &amp;mut World.</text>
+<rect x="1160.0" y="160.0" width="380.0" height="140.0" rx="14" fill="#f3e8ff" stroke="#9333ea" stroke-width="1.6" opacity="1.0"/>
+<text x="1350.0" y="187.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">PDS</text>
+<text x="1350.0" y="209.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1350.0" dy="0.0">Aurora-Locus / official</tspan><tspan x="1350.0" dy="16.9">repo · auth · sync · firehose</tspan></text>
+<rect x="1160.0" y="360.0" width="380.0" height="110.0" rx="14" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6" opacity="1.0"/>
+<text x="1350.0" y="387.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">Relay / Jetstream</text>
+<text x="1350.0" y="409.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1350.0" dy="0.0">optional; cross-city fan-out</tspan></text>
+<rect x="1160.0" y="530.0" width="380.0" height="110.0" rx="14" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6" opacity="1.0"/>
+<text x="1350.0" y="557.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">other players&apos; PDS</text>
+<text x="1350.0" y="579.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1350.0" dy="0.0">sh.fidom.* records</tspan></text>
+<rect x="1160.0" y="700.0" width="380.0" height="100.0" rx="14" fill="#f1f5f9" stroke="#64748b" stroke-width="1.6" opacity="1.0"/>
+<text x="1350.0" y="727.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="16" font-weight="700" fill="#0f172a">other ATProto clients</text>
+<text x="1350.0" y="749.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1350.0" dy="0.0">Bluesky app · web · bots</tspan></text>
+<line x1="1120" y1="110" x2="1120" y2="890" stroke="#e11d48" stroke-width="2" stroke-dasharray="7 6"/>
+<text x="1120.0" y="920.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#e11d48" paint-order="stroke" stroke="#f8fafc" stroke-width="4">trust boundary</text>
+<line x1="285.0" y1="220.0" x2="370.0" y2="220.0" stroke="#4f46e5" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+<text x="327.0" y="208.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#4f46e5" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Intent</text>
+<polyline points="285.0,360.0 330.0,360.0 330.0,250.0 370.0,250.0" fill="none" stroke="#4f46e5" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+<text x="332.0" y="306.0" text-anchor="middle" transform="rotate(-90 332.0 306.0)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#4f46e5" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Intent</text>
+<line x1="536.0" y1="290.0" x2="536.0" y2="340.0" stroke="#4f46e5" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+<line x1="544.0" y1="340.0" x2="544.0" y2="290.0" stroke="#4f46e5" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+<text x="558.0" y="322.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#4f46e5" paint-order="stroke" stroke="#f8fafc" stroke-width="4">apply / Delta</text>
+<line x1="680.0" y1="225.0" x2="740.0" y2="225.0" stroke="#ca8a04" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<text x="710.0" y="213.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#ca8a04" paint-order="stroke" stroke="#f8fafc" stroke-width="4">append</text>
+<polyline points="370.0,270.0 350.0,270.0 350.0,582.0 360.0,582.0" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<text x="350.0" y="470.0" text-anchor="middle" transform="rotate(-90 350.0 470.0)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="10" font-weight="600" fill="#ea580c" paint-order="stroke" stroke="#f8fafc" stroke-width="4">BridgeEvent / Intent</text>
+<line x1="525.0" y1="589.0" x2="525.0" y2="625.0" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<line x1="895.0" y1="589.0" x2="895.0" y2="625.0" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<line x1="680.0" y1="703.5" x2="740.0" y2="703.5" stroke="#ea580c" stroke-width="1.8" marker-end="url(#arrow-orange)"/>
+<line x1="740.0" y1="696.5" x2="680.0" y2="696.5" stroke="#ea580c" stroke-width="1.8" marker-end="url(#arrow-orange)"/>
+<text x="710.0" y="688.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#ea580c" paint-order="stroke" stroke="#f8fafc" stroke-width="4">state</text>
+<polyline points="525.0,775.0 525.0,850.0 1112.0,850.0 1112.0,230.0 1160.0,230.0" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<text x="820.0" y="840.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#ea580c" paint-order="stroke" stroke="#f8fafc" stroke-width="4">XRPC · OAuth · firehose (both ways)</text>
+<line x1="1346.0" y1="300.0" x2="1346.0" y2="360.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<line x1="1354.0" y1="360.0" x2="1354.0" y2="300.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<line x1="1346.0" y1="470.0" x2="1346.0" y2="530.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<line x1="1354.0" y1="530.0" x2="1354.0" y2="470.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<line x1="1346.0" y1="640.0" x2="1346.0" y2="700.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<line x1="1354.0" y1="700.0" x2="1354.0" y2="640.0" stroke="#64748b" stroke-width="1.8" marker-end="url(#arrow-gray)"/>
+<rect x="40.0" y="938.0" width="20.0" height="16.0" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1.4" opacity="1.0"/>
+<text x="68.0" y="950.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">implemented</text>
+<rect x="220.0" y="938.0" width="20.0" height="16.0" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.4" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="248.0" y="950.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">proposed</text>
+<rect x="360.0" y="938.0" width="20.0" height="16.0" rx="4" fill="#f1f5f9" stroke="#64748b" stroke-width="1.4" opacity="1.0"/>
+<text x="388.0" y="950.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">external / optional</text>
+<rect x="560.0" y="938.0" width="20.0" height="16.0" rx="4" fill="#fff1f2" stroke="#e11d48" stroke-width="1.4" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="588.0" y="950.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">trust boundary / no direct access</text>
+</svg>

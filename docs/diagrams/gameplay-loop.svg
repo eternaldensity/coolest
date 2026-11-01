@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1200" viewBox="0 0 1500 1200" role="img" aria-labelledby="title desc">
+<title id="title">FIDOM supported gameplay loop</title>
+<desc id="desc">The local turn loop from waking through work, gear, hacking, heat and cops, with the asynchronous ATProto mail/board edge.</desc>
+<defs>
+<marker id="arrow-ink" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#0f172a"/></marker>
+<marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#475569"/></marker>
+<marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/></marker>
+<marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#ea580c"/></marker>
+<marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#64748b"/></marker>
+<marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#e11d48"/></marker>
+<marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="3" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L0,6 L9,3 z" fill="#059669"/></marker>
+</defs>
+<rect width="1500" height="1200" fill="#ffffff"/>
+<text x="40.0" y="44.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="28" font-weight="800" fill="#0f172a">FIDOM — supported gameplay loop</text>
+<text x="40.0" y="72.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="400" fill="#475569">Solid = local turn loop. Dashed = asynchronous ATProto edge.</text>
+<rect x="1160.0" y="110.0" width="320.0" height="330.0" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.3" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="1180.0" y="140.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="800" fill="#0f172a">What each view adds</text>
+<text x="1180.0" y="175.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">Street</text>
+<text x="1250.0" y="175.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">needs · jobs · combat</text>
+<text x="1180.0" y="211.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">Net</text>
+<text x="1250.0" y="211.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">routes · tolls · power</text>
+<text x="1180.0" y="247.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">Deck</text>
+<text x="1250.0" y="247.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">hosts · CPU · trace</text>
+<text x="1180.0" y="283.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">Veil</text>
+<text x="1250.0" y="283.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">mindpower · files</text>
+<text x="1180.0" y="319.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">Board</text>
+<text x="1250.0" y="319.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">offers · accept · deadline</text>
+<text x="1180.0" y="355.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="800" fill="#4f46e5">PDS</text>
+<text x="1250.0" y="355.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569">mail · board transport</text>
+<rect x="620.0" y="60.0" width="220.0" height="54.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="730.0" y="87.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Wake / log in</text>
+<rect x="540.0" y="150.0" width="380.0" height="70.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="730.0" y="177.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Check mail, board, clan notices</text>
+<text x="730.0" y="199.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="#475569"><tspan x="730.0" dy="0.0">mailbox · offers · active contract</tspan></text>
+<polygon points="730.0,230.0 870.0,290.0 730.0,350.0 590.0,290.0" fill="#fef3c7" stroke="#d97706" stroke-width="1.8"/>
+<text x="730.0" y="295.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#0f172a"><tspan x="730.0" dy="0.0">Food / mood / HP OK?</tspan></text>
+<rect x="330.0" y="380.0" width="240.0" height="70.0" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="1.6" opacity="1.0"/>
+<text x="450.0" y="407.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Recover</text>
+<text x="450.0" y="429.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="450.0" dy="0.0">Eat · Watch · medkit · sleep</tspan></text>
+<rect x="600.0" y="390.0" width="260.0" height="60.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="730.0" y="417.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Work · Code · Farm</text>
+<text x="730.0" y="439.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="730.0" dy="0.0">components + cash</tspan></text>
+<rect x="940.0" y="390.0" width="240.0" height="60.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="1060.0" y="417.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Buy / equip gear</text>
+<text x="1060.0" y="439.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1060.0" dy="0.0">weapon · armor · meds</tspan></text>
+<rect x="940.0" y="490.0" width="240.0" height="60.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="1060.0" y="517.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Plan route in Net</text>
+<text x="1060.0" y="539.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1060.0" dy="0.0">hops · tolls · trace risk</tspan></text>
+<rect x="940.0" y="590.0" width="240.0" height="60.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="1060.0" y="617.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Hack host in Deck / Veil</text>
+<text x="1060.0" y="639.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="#475569"><tspan x="1060.0" dy="0.0">breach · cards · trace</tspan></text>
+<rect x="1260.0" y="590.0" width="220.0" height="60.0" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="1.6" opacity="1.0"/>
+<text x="1370.0" y="617.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Loot</text>
+<text x="1370.0" y="639.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1370.0" dy="0.0">components · data · files</tspan></text>
+<polygon points="1060.0,668.0 1200.0,730.0 1060.0,792.0 920.0,730.0" fill="#fef3c7" stroke="#d97706" stroke-width="1.8"/>
+<text x="1060.0" y="735.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#0f172a"><tspan x="1060.0" dy="0.0">Heat / Wanted?</tspan></text>
+<polygon points="1060.0,818.0 1200.0,880.0 1060.0,942.0 920.0,880.0" fill="#fef3c7" stroke="#d97706" stroke-width="1.8"/>
+<text x="1060.0" y="885.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="600" fill="#0f172a"><tspan x="1060.0" dy="0.0">Cops nearby?</tspan></text>
+<rect x="760.0" y="980.0" width="220.0" height="60.0" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="1.6" opacity="1.0"/>
+<text x="870.0" y="1007.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Fine or jail</text>
+<text x="870.0" y="1029.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="870.0" dy="0.0">pay / surrender</tspan><tspan x="870.0" dy="16.9">record cleared</tspan></text>
+<rect x="1260.0" y="980.0" width="220.0" height="60.0" rx="14" fill="#fff1f2" stroke="#e11d48" stroke-width="1.6" opacity="1.0"/>
+<text x="1370.0" y="1007.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Street combat</text>
+<text x="1370.0" y="1029.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="1370.0" dy="0.0">resist · revive · escape</tspan></text>
+<rect x="600.0" y="1080.0" width="220.0" height="60.0" rx="14" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="710.0" y="1107.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">Sleep / save</text>
+<text x="710.0" y="1129.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="13" font-weight="400" fill="#475569"><tspan x="710.0" dy="0.0">producers keep running</tspan></text>
+<rect x="160.0" y="150.0" width="300.0" height="70.0" rx="14" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="310.0" y="177.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#0f172a">PDS bridge — future</text>
+<text x="310.0" y="199.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="400" fill="#475569"><tspan x="310.0" dy="0.0">federated mail / board</tspan><tspan x="310.0" dy="15.6">validated · queued · logged Intent</tspan></text>
+<line x1="460.0" y1="185.0" x2="540.0" y2="185.0" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<text x="500.0" y="173.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#ea580c" paint-order="stroke" stroke="#f8fafc" stroke-width="4">async</text>
+<rect x="120.0" y="250.0" width="340.0" height="100.0" rx="14" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="290.0" y="277.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="14" font-weight="700" fill="#0f172a">Job board accept — proposed</text>
+<text x="290.0" y="299.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="400" fill="#475569"><tspan x="290.0" dy="0.0">offer → Accept → active contract</tspan><tspan x="290.0" dy="14.3">deliver / hack / courier</tspan><tspan x="290.0" dy="14.3">escrow payout / fail → reputation</tspan></text>
+<polyline points="460.0,300.0 500.0,300.0 500.0,200.0 540.0,200.0" fill="none" stroke="#ea580c" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+<text x="510.0" y="290.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#ea580c" paint-order="stroke" stroke="#f8fafc" stroke-width="4">contract</text>
+<line x1="730.0" y1="114.0" x2="730.0" y2="150.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<line x1="730.0" y1="220.0" x2="730.0" y2="230.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<line x1="600.0" y1="290.0" x2="570.0" y2="380.0" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="570.0" y="340.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">No</text>
+<line x1="730.0" y1="350.0" x2="730.0" y2="390.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<text x="748.0" y="376.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#0f172a" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Yes</text>
+<polyline points="450.0,450.0 450.0,470.0 600.0,470.0 600.0,450.0" fill="none" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="525.0" y="488.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">back to earning</text>
+<line x1="860.0" y1="420.0" x2="940.0" y2="420.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<line x1="1060.0" y1="450.0" x2="1060.0" y2="490.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<line x1="1060.0" y1="550.0" x2="1060.0" y2="590.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<line x1="1180.0" y1="620.0" x2="1260.0" y2="620.0" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="1220.0" y="608.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">loot</text>
+<polyline points="1370.0,590.0 1370.0,470.0 1180.0,470.0 1180.0,450.0" fill="none" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="1378.0" y="520.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">upgrade</text>
+<line x1="1060.0" y1="650.0" x2="1060.0" y2="668.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<polyline points="920.0,730.0 710.0,730.0 710.0,1080.0" fill="none" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="800.0" y="718.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">No</text>
+<line x1="1060.0" y1="792.0" x2="1060.0" y2="818.0" stroke="#0f172a" stroke-width="1.8" marker-end="url(#arrow-ink)"/>
+<text x="1078.0" y="810.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#0f172a" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Yes</text>
+<polyline points="920.0,880.0 870.0,880.0 870.0,980.0" fill="none" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<text x="858.0" y="940.0" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#059669" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Pay / Surrender</text>
+<polyline points="1200.0,880.0 1370.0,880.0 1370.0,980.0" fill="none" stroke="#e11d48" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+<text x="1300.0" y="868.0" text-anchor="middle" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#e11d48" paint-order="stroke" stroke="#f8fafc" stroke-width="4">Resist</text>
+<polyline points="870.0,1040.0 870.0,1060.0 750.0,1060.0 750.0,1080.0" fill="none" stroke="#059669" stroke-width="1.8" marker-end="url(#arrow-green)"/>
+<polyline points="1370.0,1040.0 1370.0,1110.0 820.0,1110.0 820.0,1110.0" fill="none" stroke="#e11d48" stroke-width="1.8" marker-end="url(#arrow-red)"/>
+<polyline points="600.0,1110.0 40.0,1110.0 40.0,87.0 620.0,87.0" fill="none" stroke="#4f46e5" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+<text x="70.0" y="1096.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#4f46e5" paint-order="stroke" stroke="#f8fafc" stroke-width="4">next day</text>
+<text x="1080.0" y="1098.0" text-anchor="end" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="11" font-weight="600" fill="#e11d48" paint-order="stroke" stroke="#f8fafc" stroke-width="4">escape / revive</text>
+<rect x="40.0" y="1168.0" width="22.0" height="16.0" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1.6" opacity="1.0"/>
+<text x="70.0" y="1181.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">local turn loop</text>
+<rect x="210.0" y="1168.0" width="22.0" height="16.0" rx="4" fill="#ffedd5" stroke="#ea580c" stroke-width="1.6" stroke-dasharray="7 5" opacity="1.0"/>
+<text x="240.0" y="1181.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">asynchronous ATProto edge</text>
+<rect x="455.0" y="1168.0" width="22.0" height="16.0" rx="4" fill="#fff1f2" stroke="#e11d48" stroke-width="1.6" opacity="1.0"/>
+<text x="485.0" y="1181.0" text-anchor="start" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="12" font-weight="600" fill="#475569">risk / consequence</text>
+</svg>
