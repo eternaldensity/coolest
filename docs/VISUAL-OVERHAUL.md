@@ -5,10 +5,12 @@
 > progress meters, scrollable central pane, painted Street map, right
 > inspector, click-to-walk pathing, PCB-style Deck cells with kind glyphs
 > and CPU/trace rails, card-hand colouring, Net node/link canvas, Veil
-> sigil canvas, and a Ctrl-K command palette. Still ahead: responsive
-> drawer, reduced-motion/contrast audit, richer Street contract rail, and
-> deeper inspector actions. Scope is the `gui/` shell; the deterministic
-> sim and server stay unchanged except for small interaction verbs.
+> sigil canvas, a Ctrl-K command palette, F1 field manual, narrow-window
+> inspector hiding, risk-coloured contract rails, and clickable Net node
+> selection. Still ahead: reduced-motion/contrast audit, deeper inspector
+> actions, and a final empty-state/help pass. Scope is the `gui/` shell;
+> the deterministic sim and server stay unchanged except for small
+> interaction verbs.
 
 ## 1. Experience goals
 

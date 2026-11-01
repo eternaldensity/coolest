@@ -126,6 +126,8 @@ pub struct Shell {
     themed: bool,
     palette_open: bool,
     palette_query: String,
+    help_open: bool,
+    net_sel: Option<HostId>,
 }
 
 impl Shell {
@@ -264,6 +266,8 @@ impl Shell {
             themed: false,
             palette_open: false,
             palette_query: String::new(),
+            help_open: false,
+            net_sel: None,
         };
         shell.say_status();
         shell
@@ -611,23 +615,46 @@ impl Shell {
                 }
             }
             Tab::Net => {
-                crate::theme::section(ui, "route preview");
-                match self.server.world.power.powered_route(
-                    &self.server.world.net,
-                    HostId(1),
-                    HostId(3),
-                ) {
-                    Ok(r) => {
-                        ui.label(format!("{:?}", r.path));
-                        ui.label(format!(
-                            "{}ms · toll {}c · cap {} · trace {}",
-                            r.latency_ms,
-                            r.toll_cents,
-                            r.cap_mbps,
-                            r.trace_threshold()
-                        ));
+                let target = self.net_sel.unwrap_or(HostId(3));
+                crate::theme::section(ui, "node");
+                if let Some(n) = self.server.world.net.node(target) {
+                    let dark = self.server.world.power.is_host_dark(target);
+                    ui.label(
+                        egui::RichText::new(format!("{target:?}"))
+                            .size(18.0)
+                            .strong()
+                            .color(if dark {
+                                crate::theme::FAINT
+                            } else {
+                                crate::theme::BETANET
+                            }),
+                    );
+                    ui.label(format!(
+                        "{} · {}mb · {}{}",
+                        match n.net {
+                            NetKind::Oldnet => "oldnet",
+                            NetKind::Betanet => "betanet",
+                        },
+                        n.modem_mbps,
+                        if n.gateway { "gateway" } else { "no gateway" },
+                        if dark { " · DARK" } else { "" }
+                    ));
+                    if ui.button(format!("Route 1→{}", target.0)).clicked() {
+                        match self.server.world.power.powered_route(
+                            &self.server.world.net,
+                            HostId(1),
+                            target,
+                        ) {
+                            Ok(r) => self.say(format!(
+                                "route {:?} {}ms toll {} thr {}",
+                                r.path,
+                                r.latency_ms,
+                                r.toll_cents,
+                                r.trace_threshold()
+                            )),
+                            Err(e) => self.say(format!("no route: {e}")),
+                        }
                     }
-                    Err(e) => crate::theme::label(ui, format!("no route: {e}")),
                 }
                 crate::theme::section(ui, "nodes");
                 for id in self.server.world.net.node_ids() {
@@ -677,6 +704,37 @@ impl Shell {
                     crate::theme::label(ui, "Not jacked in.");
                 }
             }
+        }
+    }
+
+    fn help(&mut self, ctx: &egui::Context) {
+        if !self.help_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Field manual")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                crate::theme::section(ui, "keys");
+                ui.label("Tab / 1–4  views · arrows or hjkl  move · Ctrl-K  palette");
+                ui.label("a attack · t talk · g pickup · e interact · F1 help · Esc close");
+                crate::theme::section(ui, "views");
+                ui.label("Street: needs, jobs, contracts, shops, combat, cops");
+                ui.label("Deck: kinds, cards, CPU, trace, vulns, scrub");
+                ui.label("Net: routes, tolls, power, firewalls, probes");
+                ui.label("Veil: mindpower, areas, files, hazards, transfer");
+                crate::theme::section(ui, "pressure");
+                ui.label("Watch HP, food, mood, heat, trace and contract deadlines.");
+                ui.label("The console is a record, not the only feedback surface.");
+                crate::theme::section(ui, "commands");
+                ui.label("eat · work 0-4 · code <res> · farm <res> · buy <item>");
+                ui.label("pickup/drop/equip/use <item> · deposit/withdraw <c> · sleep · revive");
+            });
+        if !open {
+            self.help_open = false;
         }
     }
 
@@ -900,6 +958,10 @@ impl Shell {
         }
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
             self.palette_open = false;
+            self.help_open = false;
+        }
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::F1)) {
+            self.help_open = !self.help_open;
         }
 
         egui::Panel::top("tabs").show(ui, |ui| {
@@ -1127,9 +1189,11 @@ impl Shell {
             });
         });
 
-        egui::Panel::right("inspector")
-            .default_size(300.0)
-            .show(ui, |ui| self.inspector(ui));
+        if ui.ctx().content_rect().width() >= 1120.0 {
+            egui::Panel::right("inspector")
+                .default_size(300.0)
+                .show(ui, |ui| self.inspector(ui));
+        }
 
         egui::Panel::bottom("console").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1261,7 +1325,30 @@ impl Shell {
                                     o.kind.summary(),
                                     left
                                 );
-                                if ui.button(label).clicked() {
+                                let color = match o.risk.name() {
+                                    "illegal" | "combat" => crate::theme::DANGER,
+                                    "grey" => crate::theme::VEIL,
+                                    _ => crate::theme::OLDNET,
+                                };
+                                if ui
+                                    .add_sized(
+                                        [250.0, 30.0],
+                                        egui::Button::new(
+                                            egui::RichText::new(label.clone())
+                                                .size(11.0)
+                                                .color(color),
+                                        )
+                                        .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
+                                        .stroke(egui::Stroke::new(1.0, color)),
+                                    )
+                                    .on_hover_text(format!(
+                                        "{} · {} · {}",
+                                        o.title,
+                                        o.kind.summary(),
+                                        o.risk.name()
+                                    ))
+                                    .clicked()
+                                {
                                     self.do_verb(Verb::AcceptOffer { offer: o.id });
                                 }
                             }
@@ -2219,7 +2306,7 @@ impl Shell {
                 // Oldnet copper or Betanet laser lines. Controls stay below.
                 let node_ids = self.server.world.net.node_ids();
                 let graph_size = egui::vec2(ui.available_width().min(720.0), 200.0);
-                let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::hover());
+                let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::click());
                 let grect = gresp.rect;
                 gp.rect_filled(grect, 8.0, egui::Color32::from_rgb(0x0D, 0x14, 0x1A));
                 gp.rect_stroke(
@@ -2288,6 +2375,9 @@ impl Shell {
                             NetKind::Betanet => crate::theme::BETANET,
                         }
                     };
+                    if self.net_sel == Some(*id) {
+                        gp.circle_stroke(*p, 28.0, egui::Stroke::new(2.0, crate::theme::OLDNET));
+                    }
                     gp.circle_filled(*p, 23.0, egui::Color32::from_rgb(0x12, 0x1B, 0x22));
                     gp.circle_stroke(*p, 23.0, egui::Stroke::new(1.8, color));
                     gp.text(
@@ -2305,6 +2395,19 @@ impl Shell {
                             egui::FontId::proportional(9.0),
                             crate::theme::MUTED,
                         );
+                    }
+                }
+                if gresp.clicked() {
+                    if let Some(pointer) = gresp.interact_pointer_pos() {
+                        if let Some((id, dist)) = npos
+                            .iter()
+                            .map(|(id, p)| (*id, p.distance(pointer)))
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                        {
+                            if dist <= 30.0 {
+                                self.net_sel = Some(HostId(id));
+                            }
+                        }
                     }
                 }
                 // Graph snapshot: nodes (with net kind + power state) and links.
@@ -2602,6 +2705,7 @@ impl Shell {
                 });
         });
         self.palette(ui.ctx());
+        self.help(ui.ctx());
         ui.ctx().request_repaint();
     }
 }
@@ -3096,6 +3200,15 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn f1_opens_field_manual() {
+            let mut h = Harness::new();
+            h.tap_key(egui::Key::F1);
+            assert!(h.has_text("Field manual"), "text: {:?}", h.labels());
+            h.tap_key(egui::Key::F1);
+            assert!(!h.has_text("Field manual"), "text: {:?}", h.labels());
         }
 
         #[test]
