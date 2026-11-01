@@ -118,7 +118,6 @@ pub struct Shell {
     input: String,
     log: Vec<String>,
     sel: Option<(u8, u8)>,
-    mp: u8,
     talks: BTreeMap<String, Rc<sim::Dialogue>>,
     talking: Option<sim::Conversation>,
     frames_left: Option<u32>,
@@ -190,10 +189,17 @@ impl Shell {
         {
             talks.insert(d.id.clone(), Rc::new(d));
         }
-        // Demo veil complex: lobby - ops - roof(exit).
+        // Demo veil complex: lobby - ops - roof(exit). Ops has a seizable
+        // weak host and two mind-files; the roof is hazardous.
         server.world.veil.add_area(1, "lobby", vec![2], false);
         server.world.veil.add_area(2, "ops", vec![1, 3], false);
         server.world.veil.add_area(3, "roof", vec![2], true);
+        server.world.veil.set_host(2, EntityId(70), 3);
+        server.world.veil.set_hazard(3, 2);
+        server
+            .world
+            .veil
+            .set_files(2, vec!["plans".to_string(), "chat-log".to_string()]);
 
         server
             .world
@@ -233,7 +239,6 @@ impl Shell {
             input: String::new(),
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
             sel: None,
-            mp: 8,
             talks,
             talking: None,
             frames_left: frames,
@@ -1415,32 +1420,41 @@ impl Shell {
             }
             Tab::Veil => {
                 ui.heading("Veil — helmet space");
+                let mp = self
+                    .server
+                    .world
+                    .mind_of(self.actor)
+                    .map(|m| m.mindpower)
+                    .unwrap_or(0);
                 if !self.server.world.veil.present(self.actor) {
-                    ui.horizontal(|ui| {
-                        ui.label("mindpower");
-                        ui.add(egui::DragValue::new(&mut self.mp).range(0..=20));
-                        if ui.button("Jack in @lobby").clicked() {
-                            let mp = self.mp;
-                            let msg = match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::VeilEnter { mp },
-                            }) {
-                                Ok(_) => format!("jacked in (mp {mp})"),
-                                Err(e) => format!("entry refused: {e}"),
-                            };
-                            self.say(msg);
-                        }
-                    });
-                    ui.label("Needs 5+ mindpower. Death ejects with drain.");
+                    ui.label(format!("mindpower {mp} (needs 5+)"));
+                    if ui.button("Jack in").clicked() {
+                        let msg = match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::VeilEnter,
+                        }) {
+                            Ok(_) => format!("jacked in (mp {mp})"),
+                            Err(e) => format!("entry refused: {e}"),
+                        };
+                        self.say(msg);
+                    }
+                    ui.label("Death ejects with drain; below 5 you cannot re-enter.");
                 } else {
                     let area = self.server.world.veil.area_of(self.actor).unwrap_or(0);
                     let name = self.server.world.veil.area_info(area).map(|(n, _, _)| n).unwrap_or_else(|| "lobby".to_string());
-                    ui.label(format!("area: {name} (mp {})", self.server.world.veil.mindpower(self.actor).unwrap_or(0)));
+                    ui.label(format!("area: {name} (mp {mp})"));
+                    let hazard = self.server.world.veil.area_hazard(area);
+                    if hazard > 0 {
+                        ui.label(
+                            egui::RichText::new(format!("! hazard {hazard} on entry"))
+                                .color(egui::Color32::RED),
+                        );
+                    }
                     if let Some(host) = self.server.world.veil.controlled(self.actor) {
                         ui.label(format!("controlling {host:?}"));
                     }
                     let exits: Vec<u64> = self.server.world.veil.area_info(area).map(|(_, e, _)| e).unwrap_or_default();
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         for a in exits {
                             let label = self.server.world.veil.area_info(a).map(|(n, _, x)| format!("{n}{}", if x { " [exit]" } else { "" })).unwrap_or_else(|| format!("area {a}"));
                             if ui.button(format!("→ {label}")).clicked() {
@@ -1455,16 +1469,31 @@ impl Shell {
                             }
                         }
                     });
-                    ui.horizontal(|ui| {
-                        if ui.button("Seize demo host (mp 3)").clicked() {
-                            let msg = match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::VeilSeize,
-                            }) {
-                                Ok(_) => "host 70 seized".to_string(),
-                                Err(e) => format!("seize failed: {e}"),
-                            };
-                            self.say(msg);
+                    // Host seizure + transfer to a nearby weaker NPC.
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some((host, hmp)) = self.server.world.veil.area_host(area) {
+                            if ui.button(format!("Seize host {host:?} (mp {hmp})")).clicked() {
+                                let msg = match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::VeilSeize,
+                                }) {
+                                    Ok(_) => format!("seized {host:?}"),
+                                    Err(e) => format!("seize failed: {e}"),
+                                };
+                                self.say(msg);
+                            }
+                        }
+                        for (id, role) in self.nearby_npcs() {
+                            if ui.button(format!("Transfer {role:?}")).clicked() {
+                                let msg = match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::VeilTransfer { host: EntityId(id) },
+                                }) {
+                                    Ok(_) => format!("transferred into {id}"),
+                                    Err(e) => format!("transfer failed: {e}"),
+                                };
+                                self.say(msg);
+                            }
                         }
                         if ui.button("Eject").clicked() {
                             let msg = match self.server.apply_one(Intent {
@@ -1478,6 +1507,24 @@ impl Shell {
                             self.say(msg);
                         }
                     });
+                    // Mind-files: carry from the area, read (consume) one.
+                    let area_files = self.server.world.veil.area_files(area);
+                    let carried = self.server.world.veil.carried_files(self.actor);
+                    if !area_files.is_empty() || !carried.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!("mind {}/{} files", carried.len(), mp));
+                            for f in area_files {
+                                if ui.button(format!("Carry {f}")).clicked() {
+                                    self.do_verb(Verb::VeilCarry { name: f.clone() });
+                                }
+                            }
+                            for (i, f) in carried.iter().enumerate() {
+                                if ui.button(format!("Read {f}")).clicked() {
+                                    self.do_verb(Verb::VeilRead { index: i });
+                                }
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -1960,8 +2007,8 @@ mod tests {
         fn veil_full_flow_through_clicks() {
             let mut h = Harness::new();
             h.click("Veil");
-            // mp slider defaults to 8: jack in, walk to ops, seize, eject.
-            h.click("Jack in @lobby");
+            // Mindpower 8: jack in, walk to ops, seize, eject.
+            h.click("Jack in");
             assert!(
                 h.shell.log.iter().any(|l| l.contains("jacked in (mp 8)")),
                 "log: {:?}",
@@ -1973,9 +2020,9 @@ mod tests {
                 "log: {:?}",
                 h.shell.log
             );
-            h.click("Seize demo host (mp 3)");
+            h.click_prefix("Seize host");
             assert!(
-                h.shell.log.iter().any(|l| l.contains("host 70 seized")),
+                h.shell.log.iter().any(|l| l.contains("seized")),
                 "log: {:?}",
                 h.shell.log
             );

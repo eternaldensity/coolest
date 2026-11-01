@@ -62,16 +62,26 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
-    /// Jack into the veil lobby with the given mindpower (design/05).
-    VeilEnter {
-        mp: u8,
-    },
+    /// Jack into the veil with the actor's real mindpower (design/05).
+    VeilEnter,
     /// Move between veil areas along exit links.
     VeilMove {
         area: u64,
     },
-    /// Seize the demo host through an active veil token.
+    /// Seize the current area's bound host through an active veil token.
     VeilSeize,
+    /// Mental transfer into a nearby weaker host/NPC.
+    VeilTransfer {
+        host: EntityId,
+    },
+    /// Pick a mind-file out of the current area.
+    VeilCarry {
+        name: String,
+    },
+    /// Read (consume) a carried mind-file at `index`.
+    VeilRead {
+        index: usize,
+    },
     /// Clean exit from the veil (light drain).
     VeilEject,
     /// Cut or restore a street section's power (design/02). Killing a
@@ -1781,6 +1791,8 @@ impl World {
         let mut mails: Vec<(EntityId, String, bool)> = Vec::new();
         // Jail overrides the normal next-act tick.
         let mut next_at_override: Option<u64> = None;
+        // Veil users ejected by a blackout, drained after the match.
+        let mut veil_ejections: Vec<EntityId> = Vec::new();
         match intent.verb {
             Verb::Wait => {}
             Verb::Move(d) => {
@@ -1971,22 +1983,84 @@ impl World {
                     killed,
                 ));
             }
-            Verb::VeilEnter { mp } => {
-                self.veil.enter_at(intent.actor, mp, 1)?;
+            Verb::VeilEnter => {
+                let mp = b.mind.mindpower;
+                let area = self.veil.entry_area();
+                self.veil.enter_at(intent.actor, mp, area)?;
                 kind = "entered";
             }
             Verb::VeilMove { area } => {
                 self.veil.move_to(intent.actor, area)?;
-                kind = "moved";
+                let hazard = self.veil.area_hazard(area);
+                if hazard > 0 {
+                    let drain = self.veil.damage(intent.actor, hazard)?;
+                    if drain > 0 {
+                        b.mind.mindpower = b.mind.mindpower.saturating_sub(drain);
+                        kind = "veil_death";
+                    } else {
+                        kind = "veil_hurt";
+                    }
+                } else {
+                    kind = "moved";
+                }
             }
             Verb::VeilSeize => {
-                self.veil.transfer(intent.actor, EntityId(70), 3, true)?;
+                let area = self.veil.area_of(intent.actor).ok_or(SimError::new(
+                    "not_inside",
+                    "active token",
+                    "absent",
+                ))?;
+                let (host, host_mp) = self.veil.area_host(area).ok_or(SimError::new(
+                    "no_host",
+                    "bound area host",
+                    "none",
+                ))?;
+                self.veil.transfer(intent.actor, host, host_mp, true)?;
                 kind = "seized";
                 // Taking over a host reads as theft (design/05).
-                crimes.push((Act::Theft, None, None, true));
+                crimes.push((Act::Theft, None, Some(host), true));
+            }
+            Verb::VeilTransfer { host } => {
+                let (host_mp, hpos) = self
+                    .npcs
+                    .get(&host.0)
+                    .map(|n| (3, n.pos))
+                    .ok_or(SimError::new("no_host", "nearby NPC host", "missing"))?;
+                let here = b.pos;
+                let in_range = (here.city, here.sx, here.sy, here.z)
+                    == (hpos.city, hpos.sx, hpos.sy, hpos.z)
+                    && (here.x as i32 - hpos.x as i32)
+                        .abs()
+                        .max((here.y as i32 - hpos.y as i32).abs())
+                        <= 3;
+                self.veil.transfer(intent.actor, host, host_mp, in_range)?;
+                kind = "transferred";
+                crimes.push((Act::Theft, None, Some(host), true));
+            }
+            Verb::VeilCarry { ref name } => {
+                let area = self.veil.area_of(intent.actor).ok_or(SimError::new(
+                    "not_inside",
+                    "active token",
+                    "absent",
+                ))?;
+                if self.veil.file_count(intent.actor) >= b.mind.mindpower as usize {
+                    return Err(SimError::new("mind_full", "mind capacity", "full"));
+                }
+                if !self.veil.area_files(area).iter().any(|f| f == name) {
+                    return Err(SimError::new("no_file", "area file", "missing"));
+                }
+                self.veil.take_area_file(area, name)?;
+                self.veil.carry(intent.actor, name)?;
+                kind = "carried";
+            }
+            Verb::VeilRead { index } => {
+                let read = self.veil.read(intent.actor, index)?;
+                extra_kinds.push(format!("read:{read}"));
+                kind = "read_file";
             }
             Verb::VeilEject => {
-                self.veil.eject(intent.actor)?;
+                let drain = self.veil.eject(intent.actor)?;
+                b.mind.mindpower = b.mind.mindpower.saturating_sub(drain);
                 kind = "ejected";
             }
             Verb::SetPower { sx, sy, up } => {
@@ -1996,6 +2070,8 @@ impl World {
                 } else {
                     self.power.kill((sx, sy));
                     kind = "power_down";
+                    // Power loss ejects everyone from the Veil (design/08).
+                    veil_ejections.extend(self.veil.blackout());
                     // Sabotage is a crime: you are on the net, so traceable.
                     crimes.push((Act::Attack, None, None, true));
                 }
@@ -2708,6 +2784,13 @@ impl World {
         };
         b.next_at = next_at_override.unwrap_or(self.tick + eff);
         self.sched.schedule(intent.actor, b.next_at);
+        // Blackout ejections drain mindpower (design/08).
+        for id in veil_ejections {
+            if let Some(bb) = self.beings.get_mut(&id.0) {
+                bb.mind.mindpower = bb.mind.mindpower.saturating_sub(crate::veil::KICK_DRAIN);
+                extra_kinds.push("veil_ejected".to_string());
+            }
+        }
         // File any crimes this act committed, now that the `beings` borrow
         // is released (the witness lookup reads NPC positions).
         for (act, host, victim, live_chain) in crimes {
@@ -4122,18 +4205,21 @@ mod tests {
         w.veil.add_area(1, "lobby", vec![2], false);
         w.veil.add_area(2, "ops", vec![1, 3], false);
         w.veil.add_area(3, "roof", vec![2], true);
+        w.veil.set_host(2, EntityId(70), 3);
+        w.beings.get_mut(&1).unwrap().mind.mindpower = 2;
         // Weak mind refused.
         w.tick = w.next_at(EntityId(1));
         let err = w
             .apply(&Intent {
                 actor: EntityId(1),
-                verb: Verb::VeilEnter { mp: 2 },
+                verb: Verb::VeilEnter,
             })
             .unwrap_err();
         assert_eq!(err.kind, "weak_mind");
+        w.beings.get_mut(&1).unwrap().mind.mindpower = 8;
         // Jack in, walk an exit link, seize, eject.
         for (verb, kind) in [
-            (Verb::VeilEnter { mp: 8 }, "entered"),
+            (Verb::VeilEnter, "entered"),
             (Verb::VeilMove { area: 2 }, "moved"),
             (Verb::VeilSeize, "seized"),
             (Verb::VeilEject, "ejected"),
@@ -4152,7 +4238,7 @@ mod tests {
         w.tick = w.next_at(EntityId(1));
         w.apply(&Intent {
             actor: EntityId(1),
-            verb: Verb::VeilEnter { mp: 8 },
+            verb: Verb::VeilEnter,
         })
         .unwrap();
         w.tick = w.next_at(EntityId(1));
@@ -4163,6 +4249,96 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(err.kind, "no_exit");
+    }
+
+    #[test]
+    fn veil_hazard_files_and_blackout() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.veil.add_area(1, "lobby", vec![2], false);
+        w.veil.add_area(2, "ops", vec![1, 3], false);
+        w.veil.add_area(3, "roof", vec![2], true);
+        w.veil.set_hazard(2, 4);
+        w.veil.set_files(2, vec!["plans".into(), "chat".into()]);
+        w.beings.get_mut(&1).unwrap().mind.mindpower = 8;
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::VeilEnter,
+        })
+        .unwrap();
+        // Moving into the hazard costs mind HP.
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::VeilMove { area: 2 },
+            })
+            .unwrap();
+        assert_eq!(events.first().map(|e| e.kind.as_str()), Some("veil_hurt"));
+        // Carry and consume a mind-file (single-use).
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::VeilCarry {
+                name: "plans".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(w.veil.carried_files(EntityId(1)), vec!["plans"]);
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::VeilRead { index: 0 },
+        })
+        .unwrap();
+        assert!(w.veil.carried_files(EntityId(1)).is_empty());
+        // A power cut ejects everyone and drains mindpower.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::SetPower {
+                sx: 0,
+                sy: 0,
+                up: false,
+            },
+        })
+        .unwrap();
+        assert_eq!(w.veil.area_of(EntityId(1)), None);
+        assert_eq!(w.mind_of(EntityId(1)).unwrap().mindpower, 6);
+    }
+
+    #[test]
+    fn veil_death_drains_below_entry_threshold() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.veil.add_area(1, "lobby", vec![2], false);
+        w.veil.add_area(2, "roof", vec![1], true);
+        w.veil.set_hazard(2, 20);
+        w.beings.get_mut(&1).unwrap().mind.mindpower = 8;
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::VeilEnter,
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        let (_, events) = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::VeilMove { area: 2 },
+            })
+            .unwrap();
+        assert_eq!(events.first().map(|e| e.kind.as_str()), Some("veil_death"));
+        assert_eq!(w.mind_of(EntityId(1)).unwrap().mindpower, 4);
+        w.tick = w.next_at(EntityId(1));
+        let err = w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::VeilEnter,
+            })
+            .unwrap_err();
+        assert_eq!(err.kind, "weak_mind");
     }
 
     #[test]

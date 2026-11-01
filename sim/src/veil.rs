@@ -31,6 +31,18 @@ pub struct Area {
     pub name: String,
     pub exits: Vec<u64>,
     pub is_exit: bool,
+    /// Mind damage on entering this area (0 = calm).
+    #[serde(default)]
+    pub hazard: u8,
+    /// Entity whose mind can be seized here (a weaker host/NPC).
+    #[serde(default)]
+    pub host: Option<u64>,
+    /// That host's mindpower (must be lower than the visitor's).
+    #[serde(default)]
+    pub host_mp: u8,
+    /// Mind-files lying in this area (single-use once carried).
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -73,8 +85,71 @@ impl Veil {
                 name: name.to_string(),
                 exits,
                 is_exit,
+                hazard: 0,
+                host: None,
+                host_mp: 0,
+                files: Vec::new(),
             },
         );
+    }
+
+    /// Area hazard (mind damage on entry).
+    pub fn set_hazard(&mut self, id: u64, hazard: u8) {
+        if let Some(a) = self.areas.get_mut(&id) {
+            a.hazard = hazard;
+        }
+    }
+
+    pub fn area_hazard(&self, id: u64) -> u8 {
+        self.areas.get(&id).map(|a| a.hazard).unwrap_or(0)
+    }
+
+    /// Bind a seizable host to an area (design/08: area labeled by host).
+    pub fn set_host(&mut self, area: u64, host: EntityId, host_mp: u8) {
+        if let Some(a) = self.areas.get_mut(&area) {
+            a.host = Some(host.0);
+            a.host_mp = host_mp;
+        }
+    }
+
+    pub fn area_host(&self, area: u64) -> Option<(EntityId, u8)> {
+        let a = self.areas.get(&area)?;
+        Some((EntityId(a.host?), a.host_mp))
+    }
+
+    /// Seed mind-files in an area (loot for the carry/read loop).
+    pub fn set_files(&mut self, area: u64, files: Vec<String>) {
+        if let Some(a) = self.areas.get_mut(&area) {
+            a.files = files;
+        }
+    }
+
+    pub fn area_files(&self, area: u64) -> Vec<String> {
+        self.areas
+            .get(&area)
+            .map(|a| a.files.clone())
+            .unwrap_or_default()
+    }
+
+    /// Remove one named file from an area, if present.
+    pub fn take_area_file(&mut self, area: u64, name: &str) -> Result<(), SimError> {
+        let a =
+            self.areas
+                .get_mut(&area)
+                .ok_or(SimError::new("no_area", "hosted area", "missing"))?;
+        let idx = a.files.iter().position(|f| f == name).ok_or(SimError::new(
+            "no_file",
+            "area file",
+            "missing",
+        ))?;
+        a.files.remove(idx);
+        Ok(())
+    }
+
+    /// First area the helmet drops into: the lowest non-lobby area, or 0
+    /// when the complex has no registered areas.
+    pub fn entry_area(&self) -> u64 {
+        self.areas.keys().copied().find(|id| *id != 0).unwrap_or(0)
     }
 
     /// Helmet entry directly into a named area.
@@ -219,6 +294,20 @@ impl Veil {
 
     pub fn controlled(&self, owner: EntityId) -> Option<EntityId> {
         self.tokens.get(&owner.0).and_then(|t| t.controls)
+    }
+
+    pub fn file_count(&self, owner: EntityId) -> usize {
+        self.tokens
+            .get(&owner.0)
+            .map(|t| t.files.len())
+            .unwrap_or(0)
+    }
+
+    pub fn carried_files(&self, owner: EntityId) -> Vec<String> {
+        self.tokens
+            .get(&owner.0)
+            .map(|t| t.files.iter().map(|f| f.name.clone()).collect())
+            .unwrap_or_default()
     }
 
     /// Carry a mind-file. Capacity = current mindpower file count.

@@ -369,6 +369,9 @@ pub fn fuzz_world(seed: u64) -> World {
     w.veil.add_area(1, "lobby", vec![2], false);
     w.veil.add_area(2, "ops", vec![1, 3], false);
     w.veil.add_area(3, "roof", vec![2], true);
+    w.veil.set_host(2, EntityId(70), 3);
+    w.veil.set_hazard(3, 2);
+    w.veil.set_files(2, vec!["plans".into(), "chat".into()]);
     w.spawn_npc(
         EntityId(10),
         sim::Role::Shopkeeper,
@@ -405,7 +408,7 @@ pub fn fuzz_world(seed: u64) -> World {
 /// One generated act from the full verb surface (deterministic per rng).
 fn fuzz_verb(rng: &mut Rng) -> Verb {
     let dirs = [Dir::N, Dir::S, Dir::E, Dir::W];
-    match rng.below(173) {
+    match rng.below(179) {
         0..=24 => Verb::Move(dirs[rng.below(4) as usize]),
         25..=29 => Verb::Wait,
         30..=39 => Verb::Eat,
@@ -424,9 +427,7 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
             y: rng.below(8) as u8,
         },
         93..=95 => Verb::DamageWire(HostId(1), HostId(2)),
-        96..=97 => Verb::VeilEnter {
-            mp: 5 + rng.below(8) as u8,
-        },
+        96..=97 => Verb::VeilEnter,
         98 => Verb::VeilMove {
             area: 1 + rng.below(3) as u64,
         },
@@ -500,6 +501,15 @@ fn fuzz_verb(rng: &mut Rng) -> Verb {
             target: EntityId(10 + rng.below(2) as u64),
         },
         172 => Verb::Surrender,
+        173..=175 => Verb::VeilCarry {
+            name: ["plans", "chat"][rng.below(2) as usize].to_string(),
+        },
+        176..=177 => Verb::VeilRead {
+            index: rng.below(3) as usize,
+        },
+        178 => Verb::VeilTransfer {
+            host: EntityId(10 + rng.below(2) as u64),
+        },
         _ => Verb::OpenMail { index: 0 },
     }
 }
