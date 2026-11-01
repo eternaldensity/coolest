@@ -23,9 +23,10 @@
 > inspector landmarks explain the rule behind each number. The signal-noir
 > pass adds the Chakra Petch display face, hard-edged L-bracket cards,
 > segmented phosphor meters, view-specific grid/scanline backdrops,
-> painted map/Deck/Net/Veil glows, and a CRT console with colour-coded
-> logs. Scope is the `gui/` shell; the deterministic sim and server stay
-> unchanged except for small interaction verbs.
+> painted map/Deck/Net/Veil glows, a CRT console with colour-coded logs,
+> and a work board that marks each job READY or SHORT against its
+> component requirement. Scope is the `gui/` shell; the deterministic sim
+> and server stay unchanged except for small interaction verbs.
 
 ## 1. Experience goals
 

@@ -1565,30 +1565,90 @@ impl Shell {
     }
 
     fn street_work(&mut self, ui: &mut egui::Ui, jobs: &[StreetJob]) {
-        // Job board on its own wrapped row: five long labels with
-        // live counts overflow a single row and push later controls
-        // outside the clip rect (their clicks are then ignored).
+        // Affordability is the component gate: a job with enough stock is
+        // green and ready; a short job is dim with an amber deficit chip.
+        let ready = jobs
+            .iter()
+            .filter(|(_, _, req)| req.is_none_or(|(_, need, have)| have >= need))
+            .count();
+        let short = jobs.len().saturating_sub(ready);
         crate::theme::card(ui, "work board", crate::theme::OLDNET, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for (i, (id, pay, req)) in jobs.iter().enumerate() {
-                    let label = match req {
-                        Some((res, need, have)) => {
-                            format!("Work {i}: {id} {pay}c [{} {have}/{need}]", res.name())
-                        }
-                        None => format!("Work {i}: {id} {pay}c"),
-                    };
-                    let tip = match req {
-                        Some((res, need, _)) => format!(
-                            "Pays {pay}c. Needs {need} {}; the work act also spends mood and food.",
-                            res.name()
+                crate::theme::chip(
+                    ui,
+                    format!("{ready} READY"),
+                    if ready > 0 {
+                        crate::theme::SUCCESS
+                    } else {
+                        crate::theme::MUTED
+                    },
+                );
+                if short > 0 {
+                    crate::theme::chip(ui, format!("{short} SHORT"), crate::theme::OLDNET);
+                }
+                crate::theme::label(ui, "components gate each job");
+            });
+            ui.add_space(2.0);
+            for (i, (id, pay, req)) in jobs.iter().enumerate() {
+                let label = match req {
+                    Some((res, need, have)) => {
+                        format!("Work {i}: {id} {pay}c [{} {have}/{need}]", res.name())
+                    }
+                    None => format!("Work {i}: {id} {pay}c"),
+                };
+                let affordable = req.is_none_or(|(_, need, have)| have >= need);
+                let (status, status_color, text_color, fill, stroke) = if affordable {
+                    (
+                        "READY".to_string(),
+                        crate::theme::SUCCESS,
+                        crate::theme::SUCCESS,
+                        crate::theme::alpha(crate::theme::SUCCESS, 10),
+                        crate::theme::alpha(crate::theme::SUCCESS, 130),
+                    )
+                } else {
+                    let (res, need, have) = req.unwrap();
+                    (
+                        format!(
+                            "NEED {} {}",
+                            need.saturating_sub(have),
+                            res.name().to_uppercase()
                         ),
-                        None => format!("Pays {pay}c. The work act also spends mood and food."),
-                    };
-                    if ui.button(label).on_hover_text(tip).clicked() {
+                        crate::theme::OLDNET,
+                        crate::theme::MUTED,
+                        crate::theme::VOID,
+                        crate::theme::alpha(crate::theme::LINE, 180),
+                    )
+                };
+                let tip = match req {
+                    Some((res, need, have)) if have >= need => format!(
+                        "Ready: you have {have}/{need} {}. Pays {pay}c; the work act also spends mood and food.",
+                        res.name()
+                    ),
+                    Some((res, need, have)) => format!(
+                        "Short: you have {have}/{need} {} ({} more needed). Pays {pay}c once stocked; the work act also spends mood and food.",
+                        res.name(),
+                        (*need).saturating_sub(*have)
+                    ),
+                    None => format!("Pays {pay}c. The work act also spends mood and food."),
+                };
+                ui.horizontal(|ui| {
+                    let w = (ui.available_width() - 132.0).max(220.0);
+                    let resp = ui.add_sized(
+                        [w, 30.0],
+                        egui::Button::new(
+                            egui::RichText::new(label.clone())
+                                .size(11.0)
+                                .color(text_color),
+                        )
+                        .fill(fill)
+                        .stroke(egui::Stroke::new(1.0, stroke)),
+                    );
+                    if resp.on_hover_text(tip).clicked() {
                         self.do_verb(Verb::Work(i as u8));
                     }
-                }
-            });
+                    crate::theme::chip(ui, status, status_color);
+                });
+            }
         });
     }
 
@@ -4784,6 +4844,27 @@ mod tests {
             let (_, _, after, _) = h.shell.server.world.needs(EntityId(1)).unwrap();
             assert_eq!(after, before + 500, "top-tier payout");
             assert_eq!(h.shell.server.world.units(EntityId(1), sim::Res::Algo), 0);
+        }
+
+        #[test]
+        fn work_board_marks_ready_and_short_jobs() {
+            let mut h = Harness::new();
+            // Start: every job is short; the board says so per row.
+            assert!(h.has_text("0 READY"), "text: {:?}", h.labels());
+            assert!(h.has_text("5 SHORT"), "text: {:?}", h.labels());
+            assert!(h.has_text("NEED 4 LOOP"), "text: {:?}", h.labels());
+            for _ in 0..4 {
+                h.click_prefix("Code loop (");
+            }
+            // Job 0 now meets its requirement and the deficit chip clears.
+            assert!(h.has_text("1 READY"), "text: {:?}", h.labels());
+            assert!(h.has_text("4 SHORT"), "text: {:?}", h.labels());
+            assert!(!h.has_text("NEED 4 LOOP"), "text: {:?}", h.labels());
+            assert!(
+                h.has(Role::Button, "Work 0: debug-script 60c [loop 4/4]"),
+                "text: {:?}",
+                h.labels()
+            );
         }
 
         #[test]
