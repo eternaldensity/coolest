@@ -1,9 +1,10 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Written 2026-10-15 for the next agent. Branch `main`, head `9582bdd`,
-> 201 tests green, `./gate.sh` and `./nightly.sh` both green, tree clean.
-> Read `README.md` and `PLAYER_GUIDE.md` first for the game itself; this
-> file is the engineering state and the traps.
+> Refreshed 2026-11-01 for v0.4. Branch `main`, head after the v0.4
+> commits, 228 test executions (200 unique `#[test]` fns), `./gate.sh`
+> and `./nightly.sh` both green. Read `README.md` and `PLAYER_GUIDE.md`
+> first for the game itself; `docs/NEXT-STATE.md` is the v0.4 plan and
+> the v0.5 shortlist; this file is the engineering state and the traps.
 
 ## 1. What this is
 
@@ -21,8 +22,11 @@ sim/         deterministic game sim (no clock/net/fs/threads) — the only place
   src/deck.rs    Host arena: programs, CPU, vulns, resources, cards, dice, retaliation
   src/net.rs     NetGraph: nodes, links, routing, firewalls, tolls
   src/power.rs   PowerGrid: section blackouts, blackout-aware routing
-  src/crime.rs   Record / Clans / License (COMPLETE but UNWIRED — see TODO)
-  src/mailer.rs  Mailer + ZombieNet (zombie net is now wired; mailboxes are not)
+  src/crime.rs   Record / Clans / License (wired: crimes, pursuit, fines, license)
+  src/body.rs    Body / Mind / shared HP + clinic revival (v0.4)
+  src/items.rs   item defs, inventory, worn gear (v0.4)
+  src/combat.rs  pure d20/PV/DV street resolution (v0.4)
+  src/mailer.rs  Mailer + ZombieNet (zombie net wired; snoop still has no verb)
   src/veil.rs    Veil areas, mindpower, transfer/eject
   src/{ledger,shop,talk,street,civic,data,renderer,portal,scheduler,error,ids,pos}.rs
 server/      authoritative shell: submit/step/apply_one, snapshots, intent log, replay, TCP runtime
@@ -127,6 +131,13 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 7. What is done (recent units, newest first)
 
+- **v0.4 Embodied City (design/06-07, plus M5 close)**: shared HP/health,
+  Body/Mind, clinic revival, data-driven items + inventory + worn gear,
+  shop gear, d20/PV/DV street combat, NPC aggro/loot, cop attacks,
+  surrender-or-jail, real-mindpower Veil with host-bound areas, mind-files,
+  hazards, and power-blackout ejection. New verbs: `Attack`, `Surrender`,
+  `Pickup`, `Drop`, `Equip`, `Use`, `Revive`, `VeilTransfer`, `VeilCarry`,
+  `VeilRead`; `VeilEnter` no longer takes `mp`.
 - **Mail/trojans (design/03/04)**: per-entity mailboxes, `Mailer+`
   crafting, `SendMail`/`SendTrojan`/`OpenMail`, NPCs reading mail on their
   turn, and trojan-on-open enslaving the reader's hosts.
@@ -153,31 +164,30 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 
 ## 8. TODO — prioritised
 
-### P1 — Wire crime/heat (M4). DONE (see section 7).
-Everything listed here landed (reporting, pursuit, fines, license,
-clans). Possible tuning later: an unpaid-fine deadline before the
-warrant, and clan mutual-aid bonuses.
+v0.4 (Body/Mind, items, street combat, M5 Veil) is done; see section 7 and
+`docs/NEXT-STATE.md`. The next state is **v0.5 Programs with identity**.
 
-### P2 — Card/program abilities. DONE (see section 7).
-Costs and per-program mods both landed. Remaining nicety: nothing consumes
-`Fx`/`Mod` from a program's own *type* yet, so the design's "type synergy"
-(producers that match the attacker's type fire harder) is unbuilt.
+### P1 — Program identity (design/03, the M2 gate)
+`Program` still has no kind: `DeckLoad` installs the same generic killer.
+Add Killer/Shield/Scanner/Cracker/Connector/Cloner/Editor kinds, a loadout
+choice, type synergy (matched producers fire harder), scan/crack/overwrite/
+takeover/clone verbs, and host zones/files/accounts. This is what makes
+"choice matters" testable.
 
-### P3 — Smaller, well-scoped
-- **Type synergy** (design/03): producers that match the attacker's type
-  should fire harder; nothing reads program type yet.
-- **Mail follow-ups**: `Mailer+` is a flat World flag (design calls it rare
-  loot/craft — loot has no source yet); attachments are a boolean, not a
-  whole file that must be saved to disk (design/04); `Mailer::snoop` still
-  has no verb, so reading someone else's box is unwired.
-- **GUI polish**: Deck Net mini-map (design/09 says Deck shows RAM + files
-  + Net minimap together); `Ctrl-K` command palette; `>`/`<` stairs;
-  diagonal vi-keys — note `sim::Dir` is only N/S/E/W, so diagonals need a
-  movement-model change, not just keybinds (`h`/`j`/`k`/`l` and arrows
-  move today).
-- **`client-web`** is a scripted demo, not a network client. `server::net`
-  and `server::runtime` (tokio) exist and are tested but nothing in the
-  GUI uses them — that is the multiplayer seam (design/08).
+### P2 — Content and UX
+- Finish M1/M2 content: 8 jobs, more item/loot lines, a short tutorial/
+  objective arc (the survival loop is still the whole opening).
+- GUI polish: Deck Net mini-map, Ctrl-K palette, `>`/`<` stairs, diagonal
+  movement (`sim::Dir` is only N/S/E/W today).
+- Mail follow-ups: `Mailer::snoop` still has no verb; attachments are a
+  boolean, not a saved file; Mailer+ still has no loot source.
+
+### P3 — Smaller / deferred
+- Unpaid-fine deadline before the warrant; clan mutual-aid bonuses.
+- Body-part targeting, elemental damage, full skill tree/XP (design/06-07).
+- `client-web` is a scripted demo, not a network client. `server::net` and
+  `server::runtime` (tokio) exist and are tested but nothing in the GUI
+  uses them — that is the multiplayer seam (design/08).
 
 ### Blocked / external
 - **ATProto PDS relay.** Lexicons validate (`server/src/atproto.rs`) but
@@ -189,8 +199,10 @@ Costs and per-program mods both landed. Remaining nicety: nothing consumes
 ```bash
 export SCCACHE_DISABLE=1 RUSTC_WRAPPER=""
 ./gate.sh; echo "exit=$?"        # must print GATE GREEN and exit 0
+cargo run -q -p tools -- fuzz 1 20000
 cargo run -q -p tools -- replay-fuzz 1 5000     # if you touched apply/state
 ./nightly.sh; echo "exit=$?"     # if you touched sim evolution or data
+cargo run -q -p client-web       # scripted survival/items/fight/arrest/veil tour
 ```
 Then `git status` should be clean apart from your intended change. If you
 add a `Verb`, also add it to the fuzz generator in `tools/src/lib.rs`

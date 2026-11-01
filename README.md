@@ -10,7 +10,7 @@ dodge traces — become what you do.
 
 ## Status
 
-Playable sim + headless client + GUI shell (201 tests green).
+Playable sim + headless client + GUI shell (228 test executions green).
 
 - `cargo test --workspace` — full suite
 - `cargo run -p client-web` — scripted tour of all systems
@@ -25,6 +25,6 @@ Playable sim + headless client + GUI shell (201 tests green).
 
 ## One loop
 
-Work a job → stay fed and cheerful → route a hack across both nets →
-fight programs in the Deck → scrub your logs → beat the trace →
-spend the money before the cops connect the dots.
+Work a job → stay fed and cheerful → buy gear and keep your HP up →
+route a hack across both nets → fight programs in the Deck → scrub your
+logs → beat the trace → survive the cops before they connect the dots.

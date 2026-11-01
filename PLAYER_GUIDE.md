@@ -3,8 +3,8 @@
 > Status: sim + headless client playable via `cargo run -p client-web`;
 > desktop shell via `cargo run -p gui`; web shell via `cd gui && trunk serve`.
 > All four views have server-routed acts and headless UI tests
-> (accesskit, no screenshots); Street/Deck/Net were browser-verified
-> 2026-10-06, Veil arrived after.
+> (accesskit, no screenshots). v0.4 added HP, gear, street combat, cop
+> arrests, and a real-mindpower Veil.
 
 ## The pitch
 
@@ -41,11 +41,28 @@ both bars down:
 ## Shops, hours, and the night store
 
 - Counters serve adjacent tiles (`$`, gold). Day shop (8:00–20:00):
-  ration 100c, meds 400c, firewall 1500c. Shuttered counters refuse
-  with the reason shown — come back in the morning.
+  ration 100c, meds 400c, firewall 1500c, knife 300c, jacket 500c,
+  medkit 250c. Shuttered counters refuse with the reason shown — come
+  back in the morning.
 - Night store three doors east stays open 24h at steeper prices
   (ration 150c, meds 600c) for the graveyard shift.
 - Talk to the shopkeeper: `Trade` routes to the counter, no haggling.
+
+## Health, gear, and danger
+
+- You have **HP** (20), **PV** (evade) and **DV** (soak). The status panel
+  shows HP and your body stats.
+- Buy gear at a counter, then `Equip` it from the Pack row. Knife/pipe are
+  melee; the pistol is ranged; jacket/vest add DV; medkit/snack are
+  consumables. Carry cap is `STR × 100g`.
+- Adjacent NPCs show `Attack <role>` buttons. Hits roll d20 + DEX/4 + 1
+  against `10 + PV`, then subtract DV. A natural 20 crits, a natural 1
+  misses. Kills drop loot and file a crime; survivors fight back.
+- Cops attack **Wanted** players on sight. Stand next to a cop and use
+  `Surrender`: pay the fine, or serve the night in jail (cash seized,
+  record cleared) if you cannot.
+- At 0 HP you are **down**, not deleted: `Revive at clinic` restores half
+  HP at home for a pocket-first fee, with any shortfall as debt.
 
 ## Deck, Net, and Veil acts
 
@@ -66,17 +83,19 @@ both bars down:
   `Route 1→3` previews path/tolls and reroutes around dark sections and
   firewalled transit; `Damage wire 1-2`, `Cut/Restore power`, and the
   `Block/Unblock` firewall filter are all logged acts.
-- **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize hosts,
-  `Eject` (light drain). Death ejects instead of killing.
+- **Veil:** `Jack in` with 5+ mindpower, walk exit links, seize the
+  area's bound host or `Transfer` into a weaker nearby NPC, carry/read
+  mind-files, `Eject` (light drain). Hazard areas damage the mind; death
+  ejects with heavy drain. A power cut ejects everyone and drains them.
 
 ## The four views (Tab to switch)
 
 | View | What | Verbs wired today |
 |------|------|-------------------|
-| Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / deposit / withdraw |
+| Street | Tile streets, doors, shops | move / eat / work / watch / sleep / buy / talk / attack / pickup / drop / equip / use / surrender / revive / deposit / withdraw |
 | Net | Host graph, latency, tolls | route (preview) / damage wire / cut+restore power / firewall filter |
 | Deck | Inside world host 1: RAM arena | load killer / strike / farm producers / play cards / exploit + trojan / scrub log (warden answers) |
-| Veil | Helmet space over the same rules | jack in / move / seize / eject |
+| Veil | Helmet space over the same rules | jack in / move / seize / transfer / carry+read files / eject |
 
 The Deck tab also plays the **closed card table** (design/03): 8 negative,
 8 positive, 4 manipulation cards. Attacks roll a d6 (a 5-6 crits for +1);
@@ -89,8 +108,8 @@ The `Mods` row builds a **persistent** ability into your program
 where the same card played from `Cards` is a one-shot next-turn effect.
 Card play is a logged act, so replays reproduce the same dice.
 
-Aspirational verbs from the design (scan, connect, crack, patch, embody,
-transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
+Aspirational verbs from the design (scan, connect, crack, patch, embody)
+are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 
 ## Hacking 101
 
@@ -132,10 +151,13 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 
 ## Dying (or not)
 
-- Street: standard roguelike stakes.
+- Street: HP damage, cop attacks, and clinic revival (v0.4). Loot drops
+  where an NPC falls.
 - Deck: losing a program just costs the program.
 - Veil: your mind enters at 5+ mindpower; death **ejects** you with heavy
-  mindpower drain instead of killing you. Power blackouts eject everyone.
+  mindpower drain instead of killing you. Hazards damage the mind, and a
+  power blackout ejects everyone. Below 5 mindpower you cannot re-enter
+  until it recovers.
 
 ## Controls today
 
@@ -143,11 +165,13 @@ transfer) are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (201 tests)
+cargo test --workspace      # prove the rules hold (228 test executions)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the
-console takes `eat | work 0-4 | watch | sleep | buy <item> | deposit/
-withdraw <c> | talk | help`. Panes: status + objective (left), tabs
-(top), console + log (bottom), view (center). Ctrl-K palette and
-`>`/`<` stairs are not wired yet — see `design/09-ux-roadmap.md`.
+console takes `eat | work 0-4 | watch | sleep | buy <item> | pickup/
+drop/equip/use <item> | talk | revive | deposit/withdraw <c> | help`.
+Panes: status + objective (left), tabs (top), console + log (bottom),
+view (center). Attack/Surrender are buttons on the Street tab. Ctrl-K
+palette and `>`/`<` stairs are not wired yet — see
+`design/09-ux-roadmap.md`.
