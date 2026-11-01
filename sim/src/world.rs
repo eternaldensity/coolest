@@ -92,6 +92,11 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
+    /// Connector remote probe: requires a route and a Connector on the rig;
+    /// reveals the target host without loading a program there.
+    DeckConnect {
+        host: HostId,
+    },
     /// Strike an arena cell of world host 1, then run warden
     /// retaliation in the same act (design/03).
     DeckStrike {
@@ -2425,6 +2430,27 @@ impl World {
                 host.clone_to(src, id, at)?;
                 kind = "cloned";
             }
+            Verb::DeckConnect { host } => {
+                let src = self
+                    .hosts
+                    .get(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if src.has_kind(intent.actor, ProgramKind::Connector).is_none() {
+                    return Err(SimError::new("no_connector", "Connector on rig", "missing"));
+                }
+                // Route through the Net graph; dark sections are refused by
+                // the powered route where available.
+                self.net.route(HostId(1), host)?;
+                let target = self.hosts.get_mut(&host.0).ok_or(SimError::new(
+                    "no_host",
+                    "target host",
+                    "missing",
+                ))?;
+                target.mark_revealed(intent.actor);
+                target.log(intent.actor, self.tick, HostId(1));
+                extra_kinds.push("remote_scan".to_string());
+                kind = "connected";
+            }
             Verb::DeckStrike { x, y } => {
                 let killed = self
                     .hosts
@@ -4235,6 +4261,38 @@ mod tests {
         })
         .unwrap();
         assert_eq!(w.units(EntityId(1), Res::Data), 3);
+    }
+
+    #[test]
+    fn connector_probes_a_routed_host() {
+        use crate::net::{LinkKind, NetKind};
+        use crate::programs::ProgramKind;
+        let mut w = World::new(11);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.net.add_node(HostId(1), NetKind::Oldnet, 10, false);
+        w.net.add_node(HostId(3), NetKind::Betanet, 50, false);
+        w.net
+            .add_link(HostId(1), HostId(3), LinkKind::Laser, 10, 0)
+            .unwrap();
+        w.ensure_host(HostId(3));
+        w.ensure_host(HostId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoadKind {
+                x: 1,
+                y: 0,
+                kind: ProgramKind::Connector,
+            },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckConnect { host: HostId(3) },
+        })
+        .unwrap();
+        assert!(w.hosts[&3].scanned(EntityId(1)));
+        assert!(w.hosts[&3].scan_report(EntityId(1)).contains("vulns"));
     }
 
     #[test]

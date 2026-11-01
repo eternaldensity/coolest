@@ -163,6 +163,7 @@ impl Shell {
         server.world.power.anchor(HostId(2), (1, 0));
         server.world.power.anchor(HostId(3), (2, 0));
         server.world.ensure_host(HostId(1));
+        server.world.ensure_host(HostId(3));
         // World host 1 is a defended range rig: loading foreign programs
         // draws a warden and a trace (M2 retaliation, always on). It is an
         // office workstation, so it carries that archetype's vulns.
@@ -1163,6 +1164,15 @@ impl Shell {
                             None => self.say("click a cell first".to_string()),
                         }
                     }
+                    if ui.button("Connect host 3").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::DeckConnect { host: HostId(3) },
+                        }) {
+                            Ok(_) => self.say("remote host revealed".to_string()),
+                            Err(e) => self.say(format!("connect failed: {e}")),
+                        }
+                    }
                 });
                 // Producers (design/10): deploy a maker on the selected cell.
                 // It then yields free units every act.
@@ -1369,6 +1379,9 @@ impl Shell {
                         if h.breached { "yes" } else { "no" },
                         if h.scanned(self.actor) { "yes" } else { "no" }
                     ));
+                    if h.scanned(self.actor) {
+                        ui.label(format!("scan: {}", h.scan_report(self.actor)));
+                    }
                 }
                 if let Some((x, y)) = self.sel {
                     if let Some(kind) = self
@@ -2213,6 +2226,18 @@ mod tests {
                 h.shell.log
             );
             assert!(h.has_text("scanned yes"), "text: {:?}", h.labels());
+            // Connector remote probe onto the demo host 3.
+            h.click_last(".");
+            h.click("Load connector (1cpu)");
+            h.click("Connect host 3");
+            assert!(
+                h.shell
+                    .log
+                    .iter()
+                    .any(|l| l.contains("remote host revealed")),
+                "log: {:?}",
+                h.shell.log
+            );
         }
 
         #[test]

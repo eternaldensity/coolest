@@ -455,12 +455,37 @@ impl Host {
         if self.has_kind(owner, ProgramKind::Scanner).is_none() {
             return Err(SimError::new("no_scanner", "Scanner on host", "missing"));
         }
-        self.scanned.insert(owner.0);
+        self.mark_revealed(owner);
         Ok(self.vuln_ids())
+    }
+
+    /// Connector/remote reveal (no Scanner required; the caller checks the
+    /// Connector and route). Also used by `scan`.
+    pub fn mark_revealed(&mut self, owner: EntityId) {
+        self.scanned.insert(owner.0);
     }
 
     pub fn scanned(&self, owner: EntityId) -> bool {
         self.scanned.contains(&owner.0)
+    }
+
+    /// Human-readable scan report (only meaningful after `scanned`).
+    pub fn scan_report(&self, owner: EntityId) -> String {
+        if !self.scanned(owner) {
+            return "unscanned".to_string();
+        }
+        let trace = self
+            .trace
+            .as_ref()
+            .map(|t| format!("{}/{}", t.progress, t.threshold))
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "vulns [{}] · logs {} · trace {} · breached {}",
+            self.vuln_ids().join(","),
+            self.logs_visible(owner).len(),
+            trace,
+            if self.breached { "yes" } else { "no" }
+        )
     }
 
     /// Cracker: three beats disable the host filter/monitor (the "lock").
