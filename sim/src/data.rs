@@ -291,6 +291,25 @@ pub fn parse_items(s: &str) -> Result<ItemTable, SimError> {
     Ok(table)
 }
 
+pub fn parse_kinds(s: &str) -> Result<Vec<crate::programs::KindDef>, SimError> {
+    use std::collections::BTreeSet;
+    let rows: Vec<crate::programs::KindDef> = serde_yaml::from_str(s)
+        .map_err(|_| SimError::new("data", "kinds.yaml list", "unparseable"))?;
+    if rows.is_empty() {
+        return Err(SimError::new("data", ">= 1 program kind", "empty"));
+    }
+    let mut seen = BTreeSet::new();
+    for k in &rows {
+        if !seen.insert(k.kind) {
+            return Err(SimError::new("data", "unique program kind", "duplicate"));
+        }
+        if k.max_len == 0 || k.cpu_per_seg == 0 {
+            return Err(SimError::new("data", "positive kind stats", "zero"));
+        }
+    }
+    Ok(rows)
+}
+
 pub fn parse_contracts(s: &str) -> Result<Vec<crate::contracts::ContractTemplate>, SimError> {
     use std::collections::BTreeSet;
     let rows: Vec<crate::contracts::ContractTemplate> = serde_yaml::from_str(s)
@@ -438,6 +457,13 @@ mod tests {
     }
 
     #[test]
+    fn kinds_file_matches_code_defaults() {
+        let file = parse_kinds(include_str!("../../data/kinds.yaml")).unwrap();
+        let defaults = crate::programs::default_kinds();
+        assert_eq!(file, defaults);
+    }
+
+    #[test]
     fn contracts_file_matches_code_defaults() {
         let file = parse_contracts(include_str!("../../data/contracts.yaml")).unwrap();
         assert_eq!(file.len(), crate::contracts::default_contracts().len());
@@ -517,6 +543,16 @@ mod tests {
         );
         assert!(parse_items(
             "- id: x\n  name: X\n  glyph: x\n  weight_g: 1\n  slot: weapon\n  effect: heal:1\n"
+        )
+        .is_err());
+        // Program kinds: duplicate kind or zero stats is a content bug.
+        assert!(parse_kinds("").is_err());
+        assert!(parse_kinds(
+            "- kind: killer\n  max_len: 3\n  cpu_per_seg: 1\n  shield: 0\n  affinity: algo\n  ability: strike\n- kind: killer\n  max_len: 3\n  cpu_per_seg: 1\n  shield: 0\n  affinity: algo\n  ability: strike\n"
+        )
+        .is_err());
+        assert!(parse_kinds(
+            "- kind: killer\n  max_len: 0\n  cpu_per_seg: 1\n  shield: 0\n  affinity: algo\n  ability: strike\n"
         )
         .is_err());
         // Contracts: missing kind fields, unknown roles/items, duplicate ids.

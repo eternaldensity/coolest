@@ -12,6 +12,7 @@ use crate::ledger::{Ledger, Mail, Mailbox};
 use crate::net::NetGraph;
 use crate::pos::Pos;
 use crate::power::PowerGrid;
+use crate::programs::{KindDef, ProgramKind};
 use crate::scheduler::Scheduler;
 use crate::shop::Shop;
 use crate::street::{gen_section, gen_section_weighted, Ports, Section};
@@ -67,6 +68,30 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
+    /// v0.6 loadout choice: load a specific program kind.
+    DeckLoadKind {
+        x: u8,
+        y: u8,
+        kind: ProgramKind,
+    },
+    /// Scanner reveal on the rig (requires a Scanner on the host).
+    DeckScan,
+    /// Cracker progress against the host filter/monitor.
+    DeckCrack,
+    /// Editor patch a registered vuln.
+    DeckPatch {
+        vuln: String,
+    },
+    /// Editor sever a tail segment (no headshot).
+    DeckOverwrite {
+        x: u8,
+        y: u8,
+    },
+    /// Cloner copy a program to a free cell.
+    DeckClone {
+        x: u8,
+        y: u8,
+    },
     /// Strike an arena cell of world host 1, then run warden
     /// retaliation in the same act (design/03).
     DeckStrike {
@@ -116,6 +141,13 @@ pub enum Verb {
         x: u8,
         y: u8,
         res: crate::deck::Res,
+    },
+    /// v0.6 producer with a chosen kind (matching affinity yields +1).
+    DeckFarmKind {
+        x: u8,
+        y: u8,
+        res: crate::deck::Res,
+        kind: ProgramKind,
     },
     /// Play a card from the closed table (design/03) at a cell. Logged like
     /// any act, so replays reproduce dice and effects.
@@ -447,6 +479,9 @@ pub struct World {
     health: BTreeMap<u64, Health>,
     /// Item definitions (design/07). Code defaults mirror data/items.yaml;
     /// `set_items` overrides from the file at runtime.
+    /// v0.6 program kind table (data/kinds.yaml). Code defaults mirror it.
+    #[serde(default = "crate::programs::default_kinds")]
+    kinds: Vec<KindDef>,
     #[serde(default = "crate::items::default_items")]
     items: ItemTable,
     /// Dropped item stacks on street tiles.
@@ -567,6 +602,7 @@ impl World {
             spam_day: 0,
             health: BTreeMap::new(),
             items: crate::items::default_items(),
+            kinds: crate::programs::default_kinds(),
             floor_items: Vec::new(),
             rng: seed | 1,
             record: Record::new(),
@@ -1592,6 +1628,21 @@ impl World {
         }
     }
 
+    /// Override the program-kind table from data/kinds.yaml.
+    pub fn set_kinds(&mut self, defs: &[KindDef]) {
+        if !defs.is_empty() {
+            self.kinds = defs.to_vec();
+        }
+    }
+
+    pub fn kind_def(&self, kind: ProgramKind) -> KindDef {
+        self.kinds
+            .iter()
+            .copied()
+            .find(|d| d.kind == kind)
+            .unwrap_or_else(|| crate::programs::default_for(kind))
+    }
+
     pub fn inventory(&self, id: EntityId) -> Option<&Inventory> {
         self.beings.get(&id.0).map(|b| &b.inventory)
     }
@@ -2277,6 +2328,102 @@ impl World {
                     intent.actor,
                     false,
                 );
+            }
+            Verb::DeckLoadKind { x, y, kind: pkind } => {
+                let def = self
+                    .kinds
+                    .iter()
+                    .copied()
+                    .find(|d| d.kind == pkind)
+                    .unwrap_or_else(|| crate::programs::default_for(pkind));
+                let id = {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    EntityId(100 + host.progs.len() as u64)
+                };
+                self.hosts
+                    .get_mut(&1)
+                    .unwrap()
+                    .load_kind(id, intent.actor, CellPos(x, y), &def)?;
+                kind = "loaded";
+                if deck_foreign && !self.license.granted {
+                    crimes.push((Act::Trespass, Some(HostId(1)), None, true));
+                }
+                extra_kinds = Self::deck_beat(
+                    self.hosts.get_mut(&1).unwrap(),
+                    &mut self.funnel,
+                    self.tick,
+                    intent.actor,
+                    false,
+                );
+            }
+            Verb::DeckScan => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                host.scan(intent.actor)?;
+                kind = "scanned";
+            }
+            Verb::DeckCrack => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                let n = host.crack(intent.actor)?;
+                if n >= 3 {
+                    extra_kinds.push("lock_cracked".to_string());
+                }
+                kind = "cracked";
+            }
+            Verb::DeckPatch { ref vuln } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Editor).is_none() {
+                    return Err(SimError::new("no_editor", "Editor on host", "missing"));
+                }
+                host.patch(vuln)?;
+                kind = "patched";
+            }
+            Verb::DeckOverwrite { x, y } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Editor).is_none() {
+                    return Err(SimError::new("no_editor", "Editor on host", "missing"));
+                }
+                host.overwrite(CellPos(x, y))?;
+                kind = "overwritten";
+            }
+            Verb::DeckClone { x, y } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Cloner).is_none() {
+                    return Err(SimError::new("no_cloner", "Cloner on host", "missing"));
+                }
+                let src = host.prog_at(x, y).ok_or(SimError::new(
+                    "no_target",
+                    "program cell",
+                    "empty",
+                ))?;
+                if host.owner_of(src) != Some(intent.actor) {
+                    return Err(SimError::new("not_yours", "your program", "foreign"));
+                }
+                let at = host.free_cell_for(intent.actor).ok_or(SimError::new(
+                    "blocked",
+                    "free cell",
+                    "full",
+                ))?;
+                let id = EntityId(100 + host.progs.len() as u64);
+                host.clone_to(src, id, at)?;
+                kind = "cloned";
             }
             Verb::DeckStrike { x, y } => {
                 let killed = self
@@ -2979,6 +3126,31 @@ impl World {
                 // intrusion, so it draws no retaliation beat. Producers
                 // are also skipped by the warden (see retaliate), so they
                 // survive later DeckLoad/DeckStrike beats too.
+                kind = "farmed";
+            }
+            Verb::DeckFarmKind {
+                x,
+                y,
+                res,
+                kind: pkind,
+            } => {
+                let def = self
+                    .kinds
+                    .iter()
+                    .copied()
+                    .find(|d| d.kind == pkind)
+                    .unwrap_or_else(|| crate::programs::default_for(pkind));
+                let (_, _, rate) = farm_params(res);
+                let id = {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    EntityId(100 + host.progs.len() as u64)
+                };
+                let host = self.hosts.get_mut(&1).unwrap();
+                host.load_kind(id, intent.actor, CellPos(x, y), &def)?;
+                host.set_maker(id, vec![res], rate)?;
                 kind = "farmed";
             }
             Verb::Deposit(amt) => {
@@ -3954,6 +4126,115 @@ mod tests {
         w.set_contracts(&[crate::contracts::default_contracts()[0].clone()]);
         w.refresh_board();
         w
+    }
+
+    #[test]
+    fn program_kinds_scan_crack_patch_clone_and_synergy() {
+        use crate::deck::Res;
+        use crate::programs::ProgramKind;
+        let mut w = World::new(9);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        let host = w.hosts.get_mut(&1).unwrap();
+        host.set_firewall(true);
+        host.set_monitor(true);
+        host.add_vuln("cve-test");
+        // Scanner reveals the host.
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoadKind {
+                x: 1,
+                y: 0,
+                kind: ProgramKind::Scanner,
+            },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckScan,
+        })
+        .unwrap();
+        assert!(w.hosts[&1].scanned(EntityId(1)));
+        // Cracker needs three beats to drop the filter/monitor.
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoadKind {
+                x: 2,
+                y: 0,
+                kind: ProgramKind::Cracker,
+            },
+        })
+        .unwrap();
+        for _ in 0..3 {
+            w.tick = w.next_at(EntityId(1));
+            w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckCrack,
+            })
+            .unwrap();
+        }
+        assert!(!w.hosts[&1].firewall());
+        // Editor patches a vuln.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoadKind {
+                x: 3,
+                y: 0,
+                kind: ProgramKind::Editor,
+            },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckPatch {
+                vuln: "cve-test".into(),
+            },
+        })
+        .unwrap();
+        w.tick = w.next_at(EntityId(1));
+        assert!(w
+            .apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckPatch {
+                    vuln: "cve-test".into(),
+                },
+            })
+            .is_err());
+        // Cloner copies a program to a free cell.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckLoadKind {
+                x: 4,
+                y: 0,
+                kind: ProgramKind::Cloner,
+            },
+        })
+        .unwrap();
+        let before = w.hosts[&1].progs.len();
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckClone { x: 4, y: 0 },
+        })
+        .unwrap();
+        assert_eq!(w.hosts[&1].progs.len(), before + 1);
+        // Producer affinity: Scanner affinity is data, so data yield is +1.
+        w.tick = w.next_at(EntityId(1));
+        w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckFarmKind {
+                x: 7,
+                y: 7,
+                res: Res::Data,
+                kind: ProgramKind::Scanner,
+            },
+        })
+        .unwrap();
+        assert_eq!(w.units(EntityId(1), Res::Data), 3);
     }
 
     #[test]

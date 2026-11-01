@@ -1,0 +1,45 @@
+# v0.6 program kinds (design/03). Code defaults mirror this file.
+# ability: strike | guard | scan | crack | connect | clone | overwrite
+# affinity is the producer resource a kind boosts (+1 per beat).
+- kind: killer
+  max_len: 3
+  cpu_per_seg: 1
+  shield: 0
+  affinity: algo
+  ability: strike
+- kind: shield
+  max_len: 4
+  cpu_per_seg: 2
+  shield: 2
+  affinity: loop
+  ability: guard
+- kind: scanner
+  max_len: 2
+  cpu_per_seg: 1
+  shield: 0
+  affinity: data
+  ability: scan
+- kind: cracker
+  max_len: 3
+  cpu_per_seg: 2
+  shield: 0
+  affinity: algo
+  ability: crack
+- kind: connector
+  max_len: 2
+  cpu_per_seg: 1
+  shield: 0
+  affinity: loop
+  ability: connect
+- kind: cloner
+  max_len: 3
+  cpu_per_seg: 2
+  shield: 0
+  affinity: data
+  ability: clone
+- kind: editor
+  max_len: 3
+  cpu_per_seg: 2
+  shield: 0
+  affinity: loop
+  ability: overwrite

@@ -15,6 +15,7 @@ pub mod net;
 pub mod portal;
 pub mod pos;
 pub mod power;
+pub mod programs;
 pub mod renderer;
 pub mod scheduler;
 pub mod shop;
@@ -35,7 +36,7 @@ pub use crime::{
 };
 pub use data::{
     parse_cards, parse_contracts, parse_dialogues, parse_districts, parse_items, parse_jobs,
-    parse_vulns, CardDef, CardTable, DistrictDef, JobDef, VulnDef,
+    parse_kinds, parse_vulns, CardDef, CardTable, DistrictDef, JobDef, VulnDef,
 };
 pub use deck::{AttackOutcome, CellPos, Fx, Host, HostArch, Mod, Res};
 pub use error::SimError;
@@ -47,6 +48,7 @@ pub use net::{LinkKind, NetGraph, NetKind, Route};
 pub use portal::{Portal, PortalNet};
 pub use pos::Pos;
 pub use power::PowerGrid;
+pub use programs::{Ability, KindDef, ProgramKind};
 pub use renderer::{DeckView, NetView, RenderView, Renderer, StreetView};
 pub use scheduler::Scheduler;
 pub use shop::{Shop, Stock};

@@ -1,7 +1,8 @@
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
+use crate::programs::{KindDef, ProgramKind};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// M2a Deck arena: one host's RAM grid + programs.
 /// M2b adds cards/resources/paired-stats; M2c adds trace/vulns.
@@ -57,8 +58,11 @@ impl HostArch {
 /// M2b resource types (2024): programming components creatures produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Res {
+    #[serde(alias = "loop")]
     Loop,
+    #[serde(alias = "data")]
     Data,
+    #[serde(alias = "algo")]
     Algo,
 }
 
@@ -184,6 +188,16 @@ pub struct Program {
     pub tail: VecDeque<CellPos>,
     pub max_len: u8,
     pub cpu_per_seg: u8,
+    /// v0.6 role identity. Old saves default to Killer.
+    #[serde(default)]
+    pub kind: ProgramKind,
+    /// Producer synergy resource; old saves default to algo.
+    #[serde(default = "default_affinity")]
+    pub affinity: Res,
+    /// True only for kind-loaded v0.6 producers; legacy `load` producers
+    /// keep their old exact yield.
+    #[serde(default)]
+    pub synergy: bool,
     /// Deck-built abilities (design/03 `mods`): persistent, applied on every
     /// attack/defence, unlike the one-shot `Fx` next-turn effects.
     #[serde(default)]
@@ -294,11 +308,21 @@ pub struct Host {
     /// `breach` does not.
     #[serde(default)]
     privileged: bool,
+    /// v0.6 Scanner reveal state (per owner).
+    #[serde(default)]
+    scanned: BTreeSet<u64>,
+    /// v0.6 Cracker progress against the host lock (per owner).
+    #[serde(default)]
+    crack: BTreeMap<u64, u32>,
 }
 
 /// Nonzero xorshift seed for hosts without a serialized rng state.
 fn default_rng() -> u64 {
     0x9E37_79B9_7F4A_7C15
+}
+
+fn default_affinity() -> Res {
+    Res::Algo
 }
 
 /// What one retaliation beat did. Clients use `traced` to mark funnel
@@ -356,6 +380,8 @@ impl Host {
             rng: default_rng() ^ (id.0.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1),
             arch: HostArch::default(),
             privileged: false,
+            scanned: BTreeSet::new(),
+            crack: BTreeMap::new(),
         }
     }
 
@@ -410,6 +436,71 @@ impl Host {
     /// Registered vuln ids on this host (client display).
     pub fn vuln_ids(&self) -> Vec<String> {
         self.vulns.keys().cloned().collect()
+    }
+
+    pub fn program_kind(&self, prog: EntityId) -> Option<ProgramKind> {
+        self.progs.get(&prog.0).map(|p| p.kind)
+    }
+
+    /// First program of `kind` owned by `owner` on this host.
+    pub fn has_kind(&self, owner: EntityId, kind: ProgramKind) -> Option<EntityId> {
+        self.progs
+            .values()
+            .find(|p| p.owner == owner && p.kind == kind)
+            .map(|p| p.id)
+    }
+
+    /// Scanner reveal. Requires the owner to have a Scanner on the host.
+    pub fn scan(&mut self, owner: EntityId) -> Result<Vec<String>, SimError> {
+        if self.has_kind(owner, ProgramKind::Scanner).is_none() {
+            return Err(SimError::new("no_scanner", "Scanner on host", "missing"));
+        }
+        self.scanned.insert(owner.0);
+        Ok(self.vuln_ids())
+    }
+
+    pub fn scanned(&self, owner: EntityId) -> bool {
+        self.scanned.contains(&owner.0)
+    }
+
+    /// Cracker: three beats disable the host filter/monitor (the "lock").
+    pub fn crack(&mut self, owner: EntityId) -> Result<u32, SimError> {
+        if self.has_kind(owner, ProgramKind::Cracker).is_none() {
+            return Err(SimError::new("no_cracker", "Cracker on host", "missing"));
+        }
+        let n = self.crack.entry(owner.0).or_insert(0);
+        *n += 1;
+        if *n >= 3 {
+            self.firewall = false;
+            self.monitor_armed = false;
+        }
+        Ok(*n)
+    }
+
+    /// Editor: sever one tail segment without killing the head.
+    pub fn overwrite(&mut self, target: CellPos) -> Result<(), SimError> {
+        let seg = self.cell_get(target.0, target.1).ok_or(SimError::new(
+            "no_target",
+            "program tail cell",
+            "empty",
+        ))?;
+        if seg.is_head {
+            return Err(SimError::new("head_target", "tail cell", "head"));
+        }
+        let prog = seg.prog;
+        let p = self.progs.get_mut(&prog.0).ok_or(SimError::new(
+            "no_prog",
+            "live program",
+            "missing",
+        ))?;
+        let idx = p
+            .tail
+            .iter()
+            .position(|c| *c == target)
+            .ok_or(SimError::new("no_target", "program tail", "missing"))?;
+        p.tail.remove(idx);
+        self.cell_drop(target.0, target.1);
+        Ok(())
     }
 
     /// Advance the dice state and return a face in `1..=sides`.
@@ -501,7 +592,55 @@ impl Host {
                 tail: VecDeque::new(),
                 max_len: max_len.max(1),
                 cpu_per_seg,
+                kind: ProgramKind::Killer,
+                affinity: Res::Algo,
+                synergy: false,
                 mods: Vec::new(),
+            },
+        );
+        Ok(())
+    }
+
+    /// v0.6 loadout: install a program kind with its role stats.
+    pub fn load_kind(
+        &mut self,
+        prog: EntityId,
+        owner: EntityId,
+        at: CellPos,
+        def: &KindDef,
+    ) -> Result<(), SimError> {
+        if !self.free(at) {
+            return Err(SimError::new(
+                "cell_busy",
+                "free cell",
+                "occupied/out of bounds",
+            ));
+        }
+        if self.progs.contains_key(&prog.0) {
+            return Err(SimError::new("dup_prog", "fresh id", "exists"));
+        }
+        let add = 1 + def.cpu_per_seg as u32;
+        if self.cpu_load() + add > self.cpu_total {
+            return Err(SimError::new("cpu_overload", "headroom", "over budget"));
+        }
+        let mut mods = Vec::new();
+        if def.shield > 0 {
+            mods.push(Mod::Shield(def.shield));
+        }
+        self.cell_put(at.0, at.1, prog, true);
+        self.progs.insert(
+            prog.0,
+            Program {
+                id: prog,
+                owner,
+                head: at,
+                tail: VecDeque::new(),
+                max_len: def.max_len.max(1),
+                cpu_per_seg: def.cpu_per_seg.max(1),
+                kind: def.kind,
+                affinity: def.affinity,
+                synergy: true,
+                mods,
             },
         );
         Ok(())
@@ -648,6 +787,9 @@ impl Host {
                 tail: VecDeque::new(),
                 max_len: p.max_len,
                 cpu_per_seg: p.cpu_per_seg,
+                kind: p.kind,
+                affinity: p.affinity,
+                synergy: p.synergy,
                 // A clone carries the source's built-in abilities.
                 mods: p.mods.clone(),
             },
@@ -743,6 +885,9 @@ impl Host {
             self.vulns
                 .get_mut(vuln)
                 .ok_or(SimError::new("no_vuln", "known vuln", "unknown"))?;
+        if v.patched {
+            return Err(SimError::new("patched", "open vuln", "already patched"));
+        }
         v.patched = true;
         Ok(())
     }
@@ -987,7 +1132,9 @@ impl Host {
             Some((makes, rate)) if makes.contains(&res) => *rate as u32,
             _ => 1,
         };
-        let amount = base * mult;
+        // Type synergy: a kind-loaded maker whose affinity matches yields +1.
+        let bonus = if p.synergy && p.affinity == res { 1 } else { 0 };
+        let amount = base * mult + bonus;
         *self
             .stocks
             .entry(p.owner.0)
@@ -1030,16 +1177,21 @@ impl Host {
     pub fn tick_makers(&mut self, owner: EntityId) -> Vec<(Res, u32)> {
         // Snapshot the makers first so the stock mutation below is a
         // separate borrow (programs can be added/removed between acts).
-        let makers: Vec<(Vec<Res>, u8)> = self
+        let makers: Vec<(Vec<Res>, u8, Res, bool)> = self
             .progs
             .values()
             .filter(|p| p.owner == owner)
-            .filter_map(|p| self.makers.get(&p.id.0).cloned())
+            .filter_map(|p| {
+                self.makers
+                    .get(&p.id.0)
+                    .map(|(m, r)| (m.clone(), *r, p.affinity, p.synergy))
+            })
             .collect();
         let mut made: BTreeMap<Res, u32> = BTreeMap::new();
-        for (makes, rate) in makers {
+        for (makes, rate, affinity, synergy) in makers {
             for r in makes {
-                *made.entry(r).or_insert(0) += rate as u32;
+                let bonus = if synergy && affinity == r { 1 } else { 0 };
+                *made.entry(r).or_insert(0) += rate as u32 + bonus;
             }
         }
         for (r, n) in &made {
