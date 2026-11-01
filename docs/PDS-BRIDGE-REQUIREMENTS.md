@@ -345,6 +345,9 @@ feature coverage at selection time.
 | [blacksky-algorithms/rsky](https://github.com/blacksky-algorithms/rsky) | Rust | PDS, relay, firehose, identity, lexicon, repo | Apache-2.0; closest Rust-native full stack; WIP, evaluate maturity. |
 | [atrium-rs/atrium](https://github.com/atrium-rs/atrium) | Rust | XRPC client/API, bsky SDK | MIT; good outbound client/identity helper; not a PDS. |
 | [musicjunkieg/atproto-crates](https://github.com/musicjunkieg/atproto-crates) | Rust | 20 crates: DASL/CAR, identity, repo/MST, lexicon, OAuth, client, Jetstream/TAP, PDS/entryway | MIT; broad and recent; pin a revision; evaluate API stability. |
+| [dollspace-gay/Aurora-Locus](https://github.com/dollspace-gay/Aurora-Locus) | Rust | Self-hosted PDS (SQLite/Postgres), OAuth/DPoP, MST/CAR, firehose, identity, moderation | MIT/Apache-2.0; 893 commits; built on `proto-blue`. Small star count; verify conformance and ops before production. |
+| [dollspace-gay/proto-blue](https://github.com/dollspace-gay/proto-blue) | Rust | SDK: syntax, crypto, lexicon, repo/MST/CAR, XRPC, WS, identity, API/Agent, OAuth | MIT/Apache-2.0; 14 crates, 368 generated types, interop parity tests. Explicitly AI-generated and pre-1.0; pin a revision and differential-test against the TS reference. |
+| [dollspace-gay/skyauth](https://github.com/dollspace-gay/skyauth) | Rust | OAuth 2.1 client: DPoP, PAR, PKCE, SSRF-safe identity discovery | Fork of `mike10010100/skyauth`; dual MIT/Apache-2.0; v0.1, 18 commits. Overlaps `proto-blue-oauth`; use as an OAuth hardening reference or alternative, not a second stack. |
 | [DrChat/bluepds](https://github.com/DrChat/bluepds) | Rust | Alternative PDS (Axum + Atrium, SQLite) | Apache-2.0; small project; useful reference or test PDS. |
 | [DavidBuchanan314/millipds](https://github.com/DavidBuchanan314/millipds) | Python | Minimal PDS | MIT; explicitly experimental/testing-only; good for interop experiments. |
 | [threddyrex/rustproto](https://github.com/threddyrex/rustproto) | Rust | PDS + repo/MST/CAR/firehose reference | MIT; small; useful as a readable implementation. |
@@ -370,22 +373,89 @@ For each candidate, require:
 - [ ] Active maintenance and a real test suite; prefer projects with
       interop tests against the reference implementation.
 
+### Candidate notes (README + source-level spot checks; verify before selecting)
+
+| Candidate | Use it for | Do not use it for |
+|---|---|---|
+| Aurora-Locus | A self-hosted PDS (Mode A/B) | The bridge/sim adapter |
+| proto-blue | The bridge’s ATProto SDK (repo/XRPC/identity/lexicon/OAuth) | Running a PDS |
+| skyauth | A narrow OAuth 2.1 client, or an SSRF/DPoP reference | Repo writes, firehose, PDS hosting |
+
+**Aurora-Locus — best candidate for the PDS side of Mode A.**
+Source-level check: `v0.10.0`, `MIT OR Apache-2.0`, depends on the
+published `proto-blue = "0.3.3"`, and ships Docker/Caddy/systemd units.
+It advertises the full PDS surface FIDOM needs: account/session/OAuth,
+repo CRUD + MST, CAR export, firehose, DID:PLC/DID:Web identity, dynamic
+lexicon loading, moderation, SQLite/Postgres, health/metrics. Open checks:
+its `.env.example` says `PDS_DB_BACKEND=postgres` rejects at startup
+pending chainlink #76, which contradicts the README’s “Postgres
+first-class” claim — verify before relying on HA; federation, firehose,
+and crawl are **off by default** (`PDS_FEDERATION_*`), so enable them for
+public ATProto; conformance against the official PDS test suite;
+strictness of `$type`/lexicon validation; loading custom `sh.fidom.*`
+lexicons; firehose cursor/backfill; backup/migration story. It is young
+and single-maintainer, so treat “production-ready” as a claim to test.
+
+**proto-blue — best candidate for the bridge SDK.**
+Source-level check: workspace `v0.3.3`, edition 2024, MSRV 1.88, dual
+MIT/Apache-2.0; the README’s `v0.3.0` text lags the workspace version.
+It covers the bridge’s ATProto primitives: validated DID/Handle/NSID/
+AT-URI/TID/Datetime newtypes, DAG-CBOR/CID, lexicon validation, MST/CAR,
+XRPC client, WebSocket/firehose, identity resolution, Agent/API, and
+OAuth. This is the layer `server/atproto/` needs for BR-1..BR-12; it is
+**not a PDS**. Open checks: the README states the project was generated
+entirely by Claude Opus 4.6 and is pre-1.0, so pin a revision, run the
+live-PDS tests, differential-test against the TypeScript reference, and
+review the generated types/custom-lexicon path. Also verify its OAuth
+client against the PDS you choose (DPoP/PAR behavior is PDS-specific).
+
+**skyauth — narrow OAuth client, not a bridge.**
+It specializes in OAuth 2.1 + DPoP + PAR + PKCE, SSRF/DNS-rebinding-safe
+identity discovery, and Axum/Actix/Tower integration. The linked
+`dollspace-gay/skyauth` is a fork at `v0.1.0` with 18 commits; the
+upstream `mike10010100/skyauth` is materially ahead (`v0.3` README, 126
+commits) and its `Cargo.toml` still points at the upstream repository.
+Prefer upstream if this crate is selected. Also reconcile the published
+crate name: the fork’s README badge points at `atproto-oauth`, while its
+`Cargo.toml` package is `skyauth`. Use it only if its OAuth/SSRF
+hardening is a hard requirement; otherwise use `proto-blue-oauth` so the
+bridge has one auth stack. Open checks: upstream divergence, maintenance,
+and whether its formal-verification claims cover the exact flows FIDOM
+uses. It does not implement repo/XRPC/PDS.
+
+**Correlated risk:** all three are from the same author, and Aurora-Locus
+depends on proto-blue. Treat this as a supply-chain review item: pin
+commits, vendor or lock dependencies, run the reference interop tests,
+and keep the bridge able to switch PDS/SDK implementations.
+
 ## 14. Recommendation
 
 1. **Do not implement a PDS, MST, CAR, or OAuth server from scratch.**
    Those are commodity protocol layers; the differentiated work is the
    FIDOM mapping, policy, queue, and sim boundary.
-2. **Phase 1 (Mode A):** run the official `bluesky-social/pds` (or a Rust
-   PDS if staying single-language) locally; implement the bridge in
-   `server/` with a Rust XRPC client (`atrium` or `rsky`/`atproto-crates`),
-   `listRecords` polling, and a SQLite queue. Ship BR-1..BR-10.
-3. **Phase 2 (Mode B):** add OAuth/DPoP, firehose/Jetstream ingestion,
+2. **Best single-language option:** evaluate **Aurora-Locus** as the
+   Mode A PDS and **proto-blue** as the bridge SDK (`proto-blue-syntax`,
+   `proto-blue-lexicon`, `proto-blue-repo`, `proto-blue-xrpc`,
+   `proto-blue-identity`, `proto-blue-oauth`). Pin versions/revisions
+   (`aurora-locus 0.10.x`, `proto-blue 0.3.3`) and run the official PDS
+   conformance/interop fixtures before committing. Start with
+   `listRecords` polling; add `proto-blue-ws` firehose later. For a
+   public PDS, explicitly turn on Aurora’s federation/firehose/crawl
+   flags and configure a real handle domain. Use **upstream**
+   `mike10010100/skyauth` only as an OAuth/SSRF reference unless it
+   cleanly replaces `proto-blue-oauth`; the `dollspace-gay` fork is
+   behind it.
+3. **Lowest-PDS-risk option:** run the official `bluesky-social/pds`
+   and keep `proto-blue` (or `atrium`/`rsky`) as the Rust bridge client.
+   If Aurora-Locus passes the conformance checks above, prefer it for a
+   single Rust stack.
+4. **Phase 2 (Mode B):** add OAuth/DPoP, firehose/Jetstream ingestion,
    identity rotation, moderation, and multi-PDS support. Re-evaluate
-   `rsky`/`atproto-crates` maturity then.
-4. **Use the reference TypeScript PDS as the test oracle** even if the
+   `rsky`, `atproto-crates`, and proto-blue maturity then.
+5. **Use the reference TypeScript PDS as the test oracle** even if the
    runtime PDS is Rust: run the same record fixtures through both and
    compare AT URIs/CIDs/validation behavior.
-5. **Keep the bridge out of the sim crate.** New dependencies, HTTP,
+6. **Keep the bridge out of the sim crate.** New dependencies, HTTP,
    clocks, and persistence live in `server/atproto/`; `sim/` gains only
    the inbound `Verb`, external-mail provenance, and a drainable outbound
    event.
