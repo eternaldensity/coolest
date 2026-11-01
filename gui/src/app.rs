@@ -128,6 +128,7 @@ pub struct Shell {
     palette_query: String,
     help_open: bool,
     net_sel: Option<HostId>,
+    reduced_motion: bool,
 }
 
 impl Shell {
@@ -268,6 +269,7 @@ impl Shell {
             palette_query: String::new(),
             help_open: false,
             net_sel: None,
+            reduced_motion: false,
         };
         shell.say_status();
         shell
@@ -823,6 +825,13 @@ impl Shell {
                 crate::theme::section(ui, "commands");
                 ui.label("eat · work 0-4 · code <res> · farm <res> · buy <item>");
                 ui.label("pickup/drop/equip/use <item> · deposit/withdraw <c> · sleep · revive");
+                crate::theme::section(ui, "presentation");
+                if ui
+                    .checkbox(&mut self.reduced_motion, "Reduced motion (disable fades)")
+                    .changed()
+                {
+                    crate::theme::set_motion(ctx, self.reduced_motion);
+                }
             });
         if !open {
             self.help_open = false;
@@ -1406,6 +1415,12 @@ impl Shell {
                         });
                     } else {
                         ui.label("Contract board:");
+                        if offers.is_empty() {
+                            crate::theme::label(
+                                ui,
+                                "No offers today — rest, work, or check mail.",
+                            );
+                        }
                         ui.horizontal_wrapped(|ui| {
                             for o in &offers {
                                 let left = o.deadline_tick.saturating_sub(tick);
@@ -1820,6 +1835,15 @@ impl Shell {
             Tab::Deck => {
                 crate::theme::heading(ui, "Deck — world host 1");
                 ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
+                if self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.progs.is_empty())
+                    .unwrap_or(true)
+                {
+                    crate::theme::label(ui, "Arena empty — select a free cell and load a program.");
+                }
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
@@ -2396,6 +2420,9 @@ impl Shell {
                 // Graph canvas: nodes on a transit-diagram strip, edges as
                 // Oldnet copper or Betanet laser lines. Controls stay below.
                 let node_ids = self.server.world.net.node_ids();
+                if node_ids.is_empty() {
+                    crate::theme::label(ui, "No known hosts — scan or connect first.");
+                }
                 let graph_size = egui::vec2(ui.available_width().min(720.0), 200.0);
                 let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::click());
                 let grect = gresp.rect;
@@ -2631,6 +2658,9 @@ impl Shell {
                     .unwrap_or(0);
                 // Veil sigil canvas: areas as rooms, exits as fine links.
                 let areas = self.server.world.veil.area_ids();
+                if areas.is_empty() {
+                    crate::theme::label(ui, "No hosted areas yet — the Veil is quiet.");
+                }
                 if !areas.is_empty() {
                     let size = egui::vec2(ui.available_width().min(560.0), 210.0);
                     let (vresp, vp) = ui.allocate_painter(size, egui::Sense::hover());

@@ -9,9 +9,10 @@
 > inspector hiding, risk-coloured contract rails, and clickable Net node
 > selection, and deeper inspector actions (NPC talk/attack, counter buys,
 > floor pickup, Deck scan/crack/clone/patch/sever, Net probe, Veil
-> take/consume). Still ahead: reduced-motion/contrast audit and a final
-> empty-state/help pass. Scope is the `gui/` shell; the deterministic sim
-> and server stay unchanged except for small interaction verbs.
+> take/consume). Final polish includes a reduced-motion toggle in the field
+> manual, brighter danger/faint contrast, and explicit empty states for
+> board/Deck/Net/Veil. Scope is the `gui/` shell; the deterministic sim and
+> server stay unchanged except for small interaction verbs.
 
 ## 1. Experience goals
 

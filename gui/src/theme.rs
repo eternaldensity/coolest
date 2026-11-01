@@ -11,12 +11,12 @@ pub const PANEL_ALT: Color32 = Color32::from_rgb(0x16, 0x1F, 0x29);
 pub const LINE: Color32 = Color32::from_rgb(0x26, 0x32, 0x3D);
 pub const TEXT: Color32 = Color32::from_rgb(0xE8, 0xED, 0xF2);
 pub const MUTED: Color32 = Color32::from_rgb(0x93, 0xA1, 0xAE);
-pub const FAINT: Color32 = Color32::from_rgb(0x5F, 0x6C, 0x78);
+pub const FAINT: Color32 = Color32::from_rgb(0x7C, 0x89, 0x96);
 pub const OLDNET: Color32 = Color32::from_rgb(0xF0, 0xA8, 0x30);
 pub const OLDNET_DIM: Color32 = Color32::from_rgb(0xB9, 0x7A, 0x22);
 pub const BETANET: Color32 = Color32::from_rgb(0x59, 0xD8, 0xE6);
 pub const MONEY: Color32 = Color32::from_rgb(0xE6, 0xB8, 0x5C);
-pub const DANGER: Color32 = Color32::from_rgb(0xE0, 0x5A, 0x5F);
+pub const DANGER: Color32 = Color32::from_rgb(0xF0, 0x6A, 0x6F);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x62, 0xC9, 0x8A);
 pub const VEIL: Color32 = Color32::from_rgb(0xA7, 0x8B, 0xFA);
 pub const PAPER: Color32 = Color32::from_rgb(0xE8, 0xE1, 0xD0);
@@ -88,6 +88,15 @@ pub fn apply(ctx: &egui::Context) {
     );
     ctx.set_style_of(egui::Theme::Dark, style.clone());
     ctx.set_style_of(egui::Theme::Light, style);
+}
+
+/// Honor the reduced-motion preference without a second theme.
+pub fn set_motion(ctx: &egui::Context, reduced: bool) {
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        let mut style = (*ctx.style_of(theme)).clone();
+        style.animation_time = if reduced { 0.0 } else { 0.2 };
+        ctx.set_style_of(theme, style);
+    }
 }
 
 pub fn section(ui: &mut egui::Ui, label: &str) {
