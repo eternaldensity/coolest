@@ -12,8 +12,11 @@
 > take/consume). Final polish includes a reduced-motion toggle in the field
 > manual, brighter danger/faint contrast, and explicit empty states for
 > board/Deck/Net/Veil, plus card hover previews with family, cost, target,
-> and effect text. Scope is the `gui/` shell; the deterministic sim and
-> server stay unchanged except for small interaction verbs.
+> and effect text. The shell now uses framed cards with accent headers for
+> every region, the Street map is the first centre-view surface, the
+> console has a stable height, and card headers name each system so a new
+> player can scan the screen. Scope is the `gui/` shell; the deterministic
+> sim and server stay unchanged except for small interaction verbs.
 
 ## 1. Experience goals
 
@@ -74,12 +77,12 @@ signal, red = danger/heat, gold = money, mint = recovery/success.
 | `line` | `#26323D` | borders, dividers |
 | `text` | `#E8EDF2` | primary text |
 | `muted` | `#93A1AE` | secondary text |
-| `faint` | `#5F6C78` | disabled/ambient |
+| `faint` | `#7C8996` | disabled/ambient |
 | `oldnet` | `#F0A830` | Oldnet, streetlight, decay |
 | `oldnet-dim` | `#B97A22` | Oldnet secondary |
 | `betanet` | `#59D8E6` | Betanet, authority, signal |
 | `money` | `#E6B85C` | cash, payouts, prices |
-| `danger` | `#E05A5F` | HP loss, heat, wanted |
+| `danger` | `#F06A6F` | HP loss, heat, wanted |
 | `success` | `#62C98A` | healing, completion |
 | `veil` | `#A78BFA` | Veil/mindpower |
 | `paper` | `#E8E1D0` | civic forms, light-mode accents |

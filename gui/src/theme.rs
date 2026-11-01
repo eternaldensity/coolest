@@ -99,8 +99,44 @@ pub fn set_motion(ctx: &egui::Context, reduced: bool) {
     }
 }
 
+/// A titled, framed block. The shell is a dense terminal, so every region
+/// gets an explicit edge and header; without them a new player cannot tell
+/// where one system ends and the next begins.
+pub fn card<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    accent: Color32,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    egui::Frame::new()
+        .fill(PANEL_ALT)
+        .stroke(Stroke::new(1.0, LINE))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .outer_margin(egui::Margin::symmetric(0, 4))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (bar, _) = ui.allocate_exact_size(egui::vec2(3.0, 12.0), egui::Sense::hover());
+                ui.painter().rect_filled(bar, 1.0, accent);
+                ui.add_space(2.0);
+                ui.label(
+                    RichText::new(title.to_uppercase())
+                        .size(10.0)
+                        .strong()
+                        .color(MUTED),
+                );
+            });
+            ui.add(egui::Separator::default().spacing(6.0));
+            add(ui)
+        })
+        .inner
+}
+
+/// A sub-heading inside a card. Keep it a real label so accesskit and the
+/// headless tests still see the text.
 pub fn section(ui: &mut egui::Ui, label: &str) {
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     ui.label(
         RichText::new(label.to_uppercase())
             .size(10.0)

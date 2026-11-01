@@ -578,23 +578,29 @@ impl Shell {
             Tab::Street => {
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 let (x, y) = self.street_sel.unwrap_or((here.x, here.y));
-                crate::theme::section(ui, "selection");
-                ui.label(
-                    egui::RichText::new(format!("Tile ({x},{y})"))
-                        .size(18.0)
-                        .strong()
-                        .color(crate::theme::TEXT),
-                );
                 let walkable = self
                     .server
                     .world
                     .section_at(here.sx, here.sy)
                     .map(|s| s.walkable(x, y))
                     .unwrap_or(true);
-                crate::theme::label(ui, if walkable { "walkable" } else { "blocked" });
-                if (x, y) == (here.x, here.y) {
-                    crate::theme::chip(ui, "you are here", crate::theme::BETANET);
-                }
+                crate::theme::card(ui, "selection", crate::theme::BETANET, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Tile ({x},{y})"))
+                            .size(18.0)
+                            .strong()
+                            .color(crate::theme::TEXT),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        crate::theme::label(ui, if walkable { "walkable" } else { "blocked" });
+                        if (x, y) == (here.x, here.y) {
+                            crate::theme::chip(ui, "you are here", crate::theme::BETANET);
+                        }
+                    });
+                    if walkable && (x, y) != (here.x, here.y) && ui.button("Walk here").clicked() {
+                        self.walk_to(x, y);
+                    }
+                });
                 let npc = self
                     .server
                     .world
@@ -608,19 +614,19 @@ impl Shell {
                             .map(|role| (EntityId(id), role))
                     });
                 if let Some((id, role)) = npc {
-                    crate::theme::section(ui, "npc");
-                    ui.label(format!("{role:?}"));
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button(format!("Talk to {role:?}")).clicked() {
-                            self.start_talk_with(role);
-                        }
-                        if ui.button("Attack target").clicked() {
-                            self.do_verb(Verb::Attack { target: id });
-                        }
+                    crate::theme::card(ui, "npc", crate::theme::SUCCESS, |ui| {
+                        ui.label(format!("{role:?}"));
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(format!("Talk to {role:?}")).clicked() {
+                                self.start_talk_with(role);
+                            }
+                            if ui.button("Attack target").clicked() {
+                                self.do_verb(Verb::Attack { target: id });
+                            }
+                        });
                     });
                 }
                 if let Some(shop) = self.server.world.shop_at(x, y) {
-                    crate::theme::section(ui, "counter");
                     let adjacent = (x as i16 - here.x as i16).abs() <= 1
                         && (y as i16 - here.y as i16).abs() <= 1;
                     let stock: Vec<(String, i64, u32)> = shop
@@ -628,226 +634,238 @@ impl Shell {
                         .iter()
                         .map(|(k, l)| (k.clone(), l.price_cents, l.qty))
                         .collect();
-                    for (item, price, qty) in stock {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{item} — {price}c"));
-                            crate::theme::chip(
-                                ui,
-                                format!("x{qty}"),
-                                if qty == 0 {
-                                    crate::theme::DANGER
-                                } else {
-                                    crate::theme::MUTED
-                                },
-                            );
-                            if adjacent && qty > 0 && ui.button(format!("Buy {item}")).clicked() {
-                                self.do_verb(Verb::Buy(item.clone()));
-                            }
-                        });
-                    }
-                    if !adjacent {
-                        crate::theme::label(ui, "stand next to the counter to buy");
-                    }
+                    crate::theme::card(ui, "counter", crate::theme::OLDNET, |ui| {
+                        for (item, price, qty) in stock {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{item} — {price}c"));
+                                crate::theme::chip(
+                                    ui,
+                                    format!("x{qty}"),
+                                    if qty == 0 {
+                                        crate::theme::DANGER
+                                    } else {
+                                        crate::theme::MUTED
+                                    },
+                                );
+                                if adjacent && qty > 0 && ui.button(format!("Buy {item}")).clicked()
+                                {
+                                    self.do_verb(Verb::Buy(item.clone()));
+                                }
+                            });
+                        }
+                        if !adjacent {
+                            crate::theme::label(ui, "stand next to the counter to buy");
+                        }
+                    });
                 }
                 let floor = self.server.world.floor_items_at(pos(x, y));
                 if !floor.is_empty() {
-                    crate::theme::section(ui, "on floor");
-                    for (item, qty) in floor {
-                        if ui.button(format!("Take {item} x{qty}")).clicked() {
-                            self.do_verb(Verb::Pickup { item });
-                        }
-                    }
-                }
-                if walkable && (x, y) != (here.x, here.y) && ui.button("Walk here").clicked() {
-                    self.walk_to(x, y);
-                }
-            }
-            Tab::Deck => {
-                crate::theme::section(ui, "selection");
-                let Some((x, y)) = self.sel else {
-                    crate::theme::label(ui, "Select a cell in the arena.");
-                    return;
-                };
-                ui.label(
-                    egui::RichText::new(format!("Cell ({x},{y})"))
-                        .size(18.0)
-                        .strong()
-                        .color(crate::theme::TEXT),
-                );
-                let prog = self
-                    .server
-                    .world
-                    .host(HostId(1))
-                    .and_then(|h| h.prog_at(x, y));
-                if let Some(prog) = prog {
-                    let host = self.server.world.host(HostId(1)).unwrap();
-                    let kind = host.program_kind(prog);
-                    if let Some(kind) = kind {
-                        crate::theme::chip(ui, kind.name(), crate::theme::BETANET);
-                    }
-                    if let Some(p) = host.progs.get(&prog.0) {
-                        ui.label(format!("cpu {} / segment · len {}", p.cpu_per_seg, p.len()));
-                        ui.label(format!("max len {}", p.max_len));
-                    }
-                    if let Some((makes, rate)) = host.maker_info(prog) {
-                        let names = makes
-                            .iter()
-                            .map(|r| format!("{} ×{}", r.name(), rate))
-                            .collect::<Vec<_>>()
-                            .join(" · ");
-                        ui.label(format!("producer: {names}"));
-                    }
-                    let mods = host.mods_of(prog);
-                    crate::theme::label(
-                        ui,
-                        if mods.is_empty() {
-                            "mods: none".to_string()
-                        } else {
-                            format!("mods: {mods:?}")
-                        },
-                    );
-                } else {
-                    crate::theme::label(ui, "Empty cell — load a program here.");
-                }
-                crate::theme::section(ui, "actions");
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Scan host").clicked() {
-                        self.do_verb(Verb::DeckScan);
-                    }
-                    if ui.button("Crack lock").clicked() {
-                        self.do_verb(Verb::DeckCrack);
-                    }
-                    if prog.is_some() {
-                        if ui.button("Clone program").clicked() {
-                            self.do_verb(Verb::DeckClone { x, y });
-                        }
-                        if ui.button("Sever segment").clicked() {
-                            self.do_verb(Verb::DeckOverwrite { x, y });
-                        }
-                    }
-                });
-                let vulns = self
-                    .server
-                    .world
-                    .host(HostId(1))
-                    .map(|h| h.vuln_ids())
-                    .unwrap_or_default();
-                if !vulns.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        for v in vulns {
-                            if ui.button(format!("Close {v}")).clicked() {
-                                self.do_verb(Verb::DeckPatch { vuln: v });
+                    crate::theme::card(ui, "on floor", crate::theme::MUTED, |ui| {
+                        for (item, qty) in floor {
+                            if ui.button(format!("Take {item} x{qty}")).clicked() {
+                                self.do_verb(Verb::Pickup { item });
                             }
                         }
                     });
                 }
             }
-            Tab::Net => {
-                let target = self.net_sel.unwrap_or(HostId(3));
-                crate::theme::section(ui, "node");
-                if let Some(n) = self.server.world.net.node(target) {
-                    let dark = self.server.world.power.is_host_dark(target);
+            Tab::Deck => {
+                let Some((x, y)) = self.sel else {
+                    crate::theme::card(ui, "selection", crate::theme::BETANET, |ui| {
+                        crate::theme::label(ui, "Select a cell in the arena.");
+                    });
+                    return;
+                };
+                let prog = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .and_then(|h| h.prog_at(x, y));
+                crate::theme::card(ui, "selection", crate::theme::BETANET, |ui| {
                     ui.label(
-                        egui::RichText::new(format!("{target:?}"))
+                        egui::RichText::new(format!("Cell ({x},{y})"))
                             .size(18.0)
                             .strong()
-                            .color(if dark {
-                                crate::theme::FAINT
-                            } else {
-                                crate::theme::BETANET
-                            }),
+                            .color(crate::theme::TEXT),
                     );
-                    ui.label(format!(
-                        "{} · {}mb · {}{}",
-                        match n.net {
-                            NetKind::Oldnet => "oldnet",
-                            NetKind::Betanet => "betanet",
-                        },
-                        n.modem_mbps,
-                        if n.gateway { "gateway" } else { "no gateway" },
-                        if dark { " · DARK" } else { "" }
-                    ));
-                    if ui.button(format!("Route 1→{}", target.0)).clicked() {
-                        match self.server.world.power.powered_route(
-                            &self.server.world.net,
-                            HostId(1),
-                            target,
-                        ) {
-                            Ok(r) => self.say(format!(
-                                "route {:?} {}ms toll {} thr {}",
-                                r.path,
-                                r.latency_ms,
-                                r.toll_cents,
-                                r.trace_threshold()
-                            )),
-                            Err(e) => self.say(format!("no route: {e}")),
+                    if let Some(prog) = prog {
+                        let host = self.server.world.host(HostId(1)).unwrap();
+                        let kind = host.program_kind(prog);
+                        if let Some(kind) = kind {
+                            crate::theme::chip(ui, kind.name(), crate::theme::BETANET);
                         }
+                        if let Some(p) = host.progs.get(&prog.0) {
+                            ui.label(format!("cpu {} / segment · len {}", p.cpu_per_seg, p.len()));
+                            ui.label(format!("max len {}", p.max_len));
+                        }
+                        if let Some((makes, rate)) = host.maker_info(prog) {
+                            let names = makes
+                                .iter()
+                                .map(|r| format!("{} ×{}", r.name(), rate))
+                                .collect::<Vec<_>>()
+                                .join(" · ");
+                            ui.label(format!("producer: {names}"));
+                        }
+                        let mods = host.mods_of(prog);
+                        crate::theme::label(
+                            ui,
+                            if mods.is_empty() {
+                                "mods: none".to_string()
+                            } else {
+                                format!("mods: {mods:?}")
+                            },
+                        );
+                    } else {
+                        crate::theme::label(ui, "Empty cell — load a program here.");
                     }
-                    if ui.button(format!("Probe {}", target.0)).clicked() {
-                        self.do_verb(Verb::DeckConnect { host: target });
+                });
+                crate::theme::card(ui, "actions", crate::theme::OLDNET, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Scan host").clicked() {
+                            self.do_verb(Verb::DeckScan);
+                        }
+                        if ui.button("Crack lock").clicked() {
+                            self.do_verb(Verb::DeckCrack);
+                        }
+                        if prog.is_some() {
+                            if ui.button("Clone program").clicked() {
+                                self.do_verb(Verb::DeckClone { x, y });
+                            }
+                            if ui.button("Sever segment").clicked() {
+                                self.do_verb(Verb::DeckOverwrite { x, y });
+                            }
+                        }
+                    });
+                    let vulns = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .map(|h| h.vuln_ids())
+                        .unwrap_or_default();
+                    if !vulns.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            for v in vulns {
+                                if ui.button(format!("Close {v}")).clicked() {
+                                    self.do_verb(Verb::DeckPatch { vuln: v });
+                                }
+                            }
+                        });
                     }
-                }
-                crate::theme::section(ui, "nodes");
-                for id in self.server.world.net.node_ids() {
-                    if let Some(n) = self.server.world.net.node(id) {
-                        let dark = self.server.world.power.is_host_dark(id);
+                });
+            }
+            Tab::Net => {
+                let target = self.net_sel.unwrap_or(HostId(3));
+                crate::theme::card(ui, "node", crate::theme::BETANET, |ui| {
+                    if let Some(n) = self.server.world.net.node(target) {
+                        let dark = self.server.world.power.is_host_dark(target);
+                        ui.label(
+                            egui::RichText::new(format!("{target:?}"))
+                                .size(18.0)
+                                .strong()
+                                .color(if dark {
+                                    crate::theme::FAINT
+                                } else {
+                                    crate::theme::BETANET
+                                }),
+                        );
                         ui.label(format!(
-                            "{id:?} · {} · {}mb{}{}",
+                            "{} · {}mb · {}{}",
                             match n.net {
                                 NetKind::Oldnet => "oldnet",
                                 NetKind::Betanet => "betanet",
                             },
                             n.modem_mbps,
-                            if n.gateway { " · gateway" } else { "" },
+                            if n.gateway { "gateway" } else { "no gateway" },
                             if dark { " · DARK" } else { "" }
                         ));
-                    }
-                }
-            }
-            Tab::Veil => {
-                crate::theme::section(ui, "helmet");
-                if let Some(area) = self.server.world.veil.area_of(self.actor) {
-                    let name = self
-                        .server
-                        .world
-                        .veil
-                        .area_info(area)
-                        .map(|(n, _, _)| n)
-                        .unwrap_or_else(|| "area".to_string());
-                    ui.label(format!("area: {name}"));
-                    let hazard = self.server.world.veil.area_hazard(area);
-                    if hazard > 0 {
-                        crate::theme::chip(ui, format!("hazard {hazard}"), crate::theme::DANGER);
-                    }
-                    if let Some((host, mp)) = self.server.world.veil.area_host(area) {
-                        ui.label(format!("host {host:?} · mp {mp}"));
-                    }
-                    let files = self.server.world.veil.area_files(area);
-                    crate::theme::section(ui, "mind-files");
-                    if files.is_empty() {
-                        crate::theme::label(ui, "no files in this area");
-                    } else {
-                        for f in files {
-                            ui.horizontal(|ui| {
-                                ui.label(&f);
-                                if ui.button(format!("Take {f}")).clicked() {
-                                    self.do_verb(Verb::VeilCarry { name: f.clone() });
-                                }
-                            });
-                        }
-                    }
-                    let carried = self.server.world.veil.carried_files(self.actor);
-                    if !carried.is_empty() {
-                        crate::theme::section(ui, "carried");
-                        for (i, f) in carried.iter().enumerate() {
-                            if ui.button(format!("Consume {f}")).clicked() {
-                                self.do_verb(Verb::VeilRead { index: i });
+                        if ui.button(format!("Route 1→{}", target.0)).clicked() {
+                            match self.server.world.power.powered_route(
+                                &self.server.world.net,
+                                HostId(1),
+                                target,
+                            ) {
+                                Ok(r) => self.say(format!(
+                                    "route {:?} {}ms toll {} thr {}",
+                                    r.path,
+                                    r.latency_ms,
+                                    r.toll_cents,
+                                    r.trace_threshold()
+                                )),
+                                Err(e) => self.say(format!("no route: {e}")),
                             }
                         }
+                        if ui.button(format!("Probe {}", target.0)).clicked() {
+                            self.do_verb(Verb::DeckConnect { host: target });
+                        }
                     }
-                } else {
-                    crate::theme::label(ui, "Not jacked in.");
-                }
+                });
+                crate::theme::card(ui, "nodes", crate::theme::MUTED, |ui| {
+                    for id in self.server.world.net.node_ids() {
+                        if let Some(n) = self.server.world.net.node(id) {
+                            let dark = self.server.world.power.is_host_dark(id);
+                            ui.label(format!(
+                                "{id:?} · {} · {}mb{}{}",
+                                match n.net {
+                                    NetKind::Oldnet => "oldnet",
+                                    NetKind::Betanet => "betanet",
+                                },
+                                n.modem_mbps,
+                                if n.gateway { " · gateway" } else { "" },
+                                if dark { " · DARK" } else { "" }
+                            ));
+                        }
+                    }
+                });
+            }
+            Tab::Veil => {
+                crate::theme::card(ui, "helmet", crate::theme::VEIL, |ui| {
+                    if let Some(area) = self.server.world.veil.area_of(self.actor) {
+                        let name = self
+                            .server
+                            .world
+                            .veil
+                            .area_info(area)
+                            .map(|(n, _, _)| n)
+                            .unwrap_or_else(|| "area".to_string());
+                        ui.label(format!("area: {name}"));
+                        let hazard = self.server.world.veil.area_hazard(area);
+                        if hazard > 0 {
+                            crate::theme::chip(
+                                ui,
+                                format!("hazard {hazard}"),
+                                crate::theme::DANGER,
+                            );
+                        }
+                        if let Some((host, mp)) = self.server.world.veil.area_host(area) {
+                            ui.label(format!("host {host:?} · mp {mp}"));
+                        }
+                        let files = self.server.world.veil.area_files(area);
+                        crate::theme::section(ui, "mind-files");
+                        if files.is_empty() {
+                            crate::theme::label(ui, "no files in this area");
+                        } else {
+                            for f in files {
+                                ui.horizontal(|ui| {
+                                    ui.label(&f);
+                                    if ui.button(format!("Take {f}")).clicked() {
+                                        self.do_verb(Verb::VeilCarry { name: f.clone() });
+                                    }
+                                });
+                            }
+                        }
+                        let carried = self.server.world.veil.carried_files(self.actor);
+                        if !carried.is_empty() {
+                            crate::theme::section(ui, "carried");
+                            for (i, f) in carried.iter().enumerate() {
+                                if ui.button(format!("Consume {f}")).clicked() {
+                                    self.do_verb(Verb::VeilRead { index: i });
+                                }
+                            }
+                        }
+                    } else {
+                        crate::theme::label(ui, "Not jacked in.");
+                    }
+                });
             }
         }
     }
@@ -1138,6 +1156,7 @@ impl Shell {
                             .color(crate::theme::MUTED),
                     );
                     let tick = self.server.world.tick;
+                    ui.separator();
                     ui.label(
                         egui::RichText::new(format!(
                             "Day {} {:02}:{:02}",
@@ -1149,6 +1168,7 @@ impl Shell {
                         .monospace()
                         .color(crate::theme::MUTED),
                     );
+                    ui.separator();
                     ui.label(
                         egui::RichText::new(format!("${:.2}", money as f64 / 100.0))
                             .size(12.0)
@@ -1178,6 +1198,11 @@ impl Shell {
                     ui.selectable_value(&mut self.tab, Tab::Net, "Net");
                     ui.selectable_value(&mut self.tab, Tab::Deck, "Deck");
                     ui.selectable_value(&mut self.tab, Tab::Street, "Street");
+                    ui.label(
+                        egui::RichText::new("VIEWS")
+                            .size(9.0)
+                            .color(crate::theme::FAINT),
+                    );
                 });
             });
         });
@@ -1188,150 +1213,148 @@ impl Shell {
             .show(ui, |ui| {
                 crate::theme::heading(ui, "Status");
                 if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
-                    crate::theme::section(ui, "survival");
-                    ui.label(status_line(food, mood, money));
-                    crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
-                    crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
-                    let bank = self
-                        .server
-                        .world
-                        .bank_balance(self.actor)
-                        .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
-                        .unwrap_or_else(|| "bank —".to_string());
-                    ui.label(bank);
-                    let units = sim::Res::ALL
-                        .iter()
-                        .map(|r| {
-                            format!("{} {}", r.name(), self.server.world.units(self.actor, *r))
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" · ");
-                    ui.label(format!("components: {units}"));
-                    ui.horizontal_wrapped(|ui| {
-                        for r in sim::Res::ALL {
-                            crate::theme::chip(
-                                ui,
-                                format!("{} {}", self.server.world.units(self.actor, r), r.name()),
-                                crate::theme::MUTED,
-                            );
-                        }
+                    crate::theme::card(ui, "survival", crate::theme::OLDNET, |ui| {
+                        ui.label(status_line(food, mood, money));
+                        crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
+                        crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
+                        let bank = self
+                            .server
+                            .world
+                            .bank_balance(self.actor)
+                            .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
+                            .unwrap_or_else(|| "bank —".to_string());
+                        ui.label(bank);
+                        let units = sim::Res::ALL
+                            .iter()
+                            .map(|r| {
+                                format!("{} {}", r.name(), self.server.world.units(self.actor, *r))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        ui.label(format!("components: {units}"));
                     });
                     // Body/health (design/06-07). The clinic is the only way
                     // back from a lethal blow in v0.4.
                     if let Some(h) = self.server.world.health_of(self.actor) {
-                        crate::theme::section(ui, "body");
-                        ui.label(format!("HP {}/{}", h.hp, h.max_hp));
-                        if !h.is_alive() && ui.button("Revive at clinic").clicked() {
-                            match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::Revive,
-                            }) {
-                                Ok(_) => self.say("revived at the clinic".to_string()),
-                                Err(e) => self.say(format!("revive failed: {e}")),
+                        crate::theme::card(ui, "body", crate::theme::SUCCESS, |ui| {
+                            ui.label(format!("HP {}/{}", h.hp, h.max_hp));
+                            if !h.is_alive() && ui.button("Revive at clinic").clicked() {
+                                match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::Revive,
+                                }) {
+                                    Ok(_) => self.say("revived at the clinic".to_string()),
+                                    Err(e) => self.say(format!("revive failed: {e}")),
+                                }
                             }
-                        }
-                    }
-                    if let Some(body) = self.server.world.body_of(self.actor) {
-                        ui.label(format!(
-                            "PV {} · DV {} · STR {} · DEX {}",
-                            body.pv, body.dv, body.str, body.dex
-                        ));
-                    }
-                    if let Some(mind) = self.server.world.mind_of(self.actor) {
-                        ui.label(format!(
-                            "mindpower {} · literacy {}",
-                            mind.mindpower, mind.comp_literacy
-                        ));
-                        crate::theme::meter(
-                            ui,
-                            "Mind",
-                            mind.mindpower as f32,
-                            20.0,
-                            crate::theme::VEIL,
-                        );
+                            if let Some(body) = self.server.world.body_of(self.actor) {
+                                ui.label(format!(
+                                    "PV {} · DV {} · STR {} · DEX {}",
+                                    body.pv, body.dv, body.str, body.dex
+                                ));
+                            }
+                            if let Some(mind) = self.server.world.mind_of(self.actor) {
+                                ui.label(format!(
+                                    "mindpower {} · literacy {}",
+                                    mind.mindpower, mind.comp_literacy
+                                ));
+                                crate::theme::meter(
+                                    ui,
+                                    "Mind",
+                                    mind.mindpower as f32,
+                                    20.0,
+                                    crate::theme::VEIL,
+                                );
+                            }
+                        });
                     }
                     // Heat (design/05): alignment/standing are pure functions of
                     // the record, so settling the fine clears both.
-                    crate::theme::section(ui, "conduct");
-                    let standing = self.server.world.standing();
-                    let mass = self.server.world.record_mass();
-                    ui.label(format!("standing {standing:?} · mass {mass:.1}"));
-                    ui.label(format!("alignment {:?}", self.server.world.alignment()));
-                    if mass > 0.0 {
-                        let cost = self.server.world.fine_cost();
-                        if ui
-                            .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
-                            .clicked()
-                        {
-                            match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::PayFine,
-                            }) {
-                                Ok(_) => self.say("fine paid — record settled".to_string()),
-                                Err(e) => self.say(format!("fine failed: {e}")),
+                    crate::theme::card(ui, "conduct", crate::theme::DANGER, |ui| {
+                        let standing = self.server.world.standing();
+                        let mass = self.server.world.record_mass();
+                        ui.label(format!("standing {standing:?} · mass {mass:.1}"));
+                        ui.label(format!("alignment {:?}", self.server.world.alignment()));
+                        if mass > 0.0 {
+                            let cost = self.server.world.fine_cost();
+                            if ui
+                                .button(format!("Pay fine (${:.2})", cost as f64 / 100.0))
+                                .clicked()
+                            {
+                                match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::PayFine,
+                                }) {
+                                    Ok(_) => self.say("fine paid — record settled".to_string()),
+                                    Err(e) => self.say(format!("fine failed: {e}")),
+                                }
                             }
                         }
-                    }
-                    // License to hack (design/05): 3 threat kills + clean record.
-                    let lic = self.server.world.license();
-                    ui.label(format!(
-                        "license: {} kills{}{}",
-                        lic.threat_kills,
-                        if lic.granted { " · HELD" } else { "" },
-                        if lic.revoked { " · revoked" } else { "" }
-                    ));
-                    if !lic.granted && ui.button("Apply license").clicked() {
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::ApplyLicense,
-                        }) {
-                            Ok(_) => self.say("license granted".to_string()),
-                            Err(e) => self.say(format!("license refused: {e}")),
+                        // License to hack (design/05): 3 threat kills + clean record.
+                        let lic = self.server.world.license();
+                        ui.label(format!(
+                            "license: {} kills{}{}",
+                            lic.threat_kills,
+                            if lic.granted { " · HELD" } else { "" },
+                            if lic.revoked { " · revoked" } else { "" }
+                        ));
+                        if !lic.granted && ui.button("Apply license").clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::ApplyLicense,
+                            }) {
+                                Ok(_) => self.say("license granted".to_string()),
+                                Err(e) => self.say(format!("license refused: {e}")),
+                            }
                         }
-                    }
-                    // Clan (design/05 M4b): dues + initiation, lifetime enemies.
-                    let in_clan = self.server.world.clans().is_member(1, self.actor);
-                    ui.label(if in_clan {
-                        "clan: member of 1"
-                    } else {
-                        "clan: none"
+                        // Clan (design/05 M4b): dues + initiation, lifetime enemies.
+                        let in_clan = self.server.world.clans().is_member(1, self.actor);
+                        ui.label(if in_clan {
+                            "clan: member of 1"
+                        } else {
+                            "clan: none"
+                        });
+                        if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::JoinClan { clan: 1 },
+                            }) {
+                                Ok(_) => self.say("joined clan 1".to_string()),
+                                Err(e) => self.say(format!("join refused: {e}")),
+                            }
+                        }
                     });
-                    if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::JoinClan { clan: 1 },
-                        }) {
-                            Ok(_) => self.say("joined clan 1".to_string()),
-                            Err(e) => self.say(format!("join refused: {e}")),
+                    crate::theme::card(ui, "session", crate::theme::MUTED, |ui| {
+                        ui.label(format!("rations {rations} tick {}", self.server.world.tick));
+                        let tick = self.server.world.tick;
+                        ui.label(format!(
+                            "Day {} {:02}:{:02}",
+                            tick / 1440 + 1,
+                            (tick / 60) % 24,
+                            tick % 60
+                        ));
+                        if food < 30 || mood < 30 {
+                            ui.label(
+                                egui::RichText::new("! needs low — Eat / Watch soon")
+                                    .color(egui::Color32::RED),
+                            );
                         }
-                    }
-                    ui.label(format!("rations {rations} tick {}", self.server.world.tick));
-                    let tick = self.server.world.tick;
-                    ui.label(format!(
-                        "Day {} {:02}:{:02}",
-                        tick / 1440 + 1,
-                        (tick / 60) % 24,
-                        tick % 60
-                    ));
-                    if food < 30 || mood < 30 {
+                        ui.add_space(2.0);
                         ui.label(
-                            egui::RichText::new("! needs low — Eat / Watch soon")
-                                .color(egui::Color32::RED),
+                            egui::RichText::new(format!(
+                                "Objective: {}",
+                                self.server.world.advise(self.actor)
+                            ))
+                            .strong(),
                         );
-                    }
+                        let cop = Timetable::cop_day();
+                        ui.label(format!(
+                            "cop 10:00 -> {:?}",
+                            cop_duty(&cop, 10, Standing::Clean)
+                        ));
+                    });
                 }
-                ui.label(
-                    egui::RichText::new(format!(
-                        "Objective: {}",
-                        self.server.world.advise(self.actor)
-                    ))
-                    .strong(),
-                );
-                let cop = Timetable::cop_day();
-                ui.label(format!(
-                    "cop 10:00 -> {:?}",
-                    cop_duty(&cop, 10, Standing::Clean)
-                ));
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         let msg = persist_save(&self.server);
@@ -1351,25 +1374,46 @@ impl Shell {
                 .show(ui, |ui| self.inspector(ui));
         }
 
-        egui::Panel::bottom("console").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut self.input)
-                        .hint_text("eat | work 0/1 | watch | help"),
-                );
-                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.run_command();
-                }
-            });
-            egui::ScrollArea::vertical()
-                .max_height(90.0)
-                .show(ui, |ui| {
-                    ui.label("Log");
-                    for line in self.log.iter().rev().take(8) {
-                        ui.label(line);
+        egui::Panel::bottom("console")
+            .exact_size(156.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("CONSOLE")
+                            .size(10.0)
+                            .strong()
+                            .color(crate::theme::MUTED),
+                    );
+                    ui.label(
+                        egui::RichText::new("type a command · Enter runs · F1 manual")
+                            .size(10.0)
+                            .color(crate::theme::FAINT),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.input)
+                            .hint_text("eat | work 0/1 | watch | help"),
+                    );
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.run_command();
                     }
                 });
-        });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(90.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("LOG")
+                                .size(10.0)
+                                .strong()
+                                .color(crate::theme::MUTED),
+                        );
+                        for line in self.log.iter().rev().take(8) {
+                            ui.label(line);
+                        }
+                    });
+            });
 
         egui::CentralPanel::default().show(ui, |ui| {
             let scroll_id = match self.tab {
@@ -1388,6 +1432,7 @@ impl Shell {
                 // Fallback labels keep verbs available if the file is corrupt
                 // (data tests pin the file, so this is belt-and-braces).
                 // (id, pay, (resource, need, have)) when the job is gated.
+                let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
                 type JobRow = (String, i64, Option<(sim::Res, u32, u32)>);
                 let mut jobs: Vec<JobRow> = self
                     .jobs
@@ -1405,342 +1450,54 @@ impl Shell {
                         .map(|i| (format!("job-{i}"), 60 + 60 * i as i64, None))
                         .collect();
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Eat").clicked() {
-                        self.do_verb(Verb::Eat);
-                    }
-                    if ui.button("Watch").clicked() {
-                        self.do_verb(Verb::Watch);
-                    }
-                    if ui.button("Sleep").clicked() {
-                        self.do_verb(Verb::Sleep);
-                    }
-                });
-                // Manual coding (design/10): one unit per click, at a mood
-                // cost. Producers come later; this is the slow path.
-                ui.horizontal(|ui| {
-                    ui.label("Code:");
-                    for res in sim::Res::ALL {
-                        let have = self.server.world.units(self.actor, res);
-                        if ui
-                            .button(format!("Code {} ({have})", res.name()))
-                            .clicked()
-                        {
-                            self.do_verb(Verb::Code { res });
-                        }
-                    }
-                });
-                // Job board on its own wrapped row: five long labels with
-                // live counts overflow a single row and push later controls
-                // outside the clip rect (their clicks are then ignored).
-                ui.horizontal_wrapped(|ui| {
-                    for (i, (id, pay, req)) in jobs.iter().enumerate() {
-                        let label = match req {
-                            Some((res, need, have)) => format!(
-                                "Work {i}: {id} {pay}c [{} {have}/{need}]",
-                                res.name()
-                            ),
-                            None => format!("Work {i}: {id} {pay}c"),
-                        };
-                        if ui.button(label).clicked() {
-                            self.do_verb(Verb::Work(i as u8));
-                        }
-                    }
-                });
-                // v0.5 contract board: local offers, one active contract.
-                let offers = self.server.world.offers().to_vec();
-                let active = self.server.world.active_contract().cloned();
-                let tick = self.server.world.tick;
-                if !offers.is_empty() || active.is_some() {
-                    ui.separator();
-                    if let Some(c) = &active {
-                        let left = c.deadline_tick.saturating_sub(tick);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(format!(
-                                "Contract: {} · {} · {left}t left · {} rep",
-                                c.title,
-                                c.kind.summary(),
-                                self.server.world.employer_reputation(c.employer)
-                            ));
-                            if ui.button("Deliver contract").clicked() {
-                                self.do_verb(Verb::DeliverContract);
-                            }
-                            if ui.button("Abandon contract").clicked() {
-                                self.do_verb(Verb::AbandonContract);
-                            }
-                        });
-                    } else {
-                        ui.label("Contract board:");
-                        if offers.is_empty() {
-                            crate::theme::label(
-                                ui,
-                                "No offers today — rest, work, or check mail.",
-                            );
-                        }
-                        ui.horizontal_wrapped(|ui| {
-                            for o in &offers {
-                                let left = o.deadline_tick.saturating_sub(tick);
-                                let label = format!(
-                                    "Accept: {} · {}c · {} · {} left",
-                                    o.title,
-                                    o.payout_cents,
-                                    o.kind.summary(),
-                                    left
-                                );
-                                let color = match o.risk.name() {
-                                    "illegal" | "combat" => crate::theme::DANGER,
-                                    "grey" => crate::theme::VEIL,
-                                    _ => crate::theme::OLDNET,
-                                };
-                                if ui
-                                    .add_sized(
-                                        [250.0, 30.0],
-                                        egui::Button::new(
-                                            egui::RichText::new(label.clone())
-                                                .size(11.0)
-                                                .color(color),
-                                        )
-                                        .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
-                                        .stroke(egui::Stroke::new(1.0, color)),
-                                    )
-                                    .on_hover_text(format!(
-                                        "{} · {} · {}",
-                                        o.title,
-                                        o.kind.summary(),
-                                        o.risk.name()
-                                    ))
-                                    .clicked()
-                                {
-                                    self.do_verb(Verb::AcceptOffer { offer: o.id });
-                                }
-                            }
-                        });
-                    }
-                }
-                ui.label("@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy");
-                let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
-                // Pack (design/07): carried stacks, worn gear, and items on
-                // this tile. Buttons stay in one wrapped row to avoid egui's
-                // silent clip/click overflow.
-                let inv = self
-                    .server
-                    .world
-                    .inventory(self.actor)
-                    .cloned()
-                    .unwrap_or_default();
-                let items = self.server.world.item_table().clone();
-                let cap = self
-                    .server
-                    .world
-                    .body_of(self.actor)
-                    .map(|b| b.carry_grams())
-                    .unwrap_or(0);
-                let worn = inv.worn();
-                let carried = inv.carried();
-                if !carried.is_empty() || !worn.is_empty() {
-                    let weight = inv.total_weight(&items);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(format!("Pack {weight}/{cap}g"));
-                        for (slot, id) in &worn {
-                            let name = items.get(id).map(|d| d.name.as_str()).unwrap_or(id);
-                            ui.label(format!("{slot:?}: {name}"));
-                        }
-                        for (id, qty) in &carried {
-                            let def = items.get(id);
-                            let name = def.map(|d| d.name.as_str()).unwrap_or(id);
-                            ui.label(format!("{name} x{qty}"));
-                            if let Some(def) = def {
-                                if def.is_gear() && ui.button(format!("Equip {name}")).clicked() {
-                                    self.do_verb(Verb::Equip { item: id.clone() });
-                                }
-                                if def.effect.is_some() && ui.button(format!("Use {name}")).clicked()
-                                {
-                                    self.do_verb(Verb::Use { item: id.clone() });
-                                }
-                            }
-                            if ui.button(format!("Drop {name}")).clicked() {
-                                self.do_verb(Verb::Drop { item: id.clone() });
-                            }
-                        }
-                    });
-                }
-                let floor = self.server.world.floor_items_at(here);
-                if !floor.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("On floor:");
-                        for (id, qty) in floor {
-                            let name = items.get(&id).map(|d| d.name.as_str()).unwrap_or(&id);
-                            if ui.button(format!("Pick up {name} x{qty}")).clicked() {
-                                self.do_verb(Verb::Pickup { item: id.clone() });
-                            }
-                        }
-                    });
-                }
-                // Street combat (design/07): attack an adjacent NPC, or
-                // surrender to an adjacent cop while Wanted.
-                let targets = self.nearby_npcs();
-                if !targets.is_empty() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Attack:");
-                        for (id, role) in &targets {
-                            if ui.button(format!("Attack {role:?}")).clicked() {
-                                self.do_verb(Verb::Attack {
-                                    target: EntityId(*id),
-                                });
-                            }
-                        }
-                        if self.server.world.standing() == Standing::Wanted
-                            && self.server.world.adjacent_cop(self.actor).is_some()
-                            && ui.button("Surrender").clicked()
-                        {
-                            self.do_verb(Verb::Surrender);
-                        }
-                    });
-                }
-                // Mail (design/03-04): read your inbox, craft a Mailer+,
-                // and trojan a nearby NPC. Trojans land when they open it.
-                let inbox = self.server.world.inbox(self.actor).len();
-                let has_plus = self.server.world.has_mailer_plus();
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("Mail — inbox {inbox}"));
-                    if inbox > 0 && ui.button("Open mail").clicked() {
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::OpenMail { index: 0 },
-                        }) {
-                            Ok(_) => self.say("mail opened".to_string()),
-                            Err(e) => self.say(format!("open failed: {e}")),
-                        }
-                    }
-                    if !has_plus && ui.button("Craft Mailer+ (3 algo)").clicked() {
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::CraftMailerPlus,
-                        }) {
-                            Ok(_) => self.say("Mailer+ crafted — trojans unlocked".to_string()),
-                            Err(e) => self.say(format!("craft failed: {e}")),
-                        }
-                    }
-                    if has_plus {
-                        for (id, role) in self.nearby_npcs() {
-                            if ui.button(format!("Trojan {role:?}")).clicked() {
-                                match self.server.apply_one(Intent {
-                                    actor: self.actor,
-                                    verb: Verb::SendTrojan { to: EntityId(id) },
-                                }) {
-                                    Ok(_) => {
-                                        self.say(format!("trojan mailed to {id}"))
-                                    }
-                                    Err(e) => self.say(format!("trojan failed: {e}")),
-                                }
-                            }
-                        }
-                    }
-                });
-                // Snapshot world reads up front: UI callbacks below need &mut self.
-                // Counter shows within reach (counter serves adjacent tiles).
-                let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
-                let counter: Vec<(String, i64, u32)> = self.server.world
-                    .shop_near_at(here.x, here.y)
-                    .map(|shop| shop.stock.iter().map(|(k, l)| (k.clone(), l.price_cents, l.qty)).collect())
-                    .unwrap_or_default();
-                let npcs = self.server.world.npc_positions();
-                crate::theme::heading(ui, format!("Street — section ({}, {})", here.sx, here.sy));
-                // Talk panel.
-                if self.talking.is_none() {
-                    let mut started = false;
+                crate::theme::card(ui, "daily actions", crate::theme::BETANET, |ui| {
                     ui.horizontal(|ui| {
-                        for (id, role) in self.nearby_npcs() {
-                            if ui.button(format!("Talk {role:?}")).clicked() {
-                                if let Some(dlg) = self.dialogue_for(role) {
-                                    let t = sim::Conversation::new(dlg, None);
-                                    self.say(format!("[{id}] {}", t.text()));
-                                    self.talking = Some(t);
-                                    started = true;
-                                }
-                            }
-                            let _ = started;
+                        if ui.button("Eat").clicked() {
+                            self.do_verb(Verb::Eat);
+                        }
+                        if ui.button("Watch").clicked() {
+                            self.do_verb(Verb::Watch);
+                        }
+                        if ui.button("Sleep").clicked() {
+                            self.do_verb(Verb::Sleep);
                         }
                     });
-                } else {
-                    // Pick first, then act: the option borrow must end before say().
-                    enum Pick { Leave, Choice(usize), None }
-                    let pick = {
-                        let t = self.talking.as_ref().unwrap();
-                        ui.label(t.text());
-                        let mut picked = Pick::None;
-                        for (i, opt) in t.options().iter().enumerate() {
-                            if ui.button(&opt.label).clicked() {
-                                picked = Pick::Choice(i);
+                    // Manual coding (design/10): one unit per click, at a mood
+                    // cost. Producers come later; this is the slow path.
+                    ui.horizontal(|ui| {
+                        ui.label("Code:");
+                        for res in sim::Res::ALL {
+                            let have = self.server.world.units(self.actor, res);
+                            if ui
+                                .button(format!("Code {} ({have})", res.name()))
+                                .clicked()
+                            {
+                                self.do_verb(Verb::Code { res });
                             }
                         }
-                        if ui.button("Leave").clicked() {
-                            picked = Pick::Leave;
-                        }
-                        picked
-                    };
-                    match pick {
-                        Pick::Leave => self.talking = None,
-                        Pick::None => {}
-                        Pick::Choice(i) => {
-                            let outcome = {
-                                let t = self.talking.as_mut().unwrap();
-                                match t.choose(i) {
-                                    Ok(finished) => {
-                                        let fx = t.last_effect.clone();
-                                        let end = finished || t.options().is_empty();
-                                        let text = if end { String::new() } else { t.text().to_string() };
-                                        Ok((fx, end, text))
-                                    }
-                                    Err(e) => Err(format!("huh: {e}")),
-                                }
-                            };
-                            match outcome {
-                                Ok((fx, end, text)) => {
-                                    // Narrate raw effect tags only when the exchange
-                                    // ends on them; transitions speak for themselves.
-                                    if end {
-                                        if let Some(fx) = fx {
-                                            self.say(format!("* {fx} *"));
-                                        }
-                                        self.talking = None;
-                                    } else {
-                                        self.say(text);
-                                    }
-                                }
-                                Err(msg) => self.say(msg),
-                            }
-                        }
-                    }
-                }
-                // Trade panel: counter sale when standing on a shop tile.
-                if !counter.is_empty() {
-                    ui.separator();
-                    ui.label("Counter — type buy <item> or click:");
-                    for (item, price, qty) in counter {
-                        ui.horizontal(|ui| {
-                            ui.label(format!(
-                                "{} — {}c ({} left){}",
-                                item,
-                                price,
-                                qty,
-                                item_blurb(&item)
-                            ));
-                            if ui.button("Buy").clicked() {
-                                self.do_verb(Verb::Buy(item.clone()));
-                            }
-                        });
-                    }
-                    ui.separator();
-                }
+                    });
+                });
                 let (ax, ay) = (here.x, here.y);
                 let shop_tiles = self.server.world.shop_positions();
-                let side = ui.available_width().clamp(320.0, 680.0);
+                crate::theme::card(
+                    ui,
+                    &format!("street — section ({}, {})", here.sx, here.sy),
+                    crate::theme::BETANET,
+                    |ui| {
+                let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
+                let npcs = self.server.world.npc_positions();
+                crate::theme::label(
+                    ui,
+                    "@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy",
+                );
+                // Let the map grow into wide windows and centre it in the
+                // card, so the primary spatial surface is the visual anchor.
+                let side = ui.available_width().clamp(320.0, 860.0);
                 let ts = (side / 16.0).floor();
                 let map_size = egui::vec2(16.0 * ts, 16.0 * ts);
-                let (resp, painter) =
-                    ui.allocate_painter(map_size, egui::Sense::click());
-                let rect = resp.rect;
+                let canvas = egui::vec2(ui.available_width(), map_size.y);
+                let (resp, painter) = ui.allocate_painter(canvas, egui::Sense::click());
+                let rect = egui::Rect::from_center_size(resp.rect.center(), map_size);
                 for y in 0..16u8 {
                     for x in 0..16u8 {
                         let r = egui::Rect::from_min_size(
@@ -1888,10 +1645,334 @@ impl Shell {
                             .color(crate::theme::FAINT),
                     );
                 }
+                    },
+                );
+                // Job board on its own wrapped row: five long labels with
+                // live counts overflow a single row and push later controls
+                // outside the clip rect (their clicks are then ignored).
+                crate::theme::card(ui, "work board", crate::theme::OLDNET, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (i, (id, pay, req)) in jobs.iter().enumerate() {
+                            let label = match req {
+                                Some((res, need, have)) => format!(
+                                    "Work {i}: {id} {pay}c [{} {have}/{need}]",
+                                    res.name()
+                                ),
+                                None => format!("Work {i}: {id} {pay}c"),
+                            };
+                            if ui.button(label).clicked() {
+                                self.do_verb(Verb::Work(i as u8));
+                            }
+                        }
+                    });
+                });
+                // v0.5 contract board: local offers, one active contract.
+                let offers = self.server.world.offers().to_vec();
+                let active = self.server.world.active_contract().cloned();
+                let tick = self.server.world.tick;
+                if !offers.is_empty() || active.is_some() {
+                    crate::theme::card(ui, "contracts", crate::theme::MONEY, |ui| {
+                        if let Some(c) = &active {
+                            let left = c.deadline_tick.saturating_sub(tick);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(format!(
+                                    "Contract: {} · {} · {left}t left · {} rep",
+                                    c.title,
+                                    c.kind.summary(),
+                                    self.server.world.employer_reputation(c.employer)
+                                ));
+                                if ui.button("Deliver contract").clicked() {
+                                    self.do_verb(Verb::DeliverContract);
+                                }
+                                if ui.button("Abandon contract").clicked() {
+                                    self.do_verb(Verb::AbandonContract);
+                                }
+                            });
+                        } else {
+                            if offers.is_empty() {
+                                crate::theme::label(
+                                    ui,
+                                    "No offers today — rest, work, or check mail.",
+                                );
+                            } else {
+                                crate::theme::label(
+                                    ui,
+                                    "Accept one offer. Delivery pays the escrow.",
+                                );
+                            }
+                            ui.horizontal_wrapped(|ui| {
+                                for o in &offers {
+                                    let left = o.deadline_tick.saturating_sub(tick);
+                                    let label = format!(
+                                        "Accept: {} · {}c · {} · {} left",
+                                        o.title,
+                                        o.payout_cents,
+                                        o.kind.summary(),
+                                        left
+                                    );
+                                    let color = match o.risk.name() {
+                                        "illegal" | "combat" => crate::theme::DANGER,
+                                        "grey" => crate::theme::VEIL,
+                                        _ => crate::theme::OLDNET,
+                                    };
+                                    if ui
+                                        .add_sized(
+                                            [250.0, 30.0],
+                                            egui::Button::new(
+                                                egui::RichText::new(label.clone())
+                                                    .size(11.0)
+                                                    .color(color),
+                                            )
+                                            .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
+                                            .stroke(egui::Stroke::new(1.0, color)),
+                                        )
+                                        .on_hover_text(format!(
+                                            "{} · {} · {}",
+                                            o.title,
+                                            o.kind.summary(),
+                                            o.risk.name()
+                                        ))
+                                        .clicked()
+                                    {
+                                        self.do_verb(Verb::AcceptOffer { offer: o.id });
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+                // Pack (design/07): carried stacks, worn gear, and items on
+                // this tile. Buttons stay in one wrapped row to avoid egui's
+                // silent clip/click overflow.
+                let inv = self
+                    .server
+                    .world
+                    .inventory(self.actor)
+                    .cloned()
+                    .unwrap_or_default();
+                let items = self.server.world.item_table().clone();
+                let cap = self
+                    .server
+                    .world
+                    .body_of(self.actor)
+                    .map(|b| b.carry_grams())
+                    .unwrap_or(0);
+                let worn = inv.worn();
+                let carried = inv.carried();
+                let floor = self.server.world.floor_items_at(here);
+                if !carried.is_empty() || !worn.is_empty() || !floor.is_empty() {
+                    crate::theme::card(ui, "pack", crate::theme::MUTED, |ui| {
+                        if !carried.is_empty() || !worn.is_empty() {
+                            let weight = inv.total_weight(&items);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(format!("Pack {weight}/{cap}g"));
+                                for (slot, id) in &worn {
+                                    let name =
+                                        items.get(id).map(|d| d.name.as_str()).unwrap_or(id);
+                                    ui.label(format!("{slot:?}: {name}"));
+                                }
+                                for (id, qty) in &carried {
+                                    let def = items.get(id);
+                                    let name = def.map(|d| d.name.as_str()).unwrap_or(id);
+                                    ui.label(format!("{name} x{qty}"));
+                                    if let Some(def) = def {
+                                        if def.is_gear()
+                                            && ui.button(format!("Equip {name}")).clicked()
+                                        {
+                                            self.do_verb(Verb::Equip { item: id.clone() });
+                                        }
+                                        if def.effect.is_some()
+                                            && ui.button(format!("Use {name}")).clicked()
+                                        {
+                                            self.do_verb(Verb::Use { item: id.clone() });
+                                        }
+                                    }
+                                    if ui.button(format!("Drop {name}")).clicked() {
+                                        self.do_verb(Verb::Drop { item: id.clone() });
+                                    }
+                                }
+                            });
+                        }
+                        if !floor.is_empty() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("On floor:");
+                                for (id, qty) in floor {
+                                    let name =
+                                        items.get(&id).map(|d| d.name.as_str()).unwrap_or(&id);
+                                    if ui.button(format!("Pick up {name} x{qty}")).clicked() {
+                                        self.do_verb(Verb::Pickup { item: id.clone() });
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+                // Street combat (design/07): attack an adjacent NPC, or
+                // surrender to an adjacent cop while Wanted.
+                let targets = self.nearby_npcs();
+                if !targets.is_empty() {
+                    crate::theme::card(ui, "people nearby", crate::theme::DANGER, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Talk:");
+                            for (id, role) in &targets {
+                                if ui.button(format!("Talk {role:?}")).clicked() {
+                                    if let Some(dlg) = self.dialogue_for(*role) {
+                                        let t = sim::Conversation::new(dlg, None);
+                                        self.say(format!("[{id}] {}", t.text()));
+                                        self.talking = Some(t);
+                                    }
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Attack:");
+                            for (id, role) in &targets {
+                                if ui.button(format!("Attack {role:?}")).clicked() {
+                                    self.do_verb(Verb::Attack {
+                                        target: EntityId(*id),
+                                    });
+                                }
+                            }
+                            if self.server.world.standing() == Standing::Wanted
+                                && self.server.world.adjacent_cop(self.actor).is_some()
+                                && ui.button("Surrender").clicked()
+                            {
+                                self.do_verb(Verb::Surrender);
+                            }
+                        });
+                    });
+                }
+                // Mail (design/03-04): read your inbox, craft a Mailer+,
+                // and trojan a nearby NPC. Trojans land when they open it.
+                let inbox = self.server.world.inbox(self.actor).len();
+                let has_plus = self.server.world.has_mailer_plus();
+                crate::theme::card(ui, "mail", crate::theme::BETANET, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("Mail — inbox {inbox}"));
+                    if inbox > 0 && ui.button("Open mail").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::OpenMail { index: 0 },
+                        }) {
+                            Ok(_) => self.say("mail opened".to_string()),
+                            Err(e) => self.say(format!("open failed: {e}")),
+                        }
+                    }
+                    if !has_plus && ui.button("Craft Mailer+ (3 algo)").clicked() {
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::CraftMailerPlus,
+                        }) {
+                            Ok(_) => self.say("Mailer+ crafted — trojans unlocked".to_string()),
+                            Err(e) => self.say(format!("craft failed: {e}")),
+                        }
+                    }
+                    if has_plus {
+                        for (id, role) in self.nearby_npcs() {
+                            if ui.button(format!("Trojan {role:?}")).clicked() {
+                                match self.server.apply_one(Intent {
+                                    actor: self.actor,
+                                    verb: Verb::SendTrojan { to: EntityId(id) },
+                                }) {
+                                    Ok(_) => {
+                                        self.say(format!("trojan mailed to {id}"))
+                                    }
+                                    Err(e) => self.say(format!("trojan failed: {e}")),
+                                }
+                            }
+                        }
+                    }
+                    });
+                });
+                // Snapshot world reads up front: UI callbacks below need &mut self.
+                // Counter shows within reach (counter serves adjacent tiles).
+                let counter: Vec<(String, i64, u32)> = self.server.world
+                    .shop_near_at(here.x, here.y)
+                    .map(|shop| shop.stock.iter().map(|(k, l)| (k.clone(), l.price_cents, l.qty)).collect())
+                    .unwrap_or_default();
+                // Conversation card: only while a dialogue is open, so the
+                // street stays a short scan and talk/attack live together.
+                if self.talking.is_some() {
+                    crate::theme::card(ui, "conversation", crate::theme::VEIL, |ui| {
+                    // Pick first, then act: the option borrow must end before say().
+                    enum Pick { Leave, Choice(usize), None }
+                    let pick = {
+                        let t = self.talking.as_ref().unwrap();
+                        ui.label(t.text());
+                        let mut picked = Pick::None;
+                        for (i, opt) in t.options().iter().enumerate() {
+                            if ui.button(&opt.label).clicked() {
+                                picked = Pick::Choice(i);
+                            }
+                        }
+                        if ui.button("Leave").clicked() {
+                            picked = Pick::Leave;
+                        }
+                        picked
+                    };
+                    match pick {
+                        Pick::Leave => self.talking = None,
+                        Pick::None => {}
+                        Pick::Choice(i) => {
+                            let outcome = {
+                                let t = self.talking.as_mut().unwrap();
+                                match t.choose(i) {
+                                    Ok(finished) => {
+                                        let fx = t.last_effect.clone();
+                                        let end = finished || t.options().is_empty();
+                                        let text = if end { String::new() } else { t.text().to_string() };
+                                        Ok((fx, end, text))
+                                    }
+                                    Err(e) => Err(format!("huh: {e}")),
+                                }
+                            };
+                            match outcome {
+                                Ok((fx, end, text)) => {
+                                    // Narrate raw effect tags only when the exchange
+                                    // ends on them; transitions speak for themselves.
+                                    if end {
+                                        if let Some(fx) = fx {
+                                            self.say(format!("* {fx} *"));
+                                        }
+                                        self.talking = None;
+                                    } else {
+                                        self.say(text);
+                                    }
+                                }
+                                Err(msg) => self.say(msg),
+                            }
+                        }
+                    }
+                    });
+                }
+                // Trade panel: counter sale when standing on a shop tile.
+                if !counter.is_empty() {
+                    crate::theme::card(ui, "counter", crate::theme::OLDNET, |ui| {
+                        ui.label("Counter — type buy <item> or click:");
+                        for (item, price, qty) in counter {
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "{} — {}c ({} left){}",
+                                    item,
+                                    price,
+                                    qty,
+                                    item_blurb(&item)
+                                ));
+                                if ui.button("Buy").clicked() {
+                                    self.do_verb(Verb::Buy(item.clone()));
+                                }
+                            });
+                        }
+                    });
+                }
             }
             Tab::Deck => {
                 crate::theme::heading(ui, "Deck — world host 1");
                 ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
+                // Snapshot arena state up front: buttons below need &mut self.
+                // Producers get their own glyph + per-resource color so the
+                // economy loop is visible in the arena, not just in numbers.
+                crate::theme::card(ui, "host", crate::theme::OLDNET, |ui| {
                 if self
                     .server
                     .world
@@ -1901,9 +1982,6 @@ impl Shell {
                 {
                     crate::theme::label(ui, "Arena empty — select a free cell and load a program.");
                 }
-                // Snapshot arena state up front: buttons below need &mut self.
-                // Producers get their own glyph + per-resource color so the
-                // economy loop is visible in the arena, not just in numbers.
                 if let Some(h) = self.server.world.host(HostId(1)) {
                     ui.horizontal_wrapped(|ui| {
                         crate::theme::chip(
@@ -1951,6 +2029,7 @@ impl Shell {
                         );
                     }
                 }
+                });
                 let (heads, tails, head_kinds, prod, cpu, total) = match self.server.world.host(HostId(1)) {
                     Some(h) => {
                         let mut heads = std::collections::BTreeMap::new();
@@ -1985,6 +2064,7 @@ impl Shell {
                         0,
                     ),
                 };
+                crate::theme::card(ui, "arena", crate::theme::BETANET, |ui| {
                 egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
                     for y in 0..8u8 {
                         for x in 0..12u8 {
@@ -2078,9 +2158,11 @@ impl Shell {
                         ui.label(format!("selected: {} @({x},{y})", kind.name()));
                     }
                 }
+                });
                 // Exploit/patch sit above the loadout so they stay in the
                 // visible scroll region and read as the host's immediate
                 // security surface.
+                crate::theme::card(ui, "security", crate::theme::DANGER, |ui| {
                 let vulns = self
                     .server
                     .world
@@ -2136,6 +2218,8 @@ impl Shell {
                         }
                     }
                 });
+                });
+                crate::theme::card(ui, "loadout", crate::theme::SUCCESS, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
                         let (msg, beat) = match self.sel {
@@ -2214,7 +2298,9 @@ impl Shell {
                         }
                     }
                 });
+                });
                 // Kind actions. They refuse cleanly without the matching program.
+                crate::theme::card(ui, "kind actions", crate::theme::VEIL, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Kind actions:");
                     if ui.button("Scan").clicked() {
@@ -2269,8 +2355,10 @@ impl Shell {
                         }
                     }
                 });
+                });
                 // Producers (design/10): deploy a maker on the selected cell.
                 // It then yields free units every act.
+                crate::theme::card(ui, "producers", crate::theme::OLDNET, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Farm @selected:");
                     for res in sim::Res::ALL {
@@ -2315,9 +2403,10 @@ impl Shell {
                         }
                     }
                 });
+                });
                 // Card hand (design/03): colour by family, keep the cost in
                 // the label so keyboard/accesskit users still see it.
-                crate::theme::section(ui, "cards @selected");
+                crate::theme::card(ui, "cards @selected", crate::theme::MONEY, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     for card in sim::Host::implemented_cards() {
                         let (family, color) = card_family(card);
@@ -2403,7 +2492,9 @@ impl Shell {
                         }
                     }
                 }
+                });
                 // Get out clean (design/03): scrub your trail on the rig.
+                crate::theme::card(ui, "trail", crate::theme::DANGER, |ui| {
                 ui.horizontal(|ui| {
                     let logs = self
                         .server
@@ -2422,9 +2513,11 @@ impl Shell {
                         }
                     }
                 });
+                });
                 // Persistent abilities (design/03 Program.mods): build one
                 // into your program on the selected cell; it fires on every
                 // exchange rather than once.
+                crate::theme::card(ui, "mods @selected", crate::theme::BETANET, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Mods @selected:");
                     for card in ["tank", "plating", "reflect", "splash", "extra"] {
@@ -2453,7 +2546,9 @@ impl Shell {
                         }
                     }
                 });
+                });
                 // Producer yield summary: what the farm loop delivers.
+                crate::theme::card(ui, "yield", crate::theme::OLDNET, |ui| {
                 let have = sim::Res::ALL
                     .iter()
                     .map(|r| format!("{} {}", r.name(), self.server.world.units(self.actor, *r)))
@@ -2498,6 +2593,7 @@ impl Shell {
                         }
                     ));
                 }
+                });
             }
             Tab::Net => {
                 crate::theme::heading(ui, "Net — world graph (Oldnet/Betanet)");
@@ -2508,6 +2604,7 @@ impl Shell {
                 if node_ids.is_empty() {
                     crate::theme::label(ui, "No known hosts — scan or connect first.");
                 }
+                crate::theme::card(ui, "topology", crate::theme::BETANET, |ui| {
                 let graph_size = egui::vec2(ui.available_width().min(720.0), 200.0);
                 let (gresp, gp) = ui.allocate_painter(graph_size, egui::Sense::click());
                 let grect = gresp.rect;
@@ -2613,7 +2710,9 @@ impl Shell {
                         }
                     }
                 }
+                });
                 // Graph snapshot: nodes (with net kind + power state) and links.
+                crate::theme::card(ui, "nodes & links", crate::theme::MUTED, |ui| {
                 let mut lines: Vec<String> = Vec::new();
                 for id in &node_ids {
                     if let Some(n) = self.server.world.net.node(*id) {
@@ -2655,6 +2754,8 @@ impl Shell {
                 for line in &lines {
                     ui.label(line);
                 }
+                });
+                crate::theme::card(ui, "net actions", crate::theme::OLDNET, |ui| {
                 if ui.button("Route 1→3").clicked() {
                     // Blackout-aware: routing avoids hosts in dark sections.
                     match self
@@ -2732,6 +2833,7 @@ impl Shell {
                         }
                     }
                 });
+                });
             }
             Tab::Veil => {
                 crate::theme::heading(ui, "Veil — helmet space");
@@ -2743,6 +2845,7 @@ impl Shell {
                     .unwrap_or(0);
                 // Veil sigil canvas: areas as rooms, exits as fine links.
                 let areas = self.server.world.veil.area_ids();
+                crate::theme::card(ui, "areas", crate::theme::VEIL, |ui| {
                 if areas.is_empty() {
                     crate::theme::label(ui, "No hosted areas yet — the Veil is quiet.");
                 }
@@ -2807,6 +2910,8 @@ impl Shell {
                         }
                     }
                 }
+                });
+                crate::theme::card(ui, "helmet", crate::theme::BETANET, |ui| {
                 if !self.server.world.veil.present(self.actor) {
                     ui.label(format!("mindpower {mp} (needs 5+)"));
                     if ui.button("Jack in").clicked() {
@@ -2907,6 +3012,7 @@ impl Shell {
                         });
                     }
                 }
+                });
             }
                 });
         });
@@ -3089,6 +3195,36 @@ mod tests {
                 cands.pop().unwrap()
             }
 
+            /// First button (reading order) whose label starts with `prefix`.
+            /// Needed when labels carry live counts.
+            fn button_center_prefix(&self, prefix: &str) -> egui::Pos2 {
+                let mut cands: Vec<(f64, f64, egui::Pos2)> = self
+                    .tree
+                    .values()
+                    .filter(|n| {
+                        n.role() == Role::Button
+                            && n.label().unwrap_or_default().starts_with(prefix)
+                    })
+                    .filter_map(|n| n.bounds())
+                    .map(|b| {
+                        (
+                            b.y0,
+                            b.x0,
+                            egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+                        )
+                    })
+                    .collect();
+                cands.sort_by(|a, b| {
+                    a.0.partial_cmp(&b.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                });
+                cands
+                    .first()
+                    .map(|(_, _, p)| *p)
+                    .unwrap_or_else(|| panic!("no Button starting with {prefix:?}"))
+            }
+
             /// Centers of every button with this label, sorted by geometry
             /// (top-left to bottom-right) so results are run-stable.
             fn button_centers(&self, label: &str) -> Vec<egui::Pos2> {
@@ -3150,20 +3286,37 @@ mod tests {
             /// line shifts the layout, and a stale coordinate would land on
             /// whatever moved under it.
             fn click(&mut self, label: &str) {
+                self.click_resolved(label, |h| h.button_center(label));
+            }
+
+            /// Click the first button whose label starts with `prefix`.
+            fn click_prefix(&mut self, prefix: &str) {
+                self.click_resolved(prefix, |h| h.button_center_prefix(prefix));
+            }
+
+            /// Resolve and click a button, scrolling the central pane until
+            /// it is actually inside the clickable band. Both `click` and
+            /// `click_prefix` share this so a layout change cannot make one
+            /// path silently click off-screen.
+            fn click_resolved(&mut self, desc: &str, resolve: impl Fn(&Self) -> egui::Pos2) {
                 let mods = egui::Modifiers::default();
-                // The central pane is scrollable. Bring lower controls into
-                // view before clicking, otherwise egui clips the pointer.
-                for _ in 0..16 {
-                    let at = self.button_center(label);
+                for _ in 0..64 {
+                    let at = resolve(self);
                     let overlay = self.has_text("Command palette");
-                    if overlay || at.y < 610.0 || at.x < 260.0 {
+                    let top_chrome = at.y < 66.0 && at.x > 900.0;
+                    // The rails do not scroll with the central pane.
+                    let in_rail = at.x < 260.0 || at.x > 980.0;
+                    // Top bar ends near y=60; the 156px console starts near
+                    // y=644, leaving this central band fully clickable.
+                    let in_view = at.y >= 66.0 && at.y < 636.0;
+                    if overlay || top_chrome || in_rail || in_view {
                         self.pass_with(vec![egui::Event::PointerButton {
                             pos: at,
                             button: egui::PointerButton::Primary,
                             pressed: true,
                             modifiers: mods,
                         }]);
-                        let at = self.button_center(label);
+                        let at = resolve(self);
                         self.pass_with(vec![egui::Event::PointerButton {
                             pos: at,
                             button: egui::PointerButton::Primary,
@@ -3173,18 +3326,21 @@ mod tests {
                         self.pass_with(vec![]);
                         return;
                     }
+                    // Negative wheel delta scrolls toward the end of the
+                    // page; positive scrolls back toward the top.
+                    let delta = if at.y >= 636.0 { -20.0 } else { 20.0 };
                     self.pass_with(vec![
                         egui::Event::PointerMoved(egui::pos2(700.0, 420.0)),
                         egui::Event::MouseWheel {
                             unit: egui::MouseWheelUnit::Line,
-                            delta: egui::vec2(0.0, -4.0),
+                            delta: egui::vec2(0.0, delta),
                             phase: egui::TouchPhase::Move,
                             modifiers: mods,
                         },
                     ]);
                 }
                 panic!(
-                    "could not scroll Button {label:?} into view; got {:?}",
+                    "could not scroll Button {desc:?} into view; got {:?}",
                     self.labels()
                 );
             }
@@ -3225,57 +3381,6 @@ mod tests {
                     ]);
                 }
                 panic!("could not scroll cell {label:?} into view");
-            }
-
-            /// Click the first button (reading order) whose label starts with
-            /// `prefix`. Needed when labels carry live counts that change
-            /// after each click.
-            fn click_prefix(&mut self, prefix: &str) {
-                let mods = egui::Modifiers::default();
-                let find = |tree: &std::collections::HashMap<NodeId, Node>| -> egui::Pos2 {
-                    let mut cands: Vec<(f64, f64, egui::Pos2)> = tree
-                        .values()
-                        .filter(|n| {
-                            n.role() == Role::Button
-                                && n.label().unwrap_or_default().starts_with(prefix)
-                        })
-                        .filter_map(|n| n.bounds())
-                        .map(|b| {
-                            (
-                                b.y0,
-                                b.x0,
-                                egui::pos2(
-                                    ((b.x0 + b.x1) / 2.0) as f32,
-                                    ((b.y0 + b.y1) / 2.0) as f32,
-                                ),
-                            )
-                        })
-                        .collect();
-                    cands.sort_by(|a, b| {
-                        a.0.partial_cmp(&b.0)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                            .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    });
-                    cands
-                        .first()
-                        .map(|(_, _, p)| *p)
-                        .unwrap_or_else(|| panic!("no Button starting with {prefix:?}"))
-                };
-                let at = find(&self.tree);
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: mods,
-                }]);
-                let at = find(&self.tree);
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: mods,
-                }]);
-                self.pass_with(vec![]);
             }
 
             fn tap_key(&mut self, key: egui::Key) {
@@ -3423,6 +3528,31 @@ mod tests {
             );
             // All through the server log: load + strike replay cleanly.
             assert_eq!(h.shell.server.log.len(), 2);
+        }
+
+        #[test]
+        fn every_screen_region_has_a_card_header() {
+            let h = Harness::new();
+            // Left rail and Street: the primary surfaces are labelled so a
+            // new player can tell systems apart at a glance.
+            for header in [
+                "SURVIVAL",
+                "BODY",
+                "CONDUCT",
+                "SESSION",
+                "DAILY ACTIONS",
+                "STREET — SECTION (0, 0)",
+                "WORK BOARD",
+                "CONTRACTS",
+                "MAIL",
+            ] {
+                assert!(h.has_text(header), "missing header {header:?}");
+            }
+            let mut h = Harness::new();
+            h.click("Deck");
+            for header in ["HOST", "ARENA", "SECURITY", "LOADOUT", "CARDS @SELECTED"] {
+                assert!(h.has_text(header), "missing Deck header {header:?}");
+            }
         }
 
         #[test]
