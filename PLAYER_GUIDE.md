@@ -97,6 +97,10 @@ always-available Work buttons.
   - `Patch <vuln>` (Editor) closes a hole.
   - `Overwrite` (Editor) severs a tail segment without a headshot.
   - `Clone selected` (Cloner) copies a program to a free cell.
+  - `Connect host 3` (Connector) probes a routed host, reveals its scan
+    report, and logs the transit.
+  - After a scan, the host line shows the scan report (vulns, logs, trace,
+    breach).
   - Kind-matched `Synergy farm` producers yield +1 of their affinity
     resource.
   The rig is an `office-ws` with its own vulns: `Exploit` one (needs a
@@ -195,7 +199,7 @@ are not wired to the shell yet; see `design/09-ux-roadmap.md`.
 cargo run -p gui            # desktop shell (eframe)
 cd gui && trunk serve       # browser shell (wasm)
 cargo run -p client-web     # scripted tour of all systems
-cargo test --workspace      # prove the rules hold (241 test executions)
+cargo test --workspace      # prove the rules hold (242 test executions)
 ```
 
 Keys: arrows or `hjkl` move; `Tab` switches Street/Deck/Net/Veil; the

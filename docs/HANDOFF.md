@@ -1,6 +1,6 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Refreshed 2026-11-01 for v0.5/v0.6. Branch `main`, 241 test executions
+> Refreshed 2026-11-01 for v0.5/v0.6. Branch `main`, 242 test executions
 > (211 unique `#[test]` fns), `./gate.sh` and `./nightly.sh` green. Read
 > `README.md` and `PLAYER_GUIDE.md` first for the game itself;
 > `docs/NEXT-STATE.md` is the v0.4 history, `docs/V0.5-V0.6-PLAN.md` is
@@ -134,9 +134,10 @@ UI tests. Instead `gui/src/app.rs` has a harness:
 - **v0.6 Programs with Identity (M2.5 core)**: Killer/Shield/Scanner/
   Cracker/Connector/Cloner/Editor kinds, `Program.kind`, kind stats from
   `data/kinds.yaml`, `DeckLoadKind`, `DeckScan`, `DeckCrack`, `DeckPatch`,
-  `DeckOverwrite`, `DeckClone`, and kind-matched `DeckFarmKind` producers
-  (+1 affinity yield). Old programs default to Killer. The formal M2
-  balance gate and Connector's remote-chain ability are still pending.
+  `DeckOverwrite`, `DeckClone`, `DeckConnect` (routed remote probe), and
+  kind-matched `DeckFarmKind` producers (+1 affinity yield). Scanner has a
+  scan report; old programs default to Killer. The remaining v0.6 item is
+  the human M2 60%/90% playtest gate.
 - **v0.5 Contracts & Consequence**: local daily board, `AcceptOffer`,
   escrow, one active contract, delivery/hack/courier/bounty completion,
   `DeliverContract`, `AbandonContract`, expiry, employer reputation, and
@@ -183,9 +184,9 @@ Local board, escrow, deadlines, completion, abandon/expiry, reputation.
 See `docs/JOB-BOARD-ACCEPT.md`.
 
 ### v0.6 — Programs with Identity. CORE DONE.
-Kinds, loadout, scan/crack/patch/overwrite/clone, producer affinity.
-Still open: the formal M2 success-rate gate and Connector's remote-chain
-ability. Host zones/files/accounts are the leading v0.7 candidate; PDS
+Kinds, loadout, scan/crack/patch/overwrite/clone, Connector probe,
+producer affinity. Still open: the human M2 60%/90% success-rate
+playtest. Host zones/files/accounts are the leading v0.7 candidate; PDS
 bridge is also v0.7+ (requirements ready in
 `docs/PDS-BRIDGE-REQUIREMENTS.md`).
 
