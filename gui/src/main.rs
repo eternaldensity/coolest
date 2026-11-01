@@ -2,6 +2,7 @@
 //! See gui::app for the app itself.
 
 mod app;
+mod theme;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {

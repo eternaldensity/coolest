@@ -118,10 +118,12 @@ pub struct Shell {
     input: String,
     log: Vec<String>,
     sel: Option<(u8, u8)>,
+    street_sel: Option<(u8, u8)>,
     talks: BTreeMap<String, Rc<sim::Dialogue>>,
     talking: Option<sim::Conversation>,
     frames_left: Option<u32>,
     jobs: Vec<sim::JobDef>,
+    themed: bool,
 }
 
 impl Shell {
@@ -252,10 +254,12 @@ impl Shell {
             input: String::new(),
             log: vec!["Welcome to FIDOM. Arrows/hjkl move. Type help + Enter.".to_string()],
             sel: None,
+            street_sel: None,
             talks,
             talking: None,
             frames_left: frames,
             jobs,
+            themed: false,
         };
         shell.say_status();
         shell
@@ -500,6 +504,10 @@ impl Shell {
     /// headless tests drive it through `egui::Context::run_ui` with no
     /// window, GPU, or screenshots (see the accesskit harness below).
     fn show(&mut self, ui: &mut egui::Ui) {
+        if !self.themed {
+            crate::theme::apply(ui.ctx());
+            self.themed = true;
+        }
         if let Some(left) = self.frames_left {
             if left == 0 {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -514,17 +522,77 @@ impl Shell {
 
         egui::Panel::top("tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::Street, "Street");
-                ui.selectable_value(&mut self.tab, Tab::Deck, "Deck");
-                ui.selectable_value(&mut self.tab, Tab::Net, "Net");
-                ui.selectable_value(&mut self.tab, Tab::Veil, "Veil");
+                ui.label(
+                    egui::RichText::new("FIDOM")
+                        .size(20.0)
+                        .strong()
+                        .color(crate::theme::PAPER),
+                );
+                ui.label(
+                    egui::RichText::new("CIVIC NETWORK TERMINAL")
+                        .size(9.0)
+                        .color(crate::theme::OLDNET),
+                );
+                ui.separator();
+                if let Some((_, _, money, _)) = self.server.world.needs(self.actor) {
+                    let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
+                    ui.label(
+                        egui::RichText::new(format!("S({},{})", here.sx, here.sy))
+                            .size(11.0)
+                            .color(crate::theme::MUTED),
+                    );
+                    let tick = self.server.world.tick;
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Day {} {:02}:{:02}",
+                            tick / 1440 + 1,
+                            (tick / 60) % 24,
+                            tick % 60
+                        ))
+                        .size(11.0)
+                        .monospace()
+                        .color(crate::theme::MUTED),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!("${:.2}", money as f64 / 100.0))
+                            .size(12.0)
+                            .strong()
+                            .color(crate::theme::MONEY),
+                    );
+                    let standing = self.server.world.standing();
+                    let heat_color = if standing == Standing::Wanted {
+                        crate::theme::DANGER
+                    } else {
+                        crate::theme::MUTED
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("{standing:?}"))
+                            .size(11.0)
+                            .color(heat_color),
+                    );
+                    let mail = self.server.world.inbox(self.actor).len();
+                    ui.label(
+                        egui::RichText::new(format!("mail {mail}"))
+                            .size(11.0)
+                            .color(crate::theme::BETANET),
+                    );
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.selectable_value(&mut self.tab, Tab::Veil, "Veil");
+                    ui.selectable_value(&mut self.tab, Tab::Net, "Net");
+                    ui.selectable_value(&mut self.tab, Tab::Deck, "Deck");
+                    ui.selectable_value(&mut self.tab, Tab::Street, "Street");
+                });
             });
         });
 
         egui::Panel::left("status").show(ui, |ui| {
-            ui.heading("Status");
+            crate::theme::heading(ui, "Status");
             if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
+                crate::theme::section(ui, "survival");
                 ui.label(status_line(food, mood, money));
+                crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
+                crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
                 let bank = self
                     .server
                     .world
@@ -538,9 +606,19 @@ impl Shell {
                     .collect::<Vec<_>>()
                     .join(" · ");
                 ui.label(format!("components: {units}"));
+                ui.horizontal_wrapped(|ui| {
+                    for r in sim::Res::ALL {
+                        crate::theme::chip(
+                            ui,
+                            format!("{} {}", self.server.world.units(self.actor, r), r.name()),
+                            crate::theme::MUTED,
+                        );
+                    }
+                });
                 // Body/health (design/06-07). The clinic is the only way
                 // back from a lethal blow in v0.4.
                 if let Some(h) = self.server.world.health_of(self.actor) {
+                    crate::theme::section(ui, "body");
                     ui.label(format!("HP {}/{}", h.hp, h.max_hp));
                     if !h.is_alive() && ui.button("Revive at clinic").clicked() {
                         match self.server.apply_one(Intent {
@@ -563,9 +641,17 @@ impl Shell {
                         "mindpower {} · literacy {}",
                         mind.mindpower, mind.comp_literacy
                     ));
+                    crate::theme::meter(
+                        ui,
+                        "Mind",
+                        mind.mindpower as f32,
+                        20.0,
+                        crate::theme::VEIL,
+                    );
                 }
                 // Heat (design/05): alignment/standing are pure functions of
                 // the record, so settling the fine clears both.
+                crate::theme::section(ui, "conduct");
                 let standing = self.server.world.standing();
                 let mass = self.server.world.record_mass();
                 ui.label(format!(
@@ -679,7 +765,10 @@ impl Shell {
                 });
         });
 
-        egui::CentralPanel::default().show(ui, |ui| match self.tab {
+        egui::CentralPanel::default().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| match self.tab {
             Tab::Street => {
                 // Job buttons carry names + pay from data/jobs.yaml so the
                 // choice means something; indices feed Verb::Work like before.
@@ -914,7 +1003,7 @@ impl Shell {
                     .map(|shop| shop.stock.iter().map(|(k, l)| (k.clone(), l.price_cents, l.qty)).collect())
                     .unwrap_or_default();
                 let npcs = self.server.world.npc_positions();
-                ui.heading(format!("Street — section ({}, {})", here.sx, here.sy));
+                crate::theme::heading(ui, format!("Street — section ({}, {})", here.sx, here.sy));
                 // Talk panel.
                 if self.talking.is_none() {
                     let mut started = false;
@@ -1004,43 +1093,310 @@ impl Shell {
                 }
                 let (ax, ay) = (here.x, here.y);
                 let shop_tiles = self.server.world.shop_positions();
-                // Glyph colors follow the active theme: hardcoding for one
-                // theme made @ invisible on the other (light default).
-                let dark = ui.visuals().dark_mode;
-                let ink = |glyph: &str| match glyph {
-                    "@" if dark => egui::Color32::WHITE,
-                    "@" => egui::Color32::from_rgb(0, 90, 200),
-                    "n" if dark => egui::Color32::LIGHT_GREEN,
-                    "n" => egui::Color32::from_rgb(0, 140, 0),
-                    "$" if dark => egui::Color32::from_rgb(255, 190, 40),
-                    "$" => egui::Color32::from_rgb(176, 118, 0),
-                    "#" => egui::Color32::DARK_GRAY,
-                    _ => egui::Color32::GRAY,
-                };
-                egui::Grid::new("street").spacing([2.0, 2.0]).show(ui, |ui| {
-                    for y in 0..16u8 {
-                        for x in 0..16u8 {
-                            let ch = if (x, y) == (ax, ay) {
-                                "@"
-                            } else if npcs.iter().any(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
-                                "n"
-                            } else if shop_tiles.contains(&(x, y)) {
-                                "$"
-                            } else if terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true) {
-                                "."
+                let ts = 22.0;
+                let map_size = egui::vec2(16.0 * ts, 16.0 * ts);
+                let (resp, painter) =
+                    ui.allocate_painter(map_size, egui::Sense::click());
+                let rect = resp.rect;
+                for y in 0..16u8 {
+                    for x in 0..16u8 {
+                        let r = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                            egui::vec2(ts - 2.0, ts - 2.0),
+                        );
+                        let walkable = terrain
+                            .as_ref()
+                            .map(|s| s.walkable(x, y))
+                            .unwrap_or(true);
+                        let fill = if walkable {
+                            if (x as i32 + y as i32) % 5 == 0 {
+                                egui::Color32::from_rgb(0x17, 0x21, 0x29)
                             } else {
-                                "#"
+                                egui::Color32::from_rgb(0x13, 0x1C, 0x24)
+                            }
+                        } else {
+                            egui::Color32::from_rgb(0x1B, 0x24, 0x2C)
+                        };
+                        painter.rect_filled(r, 3.0, fill);
+                        painter.rect_stroke(
+                            r,
+                            3.0,
+                            egui::Stroke::new(0.7, crate::theme::LINE),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+                // Guarantees (doors/egress/computers) get a gold corner tick.
+                if let Some(s) = &terrain {
+                    for (_, gx, gy) in &s.guarantees {
+                        let r = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(*gx as f32 * ts + 3.0, *gy as f32 * ts + 3.0),
+                            egui::vec2(ts - 8.0, ts - 8.0),
+                        );
+                        painter.rect_stroke(
+                            r,
+                            2.0,
+                            egui::Stroke::new(1.4, crate::theme::OLDNET_DIM),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+                for (sx, sy) in &shop_tiles {
+                    let c = rect.min + egui::vec2(*sx as f32 * ts + ts / 2.0, *sy as f32 * ts + ts / 2.0);
+                    painter.circle_filled(c, 9.0, egui::Color32::from_rgb(0x2A, 0x21, 0x14));
+                    painter.text(
+                        c,
+                        egui::Align2::CENTER_CENTER,
+                        "$",
+                        egui::FontId::monospace(13.0),
+                        crate::theme::OLDNET,
+                    );
+                }
+                for (_, nx, ny) in &npcs {
+                    let c = rect.min + egui::vec2(*nx as f32 * ts + ts / 2.0, *ny as f32 * ts + ts / 2.0);
+                    painter.circle_filled(c, 8.0, egui::Color32::from_rgb(0x1D, 0x2A, 0x22));
+                    painter.circle_stroke(c, 8.0, egui::Stroke::new(1.2, crate::theme::SUCCESS));
+                    painter.text(
+                        c,
+                        egui::Align2::CENTER_CENTER,
+                        "n",
+                        egui::FontId::monospace(11.0),
+                        crate::theme::SUCCESS,
+                    );
+                }
+                let player = rect.min + egui::vec2(ax as f32 * ts + ts / 2.0, ay as f32 * ts + ts / 2.0);
+                painter.circle_filled(player, 10.0, egui::Color32::from_rgb(0x18, 0x31, 0x3A));
+                painter.circle_stroke(player, 10.0, egui::Stroke::new(1.8, crate::theme::BETANET));
+                painter.text(
+                    player,
+                    egui::Align2::CENTER_CENTER,
+                    "▲",
+                    egui::FontId::monospace(12.0),
+                    crate::theme::BETANET,
+                );
+                let hover_tile = resp.hover_pos().and_then(|p| {
+                    if !rect.contains(p) {
+                        return None;
+                    }
+                    let x = ((p.x - rect.min.x) / ts).floor() as i32;
+                    let y = ((p.y - rect.min.y) / ts).floor() as i32;
+                    if (0..16).contains(&x) && (0..16).contains(&y) {
+                        Some((x as u8, y as u8))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((x, y)) = self.street_sel {
+                    let r = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                        egui::vec2(ts - 2.0, ts - 2.0),
+                    );
+                    painter.rect_stroke(
+                        r,
+                        3.0,
+                        egui::Stroke::new(2.0, crate::theme::OLDNET),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if let Some((x, y)) = hover_tile {
+                    let r = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                        egui::vec2(ts - 2.0, ts - 2.0),
+                    );
+                    painter.rect_stroke(
+                        r,
+                        3.0,
+                        egui::Stroke::new(1.4, crate::theme::BETANET),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if resp.clicked() {
+                    if let Some(t) = hover_tile {
+                        self.street_sel = Some(t);
+                    }
+                }
+                let tile_desc = hover_tile.map(|(x, y)| {
+                    let mut bits = vec![format!("tile ({x},{y})")];
+                    if let Some(s) = &terrain {
+                        bits.push(if s.walkable(x, y) { "walkable" } else { "blocked" }.to_string());
+                    }
+                    if (x, y) == (ax, ay) {
+                        bits.push("you".to_string());
+                    }
+                    if let Some((id, _, _)) = npcs.iter().find(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
+                        if let Some(role) = self.server.world.npc_role(*id) {
+                            bits.push(format!("{role:?}"));
+                        }
+                    }
+                    if shop_tiles.contains(&(x, y)) {
+                        bits.push("counter".to_string());
+                    }
+                    bits.join(" · ")
+                });
+                if let Some(desc) = tile_desc {
+                    resp.on_hover_text_at_pointer(desc);
+                }
+                if let Some((x, y)) = self.street_sel {
+                    crate::theme::label(ui, format!("Selected tile ({x},{y}) — click map to inspect"));
+                } else {
+                    ui.label(
+                        egui::RichText::new("Click a tile to inspect · WASD/hjkl to walk")
+                            .size(11.0)
+                            .color(crate::theme::FAINT),
+                    );
+                }
+            }
+            Tab::Deck => {
+                crate::theme::heading(ui, "Deck — world host 1");
+                ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
+                // Snapshot arena state up front: buttons below need &mut self.
+                // Producers get their own glyph + per-resource color so the
+                // economy loop is visible in the arena, not just in numbers.
+                let (heads, tails, prod, cpu, total) = match self.server.world.host(HostId(1)) {
+                    Some(h) => {
+                        let mut heads = std::collections::BTreeMap::new();
+                        let mut tails = std::collections::BTreeSet::new();
+                        for p in h.progs.values() {
+                            if p.owner == self.actor {
+                                if let Some((makes, _)) = h.maker_info(p.id) {
+                                    if let Some(res) = makes.first() {
+                                        heads.insert((p.head.0, p.head.1), Some(*res));
+                                        for t in &p.tail {
+                                            tails.insert((t.0, t.1));
+                                        }
+                                        continue;
+                                    }
+                                }
+                            }
+                            heads.insert((p.head.0, p.head.1), None);
+                            for t in &p.tail {
+                                tails.insert((t.0, t.1));
+                            }
+                        }
+                        (heads, tails, h.producer_summary(self.actor), h.cpu_load(), h.cpu_total)
+                    }
+                    None => (
+                        std::collections::BTreeMap::new(),
+                        std::collections::BTreeSet::new(),
+                        vec![],
+                        0,
+                        0,
+                    ),
+                };
+                egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
+                    for y in 0..8u8 {
+                        for x in 0..12u8 {
+                            let (glyph, color) = if let Some(Some(res)) = heads.get(&(x, y)) {
+                                // Producer head: P in the resource's color.
+                                (
+                                    "P",
+                                    match res {
+                                        sim::Res::Loop => egui::Color32::from_rgb(120, 200, 120),
+                                        sim::Res::Data => egui::Color32::from_rgb(110, 190, 230),
+                                        sim::Res::Algo => egui::Color32::from_rgb(220, 150, 240),
+                                    },
+                                )
+                            } else if heads.contains_key(&(x, y)) {
+                                ("H", egui::Color32::LIGHT_RED)
+                            } else if tails.contains(&(x, y)) {
+                                ("o", egui::Color32::GRAY)
+                            } else if Some((x, y)) == self.sel {
+                                ("X", egui::Color32::YELLOW)
+                            } else {
+                                (".", egui::Color32::DARK_GRAY)
                             };
-                            let color = ink(ch);
-                            ui.label(egui::RichText::new(ch).monospace().color(color));
+                            if ui
+                                .button(egui::RichText::new(glyph).monospace().color(color))
+                                .clicked()
+                            {
+                                self.sel = Some((x, y));
+                            }
                         }
                         ui.end_row();
                     }
                 });
-            }
-            Tab::Deck => {
-                ui.heading("Deck — world host 1");
-                ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
+                ui.label(format!("CPU {cpu}/{total}"));
+                if let Some(h) = self.server.world.host(HostId(1)) {
+                    ui.label(format!(
+                        "arch {} · vulns {} · breached {} · scanned {}",
+                        h.arch().name(),
+                        h.vuln_ids().len(),
+                        if h.breached { "yes" } else { "no" },
+                        if h.scanned(self.actor) { "yes" } else { "no" }
+                    ));
+                    if h.scanned(self.actor) {
+                        ui.label(format!("scan: {}", h.scan_report(self.actor)));
+                    }
+                }
+                if let Some((x, y)) = self.sel {
+                    if let Some(kind) = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .and_then(|h| h.prog_at(x, y))
+                        .and_then(|p| self.server.world.host(HostId(1)).and_then(|h| h.program_kind(p)))
+                    {
+                        ui.label(format!("selected: {} @({x},{y})", kind.name()));
+                    }
+                }
+                // Exploit/patch sit above the loadout so they stay in the
+                // visible scroll region and read as the host's immediate
+                // security surface.
+                let vulns = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.vuln_ids())
+                    .unwrap_or_default();
+                let breached = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.breached)
+                    .unwrap_or(false);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Exploit:");
+                    for v in &vulns {
+                        if ui.button(v).clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::Exploit { vuln: v.clone() },
+                            }) {
+                                Ok(_) => self.say(format!("exploited {v}")),
+                                Err(e) => self.say(format!("exploit failed: {e}")),
+                            }
+                        }
+                    }
+                    if breached && ui.button("Send trojan").clicked() {
+                        let to = self
+                            .server
+                            .world
+                            .host(HostId(1))
+                            .and_then(|h| h.owner())
+                            .unwrap_or(self.actor);
+                        match self.server.apply_one(Intent {
+                            actor: self.actor,
+                            verb: Verb::SendTrojan { to },
+                        }) {
+                            Ok(_) => self.say("trojan mailed — lands when opened".to_string()),
+                            Err(e) => self.say(format!("trojan failed: {e}")),
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Patch:");
+                    for v in &vulns {
+                        if ui.button(format!("Patch {v}")).clicked() {
+                            match self.server.apply_one(Intent {
+                                actor: self.actor,
+                                verb: Verb::DeckPatch { vuln: v.clone() },
+                            }) {
+                                Ok(_) => self.say(format!("patched {v}")),
+                                Err(e) => self.say(format!("patch failed: {e}")),
+                            }
+                        }
+                    }
+                });
                 ui.horizontal(|ui| {
                     if ui.button("Load killer @selected").clicked() {
                         let (msg, beat) = match self.sel {
@@ -1304,155 +1660,6 @@ impl Shell {
                         }
                     }
                 });
-                // Snapshot arena state up front: buttons below need &mut self.
-                // Producers get their own glyph + per-resource color so the
-                // economy loop is visible in the arena, not just in numbers.
-                let (heads, tails, prod, cpu, total) = match self.server.world.host(HostId(1)) {
-                    Some(h) => {
-                        let mut heads = std::collections::BTreeMap::new();
-                        let mut tails = std::collections::BTreeSet::new();
-                        for p in h.progs.values() {
-                            if p.owner == self.actor {
-                                if let Some((makes, _)) = h.maker_info(p.id) {
-                                    if let Some(res) = makes.first() {
-                                        heads.insert((p.head.0, p.head.1), Some(*res));
-                                        for t in &p.tail {
-                                            tails.insert((t.0, t.1));
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-                            heads.insert((p.head.0, p.head.1), None);
-                            for t in &p.tail {
-                                tails.insert((t.0, t.1));
-                            }
-                        }
-                        (heads, tails, h.producer_summary(self.actor), h.cpu_load(), h.cpu_total)
-                    }
-                    None => (
-                        std::collections::BTreeMap::new(),
-                        std::collections::BTreeSet::new(),
-                        vec![],
-                        0,
-                        0,
-                    ),
-                };
-                egui::Grid::new("deck").spacing([2.0, 2.0]).show(ui, |ui| {
-                    for y in 0..8u8 {
-                        for x in 0..12u8 {
-                            let (glyph, color) = if let Some(Some(res)) = heads.get(&(x, y)) {
-                                // Producer head: P in the resource's color.
-                                (
-                                    "P",
-                                    match res {
-                                        sim::Res::Loop => egui::Color32::from_rgb(120, 200, 120),
-                                        sim::Res::Data => egui::Color32::from_rgb(110, 190, 230),
-                                        sim::Res::Algo => egui::Color32::from_rgb(220, 150, 240),
-                                    },
-                                )
-                            } else if heads.contains_key(&(x, y)) {
-                                ("H", egui::Color32::LIGHT_RED)
-                            } else if tails.contains(&(x, y)) {
-                                ("o", egui::Color32::GRAY)
-                            } else if Some((x, y)) == self.sel {
-                                ("X", egui::Color32::YELLOW)
-                            } else {
-                                (".", egui::Color32::DARK_GRAY)
-                            };
-                            if ui
-                                .button(egui::RichText::new(glyph).monospace().color(color))
-                                .clicked()
-                            {
-                                self.sel = Some((x, y));
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-                ui.label(format!("CPU {cpu}/{total}"));
-                if let Some(h) = self.server.world.host(HostId(1)) {
-                    ui.label(format!(
-                        "arch {} · vulns {} · breached {} · scanned {}",
-                        h.arch().name(),
-                        h.vuln_ids().len(),
-                        if h.breached { "yes" } else { "no" },
-                        if h.scanned(self.actor) { "yes" } else { "no" }
-                    ));
-                    if h.scanned(self.actor) {
-                        ui.label(format!("scan: {}", h.scan_report(self.actor)));
-                    }
-                }
-                if let Some((x, y)) = self.sel {
-                    if let Some(kind) = self
-                        .server
-                        .world
-                        .host(HostId(1))
-                        .and_then(|h| h.prog_at(x, y))
-                        .and_then(|p| self.server.world.host(HostId(1)).and_then(|h| h.program_kind(p)))
-                    {
-                        ui.label(format!("selected: {} @({x},{y})", kind.name()));
-                    }
-                }
-                // Exploit the rig's holes (design/03): needs a program of
-                // yours on the host as the delivery vehicle.
-                let vulns = self
-                    .server
-                    .world
-                    .host(HostId(1))
-                    .map(|h| h.vuln_ids())
-                    .unwrap_or_default();
-                let breached = self
-                    .server
-                    .world
-                    .host(HostId(1))
-                    .map(|h| h.breached)
-                    .unwrap_or(false);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Patch:");
-                    for v in &vulns {
-                        if ui.button(format!("Patch {v}")).clicked() {
-                            match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::DeckPatch { vuln: v.clone() },
-                            }) {
-                                Ok(_) => self.say(format!("patched {v}")),
-                                Err(e) => self.say(format!("patch failed: {e}")),
-                            }
-                        }
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Exploit:");
-                    for v in &vulns {
-                        if ui.button(v).clicked() {
-                            match self.server.apply_one(Intent {
-                                actor: self.actor,
-                                verb: Verb::Exploit { vuln: v.clone() },
-                            }) {
-                                Ok(_) => self.say(format!("exploited {v}")),
-                                Err(e) => self.say(format!("exploit failed: {e}")),
-                            }
-                        }
-                    }
-                    if breached && ui.button("Send trojan").clicked() {
-                        // Trojans go by mail now: send one to the rig's
-                        // owner, who runs it when they open it.
-                        let to = self
-                            .server
-                            .world
-                            .host(HostId(1))
-                            .and_then(|h| h.owner())
-                            .unwrap_or(self.actor);
-                        match self.server.apply_one(Intent {
-                            actor: self.actor,
-                            verb: Verb::SendTrojan { to },
-                        }) {
-                            Ok(_) => self.say("trojan mailed — lands when opened".to_string()),
-                            Err(e) => self.say(format!("trojan failed: {e}")),
-                        }
-                    }
-                });
                 // Producer yield summary: what the farm loop delivers.
                 let have = sim::Res::ALL
                     .iter()
@@ -1500,7 +1707,7 @@ impl Shell {
                 }
             }
             Tab::Net => {
-                ui.heading("Net — world graph (Oldnet/Betanet)");
+                crate::theme::heading(ui, "Net — world graph (Oldnet/Betanet)");
                 ui.label("More hops = safer trace, higher tolls. Laser is fast but tolled. Dark sections drop their hosts.");
                 // Graph snapshot: nodes (with net kind + power state) and links.
                 let node_ids = self.server.world.net.node_ids();
@@ -1624,7 +1831,7 @@ impl Shell {
                 });
             }
             Tab::Veil => {
-                ui.heading("Veil — helmet space");
+                crate::theme::heading(ui, "Veil — helmet space");
                 let mp = self
                     .server
                     .world
@@ -1732,6 +1939,7 @@ impl Shell {
                     }
                 }
             }
+                });
         });
         ui.ctx().request_repaint();
     }
@@ -1971,22 +2179,42 @@ mod tests {
             /// line shifts the layout, and a stale coordinate would land on
             /// whatever moved under it.
             fn click(&mut self, label: &str) {
-                let at = self.button_center(label);
                 let mods = egui::Modifiers::default();
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: mods,
-                }]);
-                let at = self.button_center(label);
-                self.pass_with(vec![egui::Event::PointerButton {
-                    pos: at,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: mods,
-                }]);
-                self.pass_with(vec![]);
+                // The central pane is scrollable. Bring lower controls into
+                // view before clicking, otherwise egui clips the pointer.
+                for _ in 0..16 {
+                    let at = self.button_center(label);
+                    if at.y < 610.0 || at.x < 260.0 {
+                        self.pass_with(vec![egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: mods,
+                        }]);
+                        let at = self.button_center(label);
+                        self.pass_with(vec![egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers: mods,
+                        }]);
+                        self.pass_with(vec![]);
+                        return;
+                    }
+                    self.pass_with(vec![
+                        egui::Event::PointerMoved(egui::pos2(700.0, 420.0)),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Line,
+                            delta: egui::vec2(0.0, -4.0),
+                            phase: egui::TouchPhase::Move,
+                            modifiers: mods,
+                        },
+                    ]);
+                }
+                panic!(
+                    "could not scroll Button {label:?} into view; got {:?}",
+                    self.labels()
+                );
             }
 
             /// Click the bottom-right-most button with this label (for grids

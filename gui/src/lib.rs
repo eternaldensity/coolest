@@ -3,6 +3,7 @@
 
 pub mod layout;
 pub mod render;
+pub mod theme;
 
 // eframe shell (binary target); kept out of docs builds without a display.
 #[cfg(not(target_arch = "wasm32"))]
