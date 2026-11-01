@@ -467,15 +467,22 @@ impl Shell {
             return;
         }
         match self.nearby_npcs().into_iter().next() {
-            Some((_, role)) => match self.dialogue_for(role) {
-                Some(dlg) => {
-                    let t = sim::Conversation::new(dlg, None);
-                    self.say(t.text().to_string());
-                    self.talking = Some(t);
-                }
-                None => self.say("they have nothing to say".to_string()),
-            },
+            Some((_, role)) => self.start_talk_with(role),
             None => self.say("no one in earshot".to_string()),
+        }
+    }
+
+    fn start_talk_with(&mut self, role: sim::Role) {
+        if self.talking.is_some() {
+            return;
+        }
+        match self.dialogue_for(role) {
+            Some(dlg) => {
+                let t = sim::Conversation::new(dlg, None);
+                self.say(t.text().to_string());
+                self.talking = Some(t);
+            }
+            None => self.say("they have nothing to say".to_string()),
         }
     }
 
@@ -534,32 +541,67 @@ impl Shell {
                 if (x, y) == (here.x, here.y) {
                     crate::theme::chip(ui, "you are here", crate::theme::BETANET);
                 }
-                if let Some(role) = self
+                let npc = self
                     .server
                     .world
                     .npc_positions()
                     .into_iter()
                     .find(|(_, nx, ny)| (*nx, *ny) == (x, y))
-                    .and_then(|(id, _, _)| self.server.world.npc_role(id))
-                {
+                    .and_then(|(id, _, _)| {
+                        self.server
+                            .world
+                            .npc_role(id)
+                            .map(|role| (EntityId(id), role))
+                    });
+                if let Some((id, role)) = npc {
                     crate::theme::section(ui, "npc");
                     ui.label(format!("{role:?}"));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(format!("Talk to {role:?}")).clicked() {
+                            self.start_talk_with(role);
+                        }
+                        if ui.button("Attack target").clicked() {
+                            self.do_verb(Verb::Attack { target: id });
+                        }
+                    });
                 }
                 if let Some(shop) = self.server.world.shop_at(x, y) {
                     crate::theme::section(ui, "counter");
-                    for (item, line) in &shop.stock {
+                    let adjacent = (x as i16 - here.x as i16).abs() <= 1
+                        && (y as i16 - here.y as i16).abs() <= 1;
+                    let stock: Vec<(String, i64, u32)> = shop
+                        .stock
+                        .iter()
+                        .map(|(k, l)| (k.clone(), l.price_cents, l.qty))
+                        .collect();
+                    for (item, price, qty) in stock {
                         ui.horizontal(|ui| {
-                            ui.label(format!("{item} — {}c", line.price_cents));
+                            ui.label(format!("{item} — {price}c"));
                             crate::theme::chip(
                                 ui,
-                                format!("x{}", line.qty),
-                                if line.qty == 0 {
+                                format!("x{qty}"),
+                                if qty == 0 {
                                     crate::theme::DANGER
                                 } else {
                                     crate::theme::MUTED
                                 },
                             );
+                            if adjacent && qty > 0 && ui.button(format!("Buy {item}")).clicked() {
+                                self.do_verb(Verb::Buy(item.clone()));
+                            }
                         });
+                    }
+                    if !adjacent {
+                        crate::theme::label(ui, "stand next to the counter to buy");
+                    }
+                }
+                let floor = self.server.world.floor_items_at(pos(x, y));
+                if !floor.is_empty() {
+                    crate::theme::section(ui, "on floor");
+                    for (item, qty) in floor {
+                        if ui.button(format!("Take {item} x{qty}")).clicked() {
+                            self.do_verb(Verb::Pickup { item });
+                        }
                     }
                 }
                 if walkable && (x, y) != (here.x, here.y) && ui.button("Walk here").clicked() {
@@ -578,12 +620,12 @@ impl Shell {
                         .strong()
                         .color(crate::theme::TEXT),
                 );
-                if let Some(prog) = self
+                let prog = self
                     .server
                     .world
                     .host(HostId(1))
-                    .and_then(|h| h.prog_at(x, y))
-                {
+                    .and_then(|h| h.prog_at(x, y));
+                if let Some(prog) = prog {
                     let host = self.server.world.host(HostId(1)).unwrap();
                     let kind = host.program_kind(prog);
                     if let Some(kind) = kind {
@@ -612,6 +654,38 @@ impl Shell {
                     );
                 } else {
                     crate::theme::label(ui, "Empty cell — load a program here.");
+                }
+                crate::theme::section(ui, "actions");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Scan host").clicked() {
+                        self.do_verb(Verb::DeckScan);
+                    }
+                    if ui.button("Crack lock").clicked() {
+                        self.do_verb(Verb::DeckCrack);
+                    }
+                    if prog.is_some() {
+                        if ui.button("Clone program").clicked() {
+                            self.do_verb(Verb::DeckClone { x, y });
+                        }
+                        if ui.button("Sever segment").clicked() {
+                            self.do_verb(Verb::DeckOverwrite { x, y });
+                        }
+                    }
+                });
+                let vulns = self
+                    .server
+                    .world
+                    .host(HostId(1))
+                    .map(|h| h.vuln_ids())
+                    .unwrap_or_default();
+                if !vulns.is_empty() {
+                    ui.horizontal_wrapped(|ui| {
+                        for v in vulns {
+                            if ui.button(format!("Close {v}")).clicked() {
+                                self.do_verb(Verb::DeckPatch { vuln: v });
+                            }
+                        }
+                    });
                 }
             }
             Tab::Net => {
@@ -655,6 +729,9 @@ impl Shell {
                             Err(e) => self.say(format!("no route: {e}")),
                         }
                     }
+                    if ui.button(format!("Probe {}", target.0)).clicked() {
+                        self.do_verb(Verb::DeckConnect { host: target });
+                    }
                 }
                 crate::theme::section(ui, "nodes");
                 for id in self.server.world.net.node_ids() {
@@ -697,7 +774,21 @@ impl Shell {
                         crate::theme::label(ui, "no files in this area");
                     } else {
                         for f in files {
-                            ui.label(f);
+                            ui.horizontal(|ui| {
+                                ui.label(&f);
+                                if ui.button(format!("Take {f}")).clicked() {
+                                    self.do_verb(Verb::VeilCarry { name: f.clone() });
+                                }
+                            });
+                        }
+                    }
+                    let carried = self.server.world.veil.carried_files(self.actor);
+                    if !carried.is_empty() {
+                        crate::theme::section(ui, "carried");
+                        for (i, f) in carried.iter().enumerate() {
+                            if ui.button(format!("Consume {f}")).clicked() {
+                                self.do_verb(Verb::VeilRead { index: i });
+                            }
                         }
                     }
                 } else {
