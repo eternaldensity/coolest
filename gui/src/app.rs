@@ -21,6 +21,8 @@ enum Tab {
     Veil,
 }
 
+type StreetJob = (String, i64, Option<(sim::Res, u32, u32)>);
+
 fn pos(x: u8, y: u8) -> Pos {
     Pos {
         city: 1,
@@ -1090,6 +1092,280 @@ impl Shell {
         self.say(format!("walked {steps} steps"));
     }
 
+    fn street_map(&mut self, ui: &mut egui::Ui, here: Pos) {
+        let (ax, ay) = (here.x, here.y);
+        let shop_tiles = self.server.world.shop_positions();
+        crate::theme::card(
+            ui,
+            &format!("street — section ({}, {})", here.sx, here.sy),
+            crate::theme::BETANET,
+            |ui| {
+                let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
+                let npcs = self.server.world.npc_positions();
+                crate::theme::label(
+                    ui,
+                    "@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy",
+                );
+                // Let the map grow into wide windows and centre it in the
+                // card, so the primary spatial surface is the visual anchor.
+                let side = ui.available_width().clamp(320.0, 860.0);
+                let ts = (side / 16.0).floor();
+                let map_size = egui::vec2(16.0 * ts, 16.0 * ts);
+                let canvas = egui::vec2(ui.available_width(), map_size.y);
+                let (resp, painter) = ui.allocate_painter(canvas, egui::Sense::click());
+                let rect = egui::Rect::from_center_size(resp.rect.center(), map_size);
+                for y in 0..16u8 {
+                    for x in 0..16u8 {
+                        let r = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                            egui::vec2(ts - 2.0, ts - 2.0),
+                        );
+                        let walkable = terrain.as_ref().map(|s| s.walkable(x, y)).unwrap_or(true);
+                        let fill = if walkable {
+                            if (x as i32 + y as i32) % 5 == 0 {
+                                egui::Color32::from_rgb(0x17, 0x21, 0x29)
+                            } else {
+                                egui::Color32::from_rgb(0x13, 0x1C, 0x24)
+                            }
+                        } else {
+                            egui::Color32::from_rgb(0x1B, 0x24, 0x2C)
+                        };
+                        painter.rect_filled(r, 3.0, fill);
+                        painter.rect_stroke(
+                            r,
+                            3.0,
+                            egui::Stroke::new(0.7, crate::theme::LINE),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+                // Guarantees (doors/egress/computers) get a gold corner tick.
+                if let Some(s) = &terrain {
+                    for (_, gx, gy) in &s.guarantees {
+                        let r = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(*gx as f32 * ts + 3.0, *gy as f32 * ts + 3.0),
+                            egui::vec2(ts - 8.0, ts - 8.0),
+                        );
+                        painter.rect_stroke(
+                            r,
+                            2.0,
+                            egui::Stroke::new(1.4, crate::theme::OLDNET_DIM),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                }
+                for (sx, sy) in &shop_tiles {
+                    let c = rect.min
+                        + egui::vec2(*sx as f32 * ts + ts / 2.0, *sy as f32 * ts + ts / 2.0);
+                    painter.circle_filled(c, 9.0, egui::Color32::from_rgb(0x2A, 0x21, 0x14));
+                    painter.text(
+                        c,
+                        egui::Align2::CENTER_CENTER,
+                        "$",
+                        egui::FontId::monospace(13.0),
+                        crate::theme::OLDNET,
+                    );
+                }
+                for (_, nx, ny) in &npcs {
+                    let c = rect.min
+                        + egui::vec2(*nx as f32 * ts + ts / 2.0, *ny as f32 * ts + ts / 2.0);
+                    painter.circle_filled(c, 8.0, egui::Color32::from_rgb(0x1D, 0x2A, 0x22));
+                    painter.circle_stroke(c, 8.0, egui::Stroke::new(1.2, crate::theme::SUCCESS));
+                    painter.text(
+                        c,
+                        egui::Align2::CENTER_CENTER,
+                        "n",
+                        egui::FontId::monospace(11.0),
+                        crate::theme::SUCCESS,
+                    );
+                }
+                let player =
+                    rect.min + egui::vec2(ax as f32 * ts + ts / 2.0, ay as f32 * ts + ts / 2.0);
+                painter.circle_filled(player, 10.0, egui::Color32::from_rgb(0x18, 0x31, 0x3A));
+                painter.circle_stroke(player, 10.0, egui::Stroke::new(1.8, crate::theme::BETANET));
+                painter.text(
+                    player,
+                    egui::Align2::CENTER_CENTER,
+                    "▲",
+                    egui::FontId::monospace(12.0),
+                    crate::theme::BETANET,
+                );
+                let hover_tile = resp.hover_pos().and_then(|p| {
+                    if !rect.contains(p) {
+                        return None;
+                    }
+                    let x = ((p.x - rect.min.x) / ts).floor() as i32;
+                    let y = ((p.y - rect.min.y) / ts).floor() as i32;
+                    if (0..16).contains(&x) && (0..16).contains(&y) {
+                        Some((x as u8, y as u8))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((x, y)) = self.street_sel {
+                    let r = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                        egui::vec2(ts - 2.0, ts - 2.0),
+                    );
+                    painter.rect_stroke(
+                        r,
+                        3.0,
+                        egui::Stroke::new(2.0, crate::theme::OLDNET),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if let Some((x, y)) = hover_tile {
+                    let r = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
+                        egui::vec2(ts - 2.0, ts - 2.0),
+                    );
+                    painter.rect_stroke(
+                        r,
+                        3.0,
+                        egui::Stroke::new(1.4, crate::theme::BETANET),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if resp.clicked() {
+                    if let Some(t) = hover_tile {
+                        self.street_sel = Some(t);
+                    }
+                }
+                let tile_desc = hover_tile.map(|(x, y)| {
+                    let mut bits = vec![format!("tile ({x},{y})")];
+                    if let Some(s) = &terrain {
+                        bits.push(
+                            if s.walkable(x, y) {
+                                "walkable"
+                            } else {
+                                "blocked"
+                            }
+                            .to_string(),
+                        );
+                    }
+                    if (x, y) == (ax, ay) {
+                        bits.push("you".to_string());
+                    }
+                    if let Some((id, _, _)) = npcs.iter().find(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
+                        if let Some(role) = self.server.world.npc_role(*id) {
+                            bits.push(format!("{role:?}"));
+                        }
+                    }
+                    if shop_tiles.contains(&(x, y)) {
+                        bits.push("counter".to_string());
+                    }
+                    bits.join(" · ")
+                });
+                if let Some(desc) = tile_desc {
+                    resp.on_hover_text_at_pointer(desc);
+                }
+                if let Some((x, y)) = self.street_sel {
+                    crate::theme::label(
+                        ui,
+                        format!("Selected tile ({x},{y}) — click map to inspect"),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new("Click a tile to inspect · WASD/hjkl to walk")
+                            .size(11.0)
+                            .color(crate::theme::FAINT),
+                    );
+                }
+            },
+        );
+    }
+
+    fn street_work(&mut self, ui: &mut egui::Ui, jobs: &[StreetJob]) {
+        // Job board on its own wrapped row: five long labels with
+        // live counts overflow a single row and push later controls
+        // outside the clip rect (their clicks are then ignored).
+        crate::theme::card(ui, "work board", crate::theme::OLDNET, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (i, (id, pay, req)) in jobs.iter().enumerate() {
+                    let label = match req {
+                        Some((res, need, have)) => {
+                            format!("Work {i}: {id} {pay}c [{} {have}/{need}]", res.name())
+                        }
+                        None => format!("Work {i}: {id} {pay}c"),
+                    };
+                    if ui.button(label).clicked() {
+                        self.do_verb(Verb::Work(i as u8));
+                    }
+                }
+            });
+        });
+    }
+
+    fn street_contracts(&mut self, ui: &mut egui::Ui) {
+        // v0.5 contract board: local offers, one active contract.
+        let offers = self.server.world.offers().to_vec();
+        let active = self.server.world.active_contract().cloned();
+        let tick = self.server.world.tick;
+        if !offers.is_empty() || active.is_some() {
+            crate::theme::card(ui, "contracts", crate::theme::MONEY, |ui| {
+                if let Some(c) = &active {
+                    let left = c.deadline_tick.saturating_sub(tick);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!(
+                            "Contract: {} · {} · {left}t left · {} rep",
+                            c.title,
+                            c.kind.summary(),
+                            self.server.world.employer_reputation(c.employer)
+                        ));
+                        if ui.button("Deliver contract").clicked() {
+                            self.do_verb(Verb::DeliverContract);
+                        }
+                        if ui.button("Abandon contract").clicked() {
+                            self.do_verb(Verb::AbandonContract);
+                        }
+                    });
+                } else {
+                    if offers.is_empty() {
+                        crate::theme::label(ui, "No offers today — rest, work, or check mail.");
+                    } else {
+                        crate::theme::label(ui, "Accept one offer. Delivery pays the escrow.");
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        for o in &offers {
+                            let left = o.deadline_tick.saturating_sub(tick);
+                            let label = format!(
+                                "Accept: {} · {}c · {} · {} left",
+                                o.title,
+                                o.payout_cents,
+                                o.kind.summary(),
+                                left
+                            );
+                            let color = match o.risk.name() {
+                                "illegal" | "combat" => crate::theme::DANGER,
+                                "grey" => crate::theme::VEIL,
+                                _ => crate::theme::OLDNET,
+                            };
+                            if ui
+                                .add_sized(
+                                    [250.0, 30.0],
+                                    egui::Button::new(
+                                        egui::RichText::new(label.clone()).size(11.0).color(color),
+                                    )
+                                    .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
+                                    .stroke(egui::Stroke::new(1.0, color)),
+                                )
+                                .on_hover_text(format!(
+                                    "{} · {} · {}",
+                                    o.title,
+                                    o.kind.summary(),
+                                    o.risk.name()
+                                ))
+                                .clicked()
+                            {
+                                self.do_verb(Verb::AcceptOffer { offer: o.id });
+                            }
+                        }
+                    });
+                }
+            });
+        }
+    }
+
     /// Frame-free UI root: the runner calls this via [`eframe::App::ui`];
     /// headless tests drive it through `egui::Context::run_ui` with no
     /// window, GPU, or screenshots (see the accesskit harness below).
@@ -1433,7 +1709,7 @@ impl Shell {
                 // (data tests pin the file, so this is belt-and-braces).
                 // (id, pay, (resource, need, have)) when the job is gated.
                 let here = self.server.world.pos_of(self.actor).unwrap_or(pos(8, 8));
-                type JobRow = (String, i64, Option<(sim::Res, u32, u32)>);
+                type JobRow = StreetJob;
                 let mut jobs: Vec<JobRow> = self
                     .jobs
                     .iter()
@@ -1477,269 +1753,24 @@ impl Shell {
                         }
                     });
                 });
-                let (ax, ay) = (here.x, here.y);
-                let shop_tiles = self.server.world.shop_positions();
-                crate::theme::card(
-                    ui,
-                    &format!("street — section ({}, {})", here.sx, here.sy),
-                    crate::theme::BETANET,
-                    |ui| {
-                let terrain = self.server.world.section_at(here.sx, here.sy).cloned();
-                let npcs = self.server.world.npc_positions();
-                crate::theme::label(
-                    ui,
-                    "@ you · n folk · $ counter (gold) · . floor · # blocked — stand by $, Buy",
-                );
-                // Let the map grow into wide windows and centre it in the
-                // card, so the primary spatial surface is the visual anchor.
-                let side = ui.available_width().clamp(320.0, 860.0);
-                let ts = (side / 16.0).floor();
-                let map_size = egui::vec2(16.0 * ts, 16.0 * ts);
-                let canvas = egui::vec2(ui.available_width(), map_size.y);
-                let (resp, painter) = ui.allocate_painter(canvas, egui::Sense::click());
-                let rect = egui::Rect::from_center_size(resp.rect.center(), map_size);
-                for y in 0..16u8 {
-                    for x in 0..16u8 {
-                        let r = egui::Rect::from_min_size(
-                            rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                            egui::vec2(ts - 2.0, ts - 2.0),
-                        );
-                        let walkable = terrain
-                            .as_ref()
-                            .map(|s| s.walkable(x, y))
-                            .unwrap_or(true);
-                        let fill = if walkable {
-                            if (x as i32 + y as i32) % 5 == 0 {
-                                egui::Color32::from_rgb(0x17, 0x21, 0x29)
-                            } else {
-                                egui::Color32::from_rgb(0x13, 0x1C, 0x24)
-                            }
-                        } else {
-                            egui::Color32::from_rgb(0x1B, 0x24, 0x2C)
-                        };
-                        painter.rect_filled(r, 3.0, fill);
-                        painter.rect_stroke(
-                            r,
-                            3.0,
-                            egui::Stroke::new(0.7, crate::theme::LINE),
-                            egui::StrokeKind::Inside,
-                        );
-                    }
-                }
-                // Guarantees (doors/egress/computers) get a gold corner tick.
-                if let Some(s) = &terrain {
-                    for (_, gx, gy) in &s.guarantees {
-                        let r = egui::Rect::from_min_size(
-                            rect.min + egui::vec2(*gx as f32 * ts + 3.0, *gy as f32 * ts + 3.0),
-                            egui::vec2(ts - 8.0, ts - 8.0),
-                        );
-                        painter.rect_stroke(
-                            r,
-                            2.0,
-                            egui::Stroke::new(1.4, crate::theme::OLDNET_DIM),
-                            egui::StrokeKind::Inside,
-                        );
-                    }
-                }
-                for (sx, sy) in &shop_tiles {
-                    let c = rect.min + egui::vec2(*sx as f32 * ts + ts / 2.0, *sy as f32 * ts + ts / 2.0);
-                    painter.circle_filled(c, 9.0, egui::Color32::from_rgb(0x2A, 0x21, 0x14));
-                    painter.text(
-                        c,
-                        egui::Align2::CENTER_CENTER,
-                        "$",
-                        egui::FontId::monospace(13.0),
-                        crate::theme::OLDNET,
-                    );
-                }
-                for (_, nx, ny) in &npcs {
-                    let c = rect.min + egui::vec2(*nx as f32 * ts + ts / 2.0, *ny as f32 * ts + ts / 2.0);
-                    painter.circle_filled(c, 8.0, egui::Color32::from_rgb(0x1D, 0x2A, 0x22));
-                    painter.circle_stroke(c, 8.0, egui::Stroke::new(1.2, crate::theme::SUCCESS));
-                    painter.text(
-                        c,
-                        egui::Align2::CENTER_CENTER,
-                        "n",
-                        egui::FontId::monospace(11.0),
-                        crate::theme::SUCCESS,
-                    );
-                }
-                let player = rect.min + egui::vec2(ax as f32 * ts + ts / 2.0, ay as f32 * ts + ts / 2.0);
-                painter.circle_filled(player, 10.0, egui::Color32::from_rgb(0x18, 0x31, 0x3A));
-                painter.circle_stroke(player, 10.0, egui::Stroke::new(1.8, crate::theme::BETANET));
-                painter.text(
-                    player,
-                    egui::Align2::CENTER_CENTER,
-                    "▲",
-                    egui::FontId::monospace(12.0),
-                    crate::theme::BETANET,
-                );
-                let hover_tile = resp.hover_pos().and_then(|p| {
-                    if !rect.contains(p) {
-                        return None;
-                    }
-                    let x = ((p.x - rect.min.x) / ts).floor() as i32;
-                    let y = ((p.y - rect.min.y) / ts).floor() as i32;
-                    if (0..16).contains(&x) && (0..16).contains(&y) {
-                        Some((x as u8, y as u8))
-                    } else {
-                        None
-                    }
-                });
-                if let Some((x, y)) = self.street_sel {
-                    let r = egui::Rect::from_min_size(
-                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                        egui::vec2(ts - 2.0, ts - 2.0),
-                    );
-                    painter.rect_stroke(
-                        r,
-                        3.0,
-                        egui::Stroke::new(2.0, crate::theme::OLDNET),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if let Some((x, y)) = hover_tile {
-                    let r = egui::Rect::from_min_size(
-                        rect.min + egui::vec2(x as f32 * ts, y as f32 * ts),
-                        egui::vec2(ts - 2.0, ts - 2.0),
-                    );
-                    painter.rect_stroke(
-                        r,
-                        3.0,
-                        egui::Stroke::new(1.4, crate::theme::BETANET),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                if resp.clicked() {
-                    if let Some(t) = hover_tile {
-                        self.street_sel = Some(t);
-                    }
-                }
-                let tile_desc = hover_tile.map(|(x, y)| {
-                    let mut bits = vec![format!("tile ({x},{y})")];
-                    if let Some(s) = &terrain {
-                        bits.push(if s.walkable(x, y) { "walkable" } else { "blocked" }.to_string());
-                    }
-                    if (x, y) == (ax, ay) {
-                        bits.push("you".to_string());
-                    }
-                    if let Some((id, _, _)) = npcs.iter().find(|(_, nx, ny)| (*nx, *ny) == (x, y)) {
-                        if let Some(role) = self.server.world.npc_role(*id) {
-                            bits.push(format!("{role:?}"));
-                        }
-                    }
-                    if shop_tiles.contains(&(x, y)) {
-                        bits.push("counter".to_string());
-                    }
-                    bits.join(" · ")
-                });
-                if let Some(desc) = tile_desc {
-                    resp.on_hover_text_at_pointer(desc);
-                }
-                if let Some((x, y)) = self.street_sel {
-                    crate::theme::label(ui, format!("Selected tile ({x},{y}) — click map to inspect"));
+                let wide = ui.available_width() >= 1180.0;
+                if wide {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            // Match the map's 860px canvas plus card margins.
+                            ui.set_width(880.0);
+                            self.street_map(ui, here);
+                        });
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            self.street_work(ui, &jobs);
+                            self.street_contracts(ui);
+                        });
+                    });
                 } else {
-                    ui.label(
-                        egui::RichText::new("Click a tile to inspect · WASD/hjkl to walk")
-                            .size(11.0)
-                            .color(crate::theme::FAINT),
-                    );
-                }
-                    },
-                );
-                // Job board on its own wrapped row: five long labels with
-                // live counts overflow a single row and push later controls
-                // outside the clip rect (their clicks are then ignored).
-                crate::theme::card(ui, "work board", crate::theme::OLDNET, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for (i, (id, pay, req)) in jobs.iter().enumerate() {
-                            let label = match req {
-                                Some((res, need, have)) => format!(
-                                    "Work {i}: {id} {pay}c [{} {have}/{need}]",
-                                    res.name()
-                                ),
-                                None => format!("Work {i}: {id} {pay}c"),
-                            };
-                            if ui.button(label).clicked() {
-                                self.do_verb(Verb::Work(i as u8));
-                            }
-                        }
-                    });
-                });
-                // v0.5 contract board: local offers, one active contract.
-                let offers = self.server.world.offers().to_vec();
-                let active = self.server.world.active_contract().cloned();
-                let tick = self.server.world.tick;
-                if !offers.is_empty() || active.is_some() {
-                    crate::theme::card(ui, "contracts", crate::theme::MONEY, |ui| {
-                        if let Some(c) = &active {
-                            let left = c.deadline_tick.saturating_sub(tick);
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(format!(
-                                    "Contract: {} · {} · {left}t left · {} rep",
-                                    c.title,
-                                    c.kind.summary(),
-                                    self.server.world.employer_reputation(c.employer)
-                                ));
-                                if ui.button("Deliver contract").clicked() {
-                                    self.do_verb(Verb::DeliverContract);
-                                }
-                                if ui.button("Abandon contract").clicked() {
-                                    self.do_verb(Verb::AbandonContract);
-                                }
-                            });
-                        } else {
-                            if offers.is_empty() {
-                                crate::theme::label(
-                                    ui,
-                                    "No offers today — rest, work, or check mail.",
-                                );
-                            } else {
-                                crate::theme::label(
-                                    ui,
-                                    "Accept one offer. Delivery pays the escrow.",
-                                );
-                            }
-                            ui.horizontal_wrapped(|ui| {
-                                for o in &offers {
-                                    let left = o.deadline_tick.saturating_sub(tick);
-                                    let label = format!(
-                                        "Accept: {} · {}c · {} · {} left",
-                                        o.title,
-                                        o.payout_cents,
-                                        o.kind.summary(),
-                                        left
-                                    );
-                                    let color = match o.risk.name() {
-                                        "illegal" | "combat" => crate::theme::DANGER,
-                                        "grey" => crate::theme::VEIL,
-                                        _ => crate::theme::OLDNET,
-                                    };
-                                    if ui
-                                        .add_sized(
-                                            [250.0, 30.0],
-                                            egui::Button::new(
-                                                egui::RichText::new(label.clone())
-                                                    .size(11.0)
-                                                    .color(color),
-                                            )
-                                            .fill(egui::Color32::from_rgb(0x12, 0x1B, 0x22))
-                                            .stroke(egui::Stroke::new(1.0, color)),
-                                        )
-                                        .on_hover_text(format!(
-                                            "{} · {} · {}",
-                                            o.title,
-                                            o.kind.summary(),
-                                            o.risk.name()
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.do_verb(Verb::AcceptOffer { offer: o.id });
-                                    }
-                                }
-                            });
-                        }
-                    });
+                    self.street_map(ui, here);
+                    self.street_work(ui, &jobs);
+                    self.street_contracts(ui);
                 }
                 // Pack (design/07): carried stacks, worn gear, and items on
                 // this tile. Buttons stay in one wrapped row to avoid egui's
@@ -3091,17 +3122,23 @@ mod tests {
             shell: Shell,
             ctx: egui::Context,
             time: f64,
+            size: egui::Vec2,
             tree: std::collections::HashMap<NodeId, Node>,
         }
 
         impl Harness {
             fn new() -> Self {
+                Self::new_sized(1280.0, 800.0)
+            }
+
+            fn new_sized(width: f32, height: f32) -> Self {
                 let ctx = egui::Context::default();
                 ctx.enable_accesskit();
                 let mut h = Self {
                     shell: Shell::new(None),
                     ctx,
                     time: 0.0,
+                    size: egui::vec2(width, height),
                     tree: Default::default(),
                 };
                 h.pass_with(vec![]);
@@ -3111,10 +3148,7 @@ mod tests {
             fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
                 self.time += 0.1;
                 egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1280.0, 800.0),
-                    )),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
                     time: Some(self.time),
                     events,
                     ..Default::default()
@@ -3553,6 +3587,25 @@ mod tests {
             for header in ["HOST", "ARENA", "SECURITY", "LOADOUT", "CARDS @SELECTED"] {
                 assert!(h.has_text(header), "missing Deck header {header:?}");
             }
+        }
+
+        #[test]
+        fn wide_layout_keeps_every_region_reachable() {
+            let h = Harness::new_sized(1920.0, 1080.0);
+            for header in [
+                "SURVIVAL",
+                "BODY",
+                "CONDUCT",
+                "SESSION",
+                "DAILY ACTIONS",
+                "STREET — SECTION (0, 0)",
+                "WORK BOARD",
+                "CONTRACTS",
+                "MAIL",
+            ] {
+                assert!(h.has_text(header), "missing wide header {header:?}");
+            }
+            assert!(h.has_text("Tile (8,8)"), "inspector missing at 1920");
         }
 
         #[test]

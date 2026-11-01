@@ -15,8 +15,10 @@
 > and effect text. The shell now uses framed cards with accent headers for
 > every region, the Street map is the first centre-view surface, the
 > console has a stable height, and card headers name each system so a new
-> player can scan the screen. Scope is the `gui/` shell; the deterministic
-> sim and server stay unchanged except for small interaction verbs.
+> player can scan the screen. At wide widths the Street map and the
+> work/contract rail share one row; narrower windows stack them. Scope is
+> the `gui/` shell; the deterministic sim and server stay unchanged except
+> for small interaction verbs.
 
 ## 1. Experience goals
 
