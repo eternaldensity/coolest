@@ -20,6 +20,18 @@ pub const DANGER: Color32 = Color32::from_rgb(0xF0, 0x6A, 0x6F);
 pub const SUCCESS: Color32 = Color32::from_rgb(0x62, 0xC9, 0x8A);
 pub const VEIL: Color32 = Color32::from_rgb(0xA7, 0x8B, 0xFA);
 pub const PAPER: Color32 = Color32::from_rgb(0xE8, 0xE1, 0xD0);
+pub const LOOP: Color32 = Color32::from_rgb(120, 200, 120);
+pub const DATA: Color32 = Color32::from_rgb(110, 190, 230);
+pub const ALGO: Color32 = Color32::from_rgb(220, 150, 240);
+
+/// Semantic color for a resource component.
+pub fn resource_color(res: sim::Res) -> Color32 {
+    match res {
+        sim::Res::Loop => LOOP,
+        sim::Res::Data => DATA,
+        sim::Res::Algo => ALGO,
+    }
+}
 
 pub fn apply(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -169,6 +181,22 @@ pub fn meter(ui: &mut egui::Ui, label: &str, value: f32, max: f32, color: Color3
 
 pub fn chip(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) {
     ui.label(RichText::new(text.into()).size(10.5).strong().color(color));
+}
+
+/// A compact label/value row for the narrow rail: quiet label on the left,
+/// tabular value on the right. Keeps long prose from wrapping mid-number.
+pub fn stat_row(ui: &mut egui::Ui, label: &str, value: impl Into<String>, color: Color32) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).size(10.5).color(FAINT));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(value.into())
+                    .size(12.0)
+                    .monospace()
+                    .color(color),
+            );
+        });
+    });
 }
 
 pub fn heading(ui: &mut egui::Ui, text: impl Into<String>) {

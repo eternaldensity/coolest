@@ -36,6 +36,18 @@ fn pos(x: u8, y: u8) -> Pos {
 
 /// One-line effect blurb for stocked items whose benefit is otherwise
 /// unstated. No entry means no promised effect.
+fn alignment_label(a: sim::Alignment) -> &'static str {
+    match a {
+        sim::Alignment::HonestPassive => "honest · passive",
+        sim::Alignment::HonestActive => "honest · active",
+        sim::Alignment::Untrusted => "untrusted",
+        sim::Alignment::Authority => "authority",
+        sim::Alignment::MinorDishonest => "minor dishonest",
+        sim::Alignment::MajorDishonest => "major dishonest",
+        sim::Alignment::Evil => "evil",
+    }
+}
+
 fn item_blurb(item: &str) -> &'static str {
     match item {
         "firewall" => " · slows inbound traces",
@@ -304,7 +316,7 @@ impl Shell {
         server.world.set_home(pos(8, 8));
         // Populate the local board after employers exist.
         server.world.refresh_board();
-        let mut shell = Self {
+        Self {
             server,
             actor,
             tab: Tab::Street,
@@ -324,9 +336,7 @@ impl Shell {
             reduced_motion: false,
             cards: card_defs,
             hovered_card: None,
-        };
-        shell.say_status();
-        shell
+        }
     }
 
     fn say(&mut self, line: String) {
@@ -594,7 +604,15 @@ impl Shell {
                             .color(crate::theme::TEXT),
                     );
                     ui.horizontal_wrapped(|ui| {
-                        crate::theme::label(ui, if walkable { "walkable" } else { "blocked" });
+                        crate::theme::chip(
+                            ui,
+                            if walkable { "walkable" } else { "blocked" },
+                            if walkable {
+                                crate::theme::SUCCESS
+                            } else {
+                                crate::theme::DANGER
+                            },
+                        );
                         if (x, y) == (here.x, here.y) {
                             crate::theme::chip(ui, "you are here", crate::theme::BETANET);
                         }
@@ -603,6 +621,47 @@ impl Shell {
                         self.walk_to(x, y);
                     }
                 });
+                // Nearby locator: keeps the inspector useful on the player's
+                // own tile and turns the map into a selection surface.
+                let near = |nx: u8, ny: u8| {
+                    (nx as i16 - here.x as i16).abs() <= 5 && (ny as i16 - here.y as i16).abs() <= 5
+                };
+                let near_npcs: Vec<(Role, u8, u8)> = self
+                    .server
+                    .world
+                    .npc_positions()
+                    .into_iter()
+                    .filter(|(_, nx, ny)| near(*nx, *ny))
+                    .filter_map(|(id, nx, ny)| {
+                        self.server.world.npc_role(id).map(|role| (role, nx, ny))
+                    })
+                    .collect();
+                let near_shops: Vec<(u8, u8)> = self
+                    .server
+                    .world
+                    .shop_positions()
+                    .into_iter()
+                    .filter(|(nx, ny)| near(*nx, *ny))
+                    .collect();
+                if !near_npcs.is_empty() || !near_shops.is_empty() {
+                    crate::theme::card(ui, "nearby", crate::theme::OLDNET, |ui| {
+                        ui.label(
+                            egui::RichText::new("click to inspect")
+                                .size(10.0)
+                                .color(crate::theme::FAINT),
+                        );
+                        for (role, nx, ny) in near_npcs {
+                            if ui.button(format!("{role:?} ({nx},{ny})")).clicked() {
+                                self.street_sel = Some((nx, ny));
+                            }
+                        }
+                        for (nx, ny) in near_shops {
+                            if ui.button(format!("counter ({nx},{ny})")).clicked() {
+                                self.street_sel = Some((nx, ny));
+                            }
+                        }
+                    });
+                }
                 let npc = self
                     .server
                     .world
@@ -1488,32 +1547,60 @@ impl Shell {
             .resizable(false)
             .show(ui, |ui| {
                 crate::theme::heading(ui, "Status");
-                if let Some((food, mood, money, rations)) = self.server.world.needs(self.actor) {
+                if let Some((food, mood, _money, rations)) = self.server.world.needs(self.actor) {
                     crate::theme::card(ui, "survival", crate::theme::OLDNET, |ui| {
-                        ui.label(status_line(food, mood, money));
-                        crate::theme::meter(ui, "Food", food as f32, 100.0, crate::theme::OLDNET);
-                        crate::theme::meter(ui, "Mood", mood as f32, 100.0, crate::theme::BETANET);
+                        let food_color = if food < 30 {
+                            crate::theme::DANGER
+                        } else {
+                            crate::theme::OLDNET
+                        };
+                        let mood_color = if mood < 30 {
+                            crate::theme::DANGER
+                        } else {
+                            crate::theme::BETANET
+                        };
+                        crate::theme::meter(ui, "Food", food as f32, 100.0, food_color);
+                        crate::theme::meter(ui, "Mood", mood as f32, 100.0, mood_color);
                         let bank = self
                             .server
                             .world
                             .bank_balance(self.actor)
-                            .map(|b| format!("bank ${:.2}", b as f64 / 100.0))
-                            .unwrap_or_else(|| "bank —".to_string());
-                        ui.label(bank);
-                        let units = sim::Res::ALL
-                            .iter()
-                            .map(|r| {
-                                format!("{} {}", r.name(), self.server.world.units(self.actor, *r))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" · ");
-                        ui.label(format!("components: {units}"));
+                            .map(|b| format!("${:.2}", b as f64 / 100.0))
+                            .unwrap_or_else(|| "—".to_string());
+                        crate::theme::stat_row(ui, "bank", bank, crate::theme::MONEY);
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new("components")
+                                .size(10.0)
+                                .color(crate::theme::FAINT),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            for r in sim::Res::ALL {
+                                crate::theme::chip(
+                                    ui,
+                                    format!(
+                                        "{} {}",
+                                        r.name().to_uppercase(),
+                                        self.server.world.units(self.actor, r)
+                                    ),
+                                    crate::theme::resource_color(r),
+                                );
+                            }
+                        });
                     });
                     // Body/health (design/06-07). The clinic is the only way
                     // back from a lethal blow in v0.4.
                     if let Some(h) = self.server.world.health_of(self.actor) {
                         crate::theme::card(ui, "body", crate::theme::SUCCESS, |ui| {
-                            ui.label(format!("HP {}/{}", h.hp, h.max_hp));
+                            let hp_frac = h.hp as f32 / h.max_hp.max(1) as f32;
+                            let hp_color = if hp_frac <= 0.25 {
+                                crate::theme::DANGER
+                            } else if hp_frac <= 0.5 {
+                                crate::theme::OLDNET
+                            } else {
+                                crate::theme::SUCCESS
+                            };
+                            crate::theme::meter(ui, "HP", h.hp as f32, h.max_hp as f32, hp_color);
                             if !h.is_alive() && ui.button("Revive at clinic").clicked() {
                                 match self.server.apply_one(Intent {
                                     actor: self.actor,
@@ -1524,16 +1611,22 @@ impl Shell {
                                 }
                             }
                             if let Some(body) = self.server.world.body_of(self.actor) {
-                                ui.label(format!(
-                                    "PV {} · DV {} · STR {} · DEX {}",
-                                    body.pv, body.dv, body.str, body.dex
-                                ));
+                                ui.horizontal_wrapped(|ui| {
+                                    for (label, value) in [
+                                        ("PV", body.pv),
+                                        ("DV", body.dv),
+                                        ("STR", body.str),
+                                        ("DEX", body.dex),
+                                    ] {
+                                        crate::theme::chip(
+                                            ui,
+                                            format!("{label} {value}"),
+                                            crate::theme::MUTED,
+                                        );
+                                    }
+                                });
                             }
                             if let Some(mind) = self.server.world.mind_of(self.actor) {
-                                ui.label(format!(
-                                    "mindpower {} · literacy {}",
-                                    mind.mindpower, mind.comp_literacy
-                                ));
                                 crate::theme::meter(
                                     ui,
                                     "Mind",
@@ -1541,16 +1634,36 @@ impl Shell {
                                     20.0,
                                     crate::theme::VEIL,
                                 );
+                                crate::theme::stat_row(
+                                    ui,
+                                    "literacy",
+                                    mind.comp_literacy.to_string(),
+                                    crate::theme::MUTED,
+                                );
                             }
                         });
                     }
                     // Heat (design/05): alignment/standing are pure functions of
-                    // the record, so settling the fine clears both.
+                    // the record, so settling the fine clears both. Standing
+                    // itself lives in the top bar; this card explains why.
                     crate::theme::card(ui, "conduct", crate::theme::DANGER, |ui| {
-                        let standing = self.server.world.standing();
                         let mass = self.server.world.record_mass();
-                        ui.label(format!("standing {standing:?} · mass {mass:.1}"));
-                        ui.label(format!("alignment {:?}", self.server.world.alignment()));
+                        crate::theme::stat_row(
+                            ui,
+                            "record mass",
+                            format!("{mass:.1}"),
+                            if mass > 0.0 {
+                                crate::theme::DANGER
+                            } else {
+                                crate::theme::MUTED
+                            },
+                        );
+                        crate::theme::stat_row(
+                            ui,
+                            "alignment",
+                            alignment_label(self.server.world.alignment()),
+                            crate::theme::MUTED,
+                        );
                         if mass > 0.0 {
                             let cost = self.server.world.fine_cost();
                             if ui
@@ -1568,12 +1681,23 @@ impl Shell {
                         }
                         // License to hack (design/05): 3 threat kills + clean record.
                         let lic = self.server.world.license();
-                        ui.label(format!(
-                            "license: {} kills{}{}",
-                            lic.threat_kills,
-                            if lic.granted { " · HELD" } else { "" },
-                            if lic.revoked { " · revoked" } else { "" }
-                        ));
+                        let lic_value = if lic.granted {
+                            "held".to_string()
+                        } else if lic.revoked {
+                            "revoked".to_string()
+                        } else {
+                            format!("{}/3 kills", lic.threat_kills)
+                        };
+                        crate::theme::stat_row(
+                            ui,
+                            "license",
+                            lic_value,
+                            if lic.revoked {
+                                crate::theme::DANGER
+                            } else {
+                                crate::theme::MUTED
+                            },
+                        );
                         if !lic.granted && ui.button("Apply license").clicked() {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -1585,11 +1709,12 @@ impl Shell {
                         }
                         // Clan (design/05 M4b): dues + initiation, lifetime enemies.
                         let in_clan = self.server.world.clans().is_member(1, self.actor);
-                        ui.label(if in_clan {
-                            "clan: member of 1"
-                        } else {
-                            "clan: none"
-                        });
+                        crate::theme::stat_row(
+                            ui,
+                            "clan",
+                            if in_clan { "member of 1" } else { "none" },
+                            crate::theme::MUTED,
+                        );
                         if !in_clan && ui.button("Join clan 1 ($5.00)").clicked() {
                             match self.server.apply_one(Intent {
                                 actor: self.actor,
@@ -1600,43 +1725,55 @@ impl Shell {
                             }
                         }
                     });
-                    crate::theme::card(ui, "session", crate::theme::MUTED, |ui| {
-                        ui.label(format!("rations {rations} tick {}", self.server.world.tick));
-                        let tick = self.server.world.tick;
-                        ui.label(format!(
-                            "Day {} {:02}:{:02}",
-                            tick / 1440 + 1,
-                            (tick / 60) % 24,
-                            tick % 60
-                        ));
-                        if food < 30 || mood < 30 {
+                    crate::theme::card(ui, "briefing", crate::theme::MUTED, |ui| {
+                        crate::theme::section(ui, "objective");
+                        for part in self.server.world.advise(self.actor).split(", ") {
                             ui.label(
-                                egui::RichText::new("! needs low — Eat / Watch soon")
-                                    .color(egui::Color32::RED),
+                                egui::RichText::new(format!("· {part}"))
+                                    .size(12.0)
+                                    .strong()
+                                    .color(crate::theme::TEXT),
                             );
                         }
-                        ui.add_space(2.0);
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Objective: {}",
-                                self.server.world.advise(self.actor)
-                            ))
-                            .strong(),
+                        if food < 30 || mood < 30 {
+                            crate::theme::chip(
+                                ui,
+                                "! needs low — Eat / Watch soon",
+                                crate::theme::DANGER,
+                            );
+                        }
+                        crate::theme::stat_row(
+                            ui,
+                            "rations",
+                            rations.to_string(),
+                            crate::theme::TEXT,
                         );
                         let cop = Timetable::cop_day();
-                        ui.label(format!(
-                            "cop 10:00 -> {:?}",
-                            cop_duty(&cop, 10, Standing::Clean)
-                        ));
+                        crate::theme::stat_row(
+                            ui,
+                            "cop shift",
+                            format!(
+                                "10:00 · {}",
+                                format!("{:?}", cop_duty(&cop, 10, Standing::Clean)).to_lowercase()
+                            ),
+                            crate::theme::MUTED,
+                        );
                     });
                 }
                 ui.add_space(4.0);
+                let button_w = (ui.available_width() - 8.0) / 2.0;
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
+                    if ui
+                        .add_sized([button_w, 26.0], egui::Button::new("Save"))
+                        .clicked()
+                    {
                         let msg = persist_save(&self.server);
                         self.say(msg);
                     }
-                    if ui.button("Load").clicked() {
+                    if ui
+                        .add_sized([button_w, 26.0], egui::Button::new("Load"))
+                        .clicked()
+                    {
                         let msg = persist_load(&mut self.server);
                         self.say(msg);
                     }
@@ -3573,7 +3710,7 @@ mod tests {
                 "SURVIVAL",
                 "BODY",
                 "CONDUCT",
-                "SESSION",
+                "BRIEFING",
                 "DAILY ACTIONS",
                 "STREET — SECTION (0, 0)",
                 "WORK BOARD",
@@ -3596,7 +3733,7 @@ mod tests {
                 "SURVIVAL",
                 "BODY",
                 "CONDUCT",
-                "SESSION",
+                "BRIEFING",
                 "DAILY ACTIONS",
                 "STREET — SECTION (0, 0)",
                 "WORK BOARD",
@@ -3606,6 +3743,18 @@ mod tests {
                 assert!(h.has_text(header), "missing wide header {header:?}");
             }
             assert!(h.has_text("Tile (8,8)"), "inspector missing at 1920");
+        }
+
+        #[test]
+        fn inspector_lists_nearby_landmarks() {
+            let h = Harness::new();
+            // The inspector is never a dead panel on the player's own tile.
+            assert!(h.has_text("NEARBY"), "text: {:?}", h.labels());
+            assert!(
+                h.has_text("counter (10,8)"),
+                "nearby counter missing; text: {:?}",
+                h.labels()
+            );
         }
 
         #[test]
@@ -3783,14 +3932,16 @@ mod tests {
         fn bank_balance_shows_and_moves_on_deposit_click() {
             let mut h = Harness::new();
             // Demo world opens the player's account with $5.00 minted.
-            assert!(h.has_text("bank $5.00"), "text: {:?}", h.labels());
+            assert!(h.has_text("bank"), "text: {:?}", h.labels());
+            assert_eq!(h.shell.server.world.bank_balance(EntityId(1)), Some(500));
             // Deposit $1.50 through the console; pocket drops, bank rises.
             let at = h.text_input_center();
             h.click_at(at);
             h.pass_with(vec![egui::Event::Text("deposit 150".into())]);
             h.tap_key(egui::Key::Enter);
             h.pass_with(vec![]);
-            assert!(h.has_text("bank $6.50"), "text: {:?}", h.labels());
+            assert!(h.has_text("$6.50"), "text: {:?}", h.labels());
+            assert_eq!(h.shell.server.world.bank_balance(EntityId(1)), Some(650));
             assert_eq!(h.shell.server.log.len(), 1);
         }
 
@@ -3898,8 +4049,9 @@ mod tests {
         #[test]
         fn license_shows_and_applying_requires_eligibility() {
             let mut h = Harness::new();
-            // No kills yet: shown, and applying is refused with its cause.
-            assert!(h.has_text("license: 0 kills"), "text: {:?}", h.labels());
+            // No kills yet: progress is shown, and applying is refused
+            // with its cause.
+            assert!(h.has_text("0/3 kills"), "text: {:?}", h.labels());
             h.click("Apply license");
             assert!(
                 h.shell
@@ -3914,8 +4066,8 @@ mod tests {
         #[test]
         fn heat_shows_and_paying_a_fine_settles_it() {
             let mut h = Harness::new();
-            // Clean to start: standing shown, no fine button.
-            assert!(h.has_text("standing Clean"), "text: {:?}", h.labels());
+            // Clean to start: standing is in the top bar, no fine button.
+            assert!(h.has_text("Clean"), "text: {:?}", h.labels());
             assert!(!h
                 .labels()
                 .iter()
@@ -3932,10 +4084,10 @@ mod tests {
                 "no fine control; text: {:?}",
                 h.labels()
             );
-            assert!(!h.has_text("standing Clean"), "text: {:?}", h.labels());
+            assert!(!h.has_text("Clean"), "text: {:?}", h.labels());
             // Settle: the record clears and pursuit ends.
             h.click_prefix("Pay fine");
-            assert!(h.has_text("standing Clean"), "text: {:?}", h.labels());
+            assert!(h.has_text("Clean"), "text: {:?}", h.labels());
             assert!(
                 h.shell.log.iter().any(|l| l.contains("record settled")),
                 "log: {:?}",
@@ -4117,11 +4269,7 @@ mod tests {
         #[test]
         fn farm_then_units_accrue_free_and_show() {
             let mut h = Harness::new();
-            assert!(
-                h.has_text("components: loop 0 · data 0 · algo 0"),
-                "text: {:?}",
-                h.labels()
-            );
+            assert!(h.has_text("LOOP 0"), "text: {:?}", h.labels());
             h.click("Deck");
             // Select a cell, then farm a loop producer there.
             h.click_last(".");
@@ -4136,11 +4284,7 @@ mod tests {
             h.click("Street");
             h.click("Watch");
             h.click("Watch");
-            assert!(
-                h.has_text("components: loop 9 · data 0 · algo 0"),
-                "text: {:?}",
-                h.labels()
-            );
+            assert!(h.has_text("LOOP 9"), "text: {:?}", h.labels());
             // Farm + two watches are all logged acts.
             assert_eq!(h.shell.server.log.len(), 3);
         }
