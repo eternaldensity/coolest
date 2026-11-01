@@ -19,6 +19,8 @@ Playable sim + headless client + GUI shell (228 test executions green).
 
 - [SETUP.md](SETUP.md) — toolchain, build, test, layout, workflow
 - [PLAYER_GUIDE.md](PLAYER_GUIDE.md) — how the game plays today
+- [docs/ARCHITECTURE-PROPOSED.md](docs/ARCHITECTURE-PROPOSED.md) — system view:
+  sim/server/bridge/PDS and how the architecture supports gameplay
 - [design/](design/) — full design docs (00–12): vision, world, deck combat,
   network, AI/crime, characters, architecture, roadmap, and the
   2006 + 2024 synthesis
