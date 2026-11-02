@@ -205,6 +205,10 @@ pub struct Mail {
     /// must be saved to disk before they can be run; nothing auto-executes.
     #[serde(default)]
     pub attachment: Option<String>,
+    /// Virus attachment (design/04): auto-runs on open. Logged, never
+    /// executes code; the reader's hosts file a crime.
+    #[serde(default)]
+    pub virus: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -231,6 +235,7 @@ impl Mailbox {
             tick: 0,
             trojan: false,
             attachment: None,
+            virus: false,
         };
         self.record_sent(m.clone())?;
         self.deliver(m)

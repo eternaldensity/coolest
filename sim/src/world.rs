@@ -1258,6 +1258,7 @@ impl World {
             tick: self.tick,
             trojan,
             attachment: None,
+            virus: false,
         };
         let outbox = self.mailboxes.entry(from.0).or_default();
         if outbox.outbox.len() >= crate::ledger::MAIL_CAP {
@@ -2556,6 +2557,11 @@ impl World {
                 if host.has_kind(intent.actor, ProgramKind::Editor).is_none() {
                     return Err(SimError::new("no_editor", "Editor on host", "missing"));
                 }
+                let from = host.access_zone(intent.actor);
+                let to = host.zone_at(x, y);
+                if !Host::zone_visible(from, to) {
+                    return Err(SimError::new("zone_hidden", "visible cell", "hidden"));
+                }
                 host.overwrite(CellPos(x, y))?;
                 kind = "overwritten";
             }
@@ -2606,11 +2612,20 @@ impl World {
                 kind = "connected";
             }
             Verb::DeckStrike { x, y } => {
-                let killed = self
-                    .hosts
-                    .entry(1)
-                    .or_insert_with(|| Host::new(HostId(1), 12, 8, 100))
-                    .strike(CellPos(x, y))?;
+                // Zone visibility gate: you can only strike cells visible
+                // from a zone your program occupies.
+                let killed = {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    let from = host.access_zone(intent.actor);
+                    let to = host.zone_at(x, y);
+                    if !Host::zone_visible(from, to) {
+                        return Err(SimError::new("zone_hidden", "visible cell", "hidden"));
+                    }
+                    host.strike(CellPos(x, y))?
+                };
                 if killed {
                     extra_kinds.push("kill".to_string());
                 }
@@ -2911,6 +2926,11 @@ impl World {
                         self.zombies.enslave(HostId(h), mail.from);
                     }
                     kind = "trojan_opened";
+                } else if mail.virus {
+                    // Virus auto-run: file a crime and log it. The reader's
+                    // hosts are flagged but not enslaved (design/04).
+                    crimes.push((Act::Trespass, None, None, true));
+                    kind = "virus_opened";
                 } else {
                     kind = "opened_mail";
                 }
@@ -5959,6 +5979,7 @@ mod tests {
                 tick: 0,
                 trojan: true,
                 attachment: None,
+                virus: false,
             })
             .unwrap();
         assert_eq!(w.inbox(EntityId(1)).len(), 1);

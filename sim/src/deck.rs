@@ -544,6 +544,43 @@ impl Host {
         self.accounts.get(&id)
     }
 
+    /// The zone from which an owner's programs operate. Defaults to Public
+    /// if the owner has no program on the host.
+    pub fn access_zone(&self, owner: EntityId) -> MemZone {
+        self.progs
+            .values()
+            .find(|p| p.owner == owner)
+            .map(|p| self.zone_at(p.head.0, p.head.1))
+            .unwrap_or(MemZone::Public)
+    }
+
+    /// Zone visibility rule (design/03): Private cells are only visible
+    /// from an AccessPrivate cell; AccessPrivate cells are visible from
+    /// AccessPublic or AccessPrivate; everything else is always visible.
+    pub fn zone_visible(from: MemZone, to: MemZone) -> bool {
+        match to {
+            MemZone::Private => from == MemZone::AccessPrivate,
+            MemZone::AccessPrivate => {
+                from == MemZone::AccessPublic || from == MemZone::AccessPrivate
+            }
+            _ => true,
+        }
+    }
+
+    /// Cells visible from a given zone.
+    pub fn visible_cells(&self, from: MemZone) -> Vec<(u8, u8)> {
+        let mut out = Vec::new();
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let z = self.zone_at(x, y);
+                if Self::zone_visible(from, z) {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
+    }
+
     /// Set the archetype and install that archetype's vulns from the data
     /// table (design/03: "data-driven vulns"). Returns how many landed.
     pub fn set_arch(&mut self, arch: HostArch, defs: &[crate::data::VulnDef]) -> usize {

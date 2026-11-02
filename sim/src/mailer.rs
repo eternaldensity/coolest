@@ -15,6 +15,12 @@ pub struct Mailer {
     /// Host account id this mailer is bound to (design/04). 0 = unbound.
     #[serde(default)]
     pub account: u64,
+    /// Simulated salted hash of the mailbox password (design/04).
+    #[serde(default)]
+    pub password_hash: u64,
+    /// Salt for the password hash.
+    #[serde(default)]
+    pub salt: u64,
     /// Multi-turn crack progress against a target mailbox (per owner).
     #[serde(default)]
     pub crack: BTreeMap<u64, u32>,
@@ -89,6 +95,8 @@ mod tests {
             owner: EntityId(1),
             plus: false,
             account: 0,
+            password_hash: 0,
+            salt: 0,
             crack: BTreeMap::new(),
         };
         assert!(plain.snoop(&mbox).is_err());
@@ -96,6 +104,8 @@ mod tests {
             owner: EntityId(1),
             plus: true,
             account: 0,
+            password_hash: 0,
+            salt: 0,
             crack: BTreeMap::new(),
         };
         let seen = plus.snoop(&mbox).unwrap();
