@@ -103,6 +103,23 @@ pub enum Verb {
         x: u8,
         y: u8,
     },
+    /// v0.7 host dungeon: list files on the current host.
+    DeckListFiles,
+    /// v0.7 host dungeon: read a file on the current host.
+    DeckReadFile {
+        name: String,
+    },
+    /// v0.7 host dungeon: decompile a file into a random mod (Editor).
+    DeckDecompile {
+        x: u8,
+        y: u8,
+        file: String,
+    },
+    /// v0.7 host dungeon: flip ownership of an enemy head (mindpower check).
+    DeckTakeover {
+        x: u8,
+        y: u8,
+    },
     /// Jack into the veil with the actor's real mindpower (design/05).
     VeilEnter,
     /// Move between veil areas along exit links.
@@ -2597,6 +2614,73 @@ impl World {
                     killed,
                 ));
             }
+            Verb::DeckListFiles => {
+                let host = self
+                    .hosts
+                    .get(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                for name in host.files().keys() {
+                    extra_kinds.push(format!("file:{}", name));
+                }
+                kind = "listed";
+            }
+            Verb::DeckReadFile { ref name } => {
+                let host = self
+                    .hosts
+                    .get(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                let f = host
+                    .read_file(name)
+                    .ok_or(SimError::new("no_file", "file", "missing"))?;
+                extra_kinds.push(format!("read:{}", f.name));
+                if !f.content.is_empty() {
+                    extra_kinds.push(format!("content:{}", f.content));
+                }
+                kind = "read";
+            }
+            Verb::DeckDecompile { ref file, .. } => {
+                let host = self
+                    .hosts
+                    .get(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Editor).is_none() {
+                    return Err(SimError::new("no_editor", "Editor on host", "missing"));
+                }
+                let f = host
+                    .read_file(file)
+                    .ok_or(SimError::new("no_file", "file", "missing"))?;
+                extra_kinds.push(format!("decompiled:{}", f.name));
+                kind = "decompiled";
+            }
+            Verb::DeckTakeover { x, y } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Killer).is_none() {
+                    return Err(SimError::new("no_killer", "Killer on host", "missing"));
+                }
+                let attacker = host
+                    .progs
+                    .values()
+                    .find(|p| {
+                        p.owner == intent.actor
+                            && (p.head.0 as i16 - x as i16).abs()
+                                + (p.head.1 as i16 - y as i16).abs()
+                                == 1
+                    })
+                    .map(|p| p.id)
+                    .ok_or(SimError::new("no_attacker", "adjacent program", "missing"))?;
+                if host.owner_of(attacker) != Some(intent.actor) {
+                    return Err(SimError::new("not_yours", "your program", "foreign"));
+                }
+                let mp = b.mind.mindpower;
+                if mp < 5 {
+                    return Err(SimError::new("low_mind", "mindpower", "short"));
+                }
+                host.takeover(attacker, CellPos(x, y))?;
+                kind = "taken_over";
+            }
             Verb::VeilEnter => {
                 let mp = b.mind.mindpower;
                 let area = self.veil.entry_area();
@@ -4765,6 +4849,101 @@ mod tests {
         assert_eq!(w.snapshot_hash(), w2.snapshot_hash());
         assert!(w2.host(crate::ids::HostId(1)).is_some());
         assert!(w2.host(crate::ids::HostId(9)).is_none());
+    }
+
+    #[test]
+    fn host_dungeon_list_and_read_file_work() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckListFiles,
+        });
+        assert!(r.is_ok(), "{:?}", r.err());
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckReadFile {
+                name: "readme.txt".to_string(),
+            },
+        });
+        assert!(r.is_ok(), "{:?}", r.err());
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckReadFile {
+                name: "nope.txt".to_string(),
+            },
+        });
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn host_dungeon_decompile_requires_editor() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        // No Editor on the rig: refused.
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckDecompile {
+                x: 0,
+                y: 0,
+                file: "readme.txt".to_string(),
+            },
+        });
+        assert!(r.is_err());
+        // With an Editor loaded, it succeeds.
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load_kind(
+                EntityId(200),
+                EntityId(1),
+                CellPos(0, 0),
+                &crate::programs::default_for(ProgramKind::Editor),
+            )
+            .unwrap();
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckDecompile {
+                x: 0,
+                y: 0,
+                file: "readme.txt".to_string(),
+            },
+        });
+        assert!(r.is_ok(), "{:?}", r.err());
+    }
+
+    #[test]
+    fn host_dungeon_takeover_requires_adjacent_owned_program() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        // Load a killer for the actor.
+        let def = crate::programs::default_for(ProgramKind::Killer);
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load_kind(EntityId(200), EntityId(1), CellPos(1, 1), &def)
+            .unwrap();
+        // A foreign program adjacent to it (owned by someone else).
+        let def2 = crate::programs::default_for(ProgramKind::Killer);
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load_kind(EntityId(201), EntityId(2), CellPos(1, 2), &def2)
+            .unwrap();
+        // Mindpower check: give the actor enough.
+        w.beings.get_mut(&1).unwrap().mind.mindpower = 8;
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckTakeover { x: 1, y: 2 },
+        });
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert_eq!(
+            w.hosts.get(&1).unwrap().owner_of(EntityId(201)),
+            Some(EntityId(1))
+        );
     }
 
     #[test]

@@ -55,6 +55,89 @@ impl HostArch {
     ];
 }
 
+/// Host dungeon zones (design/03): a RAM cell's zone gates visibility.
+/// Public is world-readable; Shared is world-readable/admin-writable;
+/// Private is only visible from an Access* cell; Access* cells are the
+/// privilege gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MemZone {
+    #[default]
+    Public,
+    Shared,
+    Private,
+    AccessPublic,
+    AccessPrivate,
+}
+
+impl MemZone {
+    pub fn name(self) -> &'static str {
+        match self {
+            MemZone::Public => "public",
+            MemZone::Shared => "shared",
+            MemZone::Private => "private",
+            MemZone::AccessPublic => "access-public",
+            MemZone::AccessPrivate => "access-private",
+        }
+    }
+}
+
+/// A host account (design/04). Passwords are simulated as a crack
+/// difficulty; multi-turn cracking is skill-gated and interruptible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Account {
+    pub id: u64,
+    pub handle: String,
+    /// Simulated salted-hash difficulty (higher = more turns to crack).
+    #[serde(default)]
+    pub crack_difficulty: u32,
+    /// Whether the account grants admin-program control on local login.
+    #[serde(default)]
+    pub admin: bool,
+    /// Account home directory name.
+    #[serde(default)]
+    pub home: String,
+}
+
+impl Account {
+    pub fn new(id: u64, handle: &str, admin: bool) -> Self {
+        Self {
+            id,
+            handle: handle.to_string(),
+            crack_difficulty: if admin { 6 } else { 2 },
+            admin,
+            home: if admin {
+                "admin".to_string()
+            } else {
+                format!("guests/{}", handle)
+            },
+        }
+    }
+}
+
+/// A host file (design/04). Stored as whole sectors; multi-sector files
+/// need all sectors present in cwd to run/open.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostFile {
+    pub name: String,
+    pub size_sectors: u8,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub executable: bool,
+}
+
+impl HostFile {
+    pub fn new(name: &str, content: &str, executable: bool) -> Self {
+        let sectors = (content.len() as u32).div_ceil(256).max(1) as u8;
+        Self {
+            name: name.to_string(),
+            size_sectors: sectors,
+            content: content.to_string(),
+            executable,
+        }
+    }
+}
+
 /// M2b resource types (2024): programming components creatures produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Res {
@@ -314,6 +397,15 @@ pub struct Host {
     /// v0.6 Cracker progress against the host lock (per owner).
     #[serde(default)]
     crack: BTreeMap<u64, u32>,
+    /// Host dungeon zones (design/03): per-cell zone, default Public.
+    #[serde(default)]
+    pub zones: Vec<MemZone>,
+    /// Host accounts (design/04): guest sandboxes + admin.
+    #[serde(default)]
+    pub accounts: BTreeMap<u64, Account>,
+    /// Host files (design/04): whole-file storage.
+    #[serde(default)]
+    pub files: BTreeMap<String, HostFile>,
 }
 
 /// Nonzero xorshift seed for hosts without a serialized rng state.
@@ -382,12 +474,69 @@ impl Host {
             privileged: false,
             scanned: BTreeSet::new(),
             crack: BTreeMap::new(),
+            zones: vec![MemZone::Public; (w as usize) * (h as usize)],
+            accounts: {
+                let mut a = BTreeMap::new();
+                a.insert(1, Account::new(1, "guest", false));
+                a.insert(2, Account::new(2, "admin", true));
+                a
+            },
+            files: {
+                let mut f = BTreeMap::new();
+                f.insert(
+                    "readme.txt".to_string(),
+                    HostFile::new("readme.txt", "Welcome to this host.", false),
+                );
+                f.insert(
+                    "log.txt".to_string(),
+                    HostFile::new("log.txt", "connection log", false),
+                );
+                f
+            },
         }
     }
 
     /// Host archetype (design/03).
     pub fn arch(&self) -> HostArch {
         self.arch
+    }
+
+    /// Zone of a RAM cell (design/03). Defaults to Public for old saves
+    /// that never stored zones.
+    pub fn zone_at(&self, x: u8, y: u8) -> MemZone {
+        let idx = y as usize * self.w as usize + x as usize;
+        self.zones.get(idx).copied().unwrap_or(MemZone::Public)
+    }
+
+    pub fn set_zone(&mut self, x: u8, y: u8, zone: MemZone) {
+        let idx = y as usize * self.w as usize + x as usize;
+        if idx < self.zones.len() {
+            self.zones[idx] = zone;
+        }
+    }
+
+    pub fn accounts(&self) -> &BTreeMap<u64, Account> {
+        &self.accounts
+    }
+
+    pub fn accounts_mut(&mut self) -> &mut BTreeMap<u64, Account> {
+        &mut self.accounts
+    }
+
+    pub fn files(&self) -> &BTreeMap<String, HostFile> {
+        &self.files
+    }
+
+    pub fn files_mut(&mut self) -> &mut BTreeMap<String, HostFile> {
+        &mut self.files
+    }
+
+    pub fn read_file(&self, name: &str) -> Option<&HostFile> {
+        self.files.get(name)
+    }
+
+    pub fn account(&self, id: u64) -> Option<&Account> {
+        self.accounts.get(&id)
     }
 
     /// Set the archetype and install that archetype's vulns from the data
@@ -2307,5 +2456,34 @@ mod tests {
             .unwrap();
         assert_eq!(h.scrub_log(EntityId(1)).unwrap(), 1);
         assert_eq!(h.logs.len(), 1); // other's entry survives
+    }
+
+    #[test]
+    fn host_dungeon_seeds_accounts_and_files() {
+        let h = Host::new(HostId(1), 12, 8, 100);
+        assert!(h.account(1).is_some(), "guest account");
+        assert!(h.account(2).unwrap().admin, "admin account");
+        assert!(h.read_file("readme.txt").is_some(), "readme");
+        assert!(h.read_file("log.txt").is_some(), "log");
+        assert_eq!(h.zone_at(0, 0), MemZone::Public);
+        assert_eq!(h.zone_at(11, 7), MemZone::Public);
+        // Setting a zone persists and round-trips.
+        let mut h = h;
+        h.set_zone(3, 3, MemZone::Private);
+        assert_eq!(h.zone_at(3, 3), MemZone::Private);
+    }
+
+    #[test]
+    fn host_accounts_and_files_are_mutable() {
+        let mut h = Host::new(HostId(1), 12, 8, 100);
+        h.accounts_mut().insert(3, Account::new(3, "eve", false));
+        assert!(h.account(3).is_some());
+        h.files_mut().insert(
+            "secret.txt".to_string(),
+            HostFile::new("secret.txt", "top secret", true),
+        );
+        let f = h.read_file("secret.txt").unwrap();
+        assert!(f.executable);
+        assert_eq!(f.size_sectors, 1);
     }
 }

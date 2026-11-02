@@ -10,7 +10,7 @@ dodge traces — become what you do.
 
 ## Status
 
-Playable sim + headless client + GUI shell (259 test executions green).
+Playable sim + headless client + GUI shell (264 test executions green).
 
 - `cargo test --workspace` — full suite
 - `cargo run -p client-web` — scripted tour of all systems

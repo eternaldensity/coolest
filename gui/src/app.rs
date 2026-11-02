@@ -837,6 +837,15 @@ impl Shell {
                             .color(crate::theme::TEXT),
                     )
                     .on_hover_text("Selected arena cell.");
+                    if let Some(zone) = self
+                        .server
+                        .world
+                        .host(HostId(1))
+                        .map(|h| h.zone_at(x, y).name().to_string())
+                    {
+                        crate::theme::chip(ui, format!("zone {zone}"), crate::theme::MUTED)
+                            .on_hover_text("RAM zone: public/shared/private/access.");
+                    }
                     if let Some(prog) = prog {
                         let host = self.server.world.host(HostId(1)).unwrap();
                         let kind = host.program_kind(prog);
@@ -2844,6 +2853,18 @@ impl Shell {
                         .on_hover_text(
                             "Scan with a Scanner to reveal vulns, logs, trace, and breach state.",
                         );
+                        crate::theme::chip(
+                            ui,
+                            format!("files {}", h.files().len()),
+                            crate::theme::MUTED,
+                        )
+                        .on_hover_text("Files on this host. Read, decompile, or patch them.");
+                        crate::theme::chip(
+                            ui,
+                            format!("accounts {}", h.accounts().len()),
+                            crate::theme::MUTED,
+                        )
+                        .on_hover_text("Accounts on this host. Guests and admins.");
                     });
                     if let Some((progress, threshold)) = h.trace_progress() {
                         crate::theme::meter(
