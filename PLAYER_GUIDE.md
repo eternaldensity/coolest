@@ -18,8 +18,8 @@ broke with the cheapest rig and eat, work, and hack your way up.
 You wake with **food 80 / mood 70 / $2.00 / 3 rations**. Every action ticks
 both bars down:
 
-- **Work** a programming job → earns cash, costs mood + food. Five tiers
-  on the board (`debug-script` 60c → `contract-build` 500c): higher tiers
+- **Work** a programming job → earns cash, costs mood + food. Eight tiers
+  on the board (`debug-script` 60c → `kernel-compile` 1200c): higher tiers
   pay more per mood but drain more pressure per act.
 - **Jobs consume components.** Every job needs 4–6 units of `loop`,
   `data`, or `algo` from your rig's stock; the button shows
@@ -37,6 +37,9 @@ both bars down:
 - At **zero food or mood, jobs lock out**; starving doubles how long
   everything takes. This is the whole early game: stay fed and cheerful
   enough to keep earning.
+- The left rail's **BRIEFING** card shows your next milestone as a `NEXT:`
+  chip plus a running objective; `Ctrl-K → Objective` prints the same hint
+  in the console.
 
 ## Shops, hours, and the night store
 
