@@ -834,52 +834,6 @@ impl Shell {
                                         } else {
                                             crate::theme::MUTED
                                         },
-                                    );
-                                    ui.label(name);
-                                    crate::theme::label(
-                                        ui,
-                                        format!("{} sectors", file.size_sectors),
-                                    );
-                                });
-                            }
-                        });
-                    }
-                    let accounts = host.accounts();
-                    if !accounts.is_empty() {
-                        crate::theme::card(ui, "accounts", crate::theme::MUTED, |ui| {
-                            for (id, acct) in accounts {
-                                crate::theme::stat_row(
-                                    ui,
-                                    &acct.handle,
-                                    if acct.admin { "admin" } else { "guest" },
-                                    if acct.admin {
-                                        crate::theme::OLDNET
-                                    } else {
-                                        crate::theme::MUTED
-                                    },
-                                )
-                                .on_hover_text(format!(
-                                    "Account {} · crack difficulty {} · home {}",
-                                    id, acct.crack_difficulty, acct.home
-                                ));
-                            }
-                        });
-                    }
-                }
-                if let Some(host) = self.server.world.host(HostId(1)) {
-                    let files = host.files();
-                    if !files.is_empty() {
-                        crate::theme::card(ui, "files", crate::theme::MUTED, |ui| {
-                            for (name, file) in files {
-                                ui.horizontal(|ui| {
-                                    crate::theme::chip(
-                                        ui,
-                                        if file.executable { "EXE" } else { "TXT" },
-                                        if file.executable {
-                                            crate::theme::OLDNET
-                                        } else {
-                                            crate::theme::MUTED
-                                        },
                                     )
                                     .on_hover_text(
                                         if file.executable {

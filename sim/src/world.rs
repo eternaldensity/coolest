@@ -3001,16 +3001,19 @@ impl World {
                 }
                 let prog = self.mail_crack.entry(target.0).or_insert(0);
                 *prog += 1;
-                let difficulty = self
+                let (difficulty, verified) = self
                     .hosts
                     .values()
                     .find(|h| h.owner() == Some(target))
                     .and_then(|h| h.account(1))
-                    .map(|a| a.crack_difficulty)
-                    .unwrap_or(3);
-                if *prog >= difficulty {
+                    .map(|a| (a.crack_difficulty, a.verify_password(a.handle.len() as u64)))
+                    .unwrap_or((3, true));
+                if *prog >= difficulty && verified {
                     self.cracked_mail.insert(target.0);
                     extra_kinds.push("mail_cracked".to_string());
+                } else if *prog >= difficulty {
+                    // Password hash didn't verify: require more turns.
+                    *prog = difficulty.saturating_sub(1);
                 }
                 kind = "cracked_mail";
             }
