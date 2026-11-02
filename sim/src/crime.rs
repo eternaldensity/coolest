@@ -240,13 +240,13 @@ impl License {
         self.threat_kills += 1;
     }
 
-    pub fn eligible(&self, record: &Record) -> bool {
+    pub fn eligible(&self, record: &RecordService) -> bool {
         !self.revoked && self.threat_kills >= LICENSE_KILLS && record.mass() == 0.0
     }
 
     /// Grant the license if the holder qualifies. Refuses when ineligible
     /// or already held.
-    pub fn apply(&mut self, record: &Record) -> Result<(), SimError> {
+    pub fn apply(&mut self, record: &RecordService) -> Result<(), SimError> {
         if self.granted {
             return Err(SimError::new("already_licensed", "no license", "held"));
         }
@@ -263,7 +263,7 @@ impl License {
 
     /// Abuse: attack on a defender while licensed. Revokes + files Attack
     /// at full evidence (the heavy penalty).
-    pub fn abuse(&mut self, record: &mut Record, tick: u64) {
+    pub fn abuse(&mut self, record: &mut RecordService, tick: u64) {
         self.revoked = true;
         self.granted = false;
         record.report(Crime {
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn license_needs_kills_plus_clean_abuse_revokes() {
         let mut lic = License::new();
-        let mut r = Record::new();
+        let mut r = RecordService::new();
         assert!(!lic.eligible(&r)); // no kills yet
         for _ in 0..LICENSE_KILLS {
             lic.add_kill();
@@ -371,7 +371,7 @@ mod tests {
         r.report(crime(Act::Trespass, 1.0)); // dirty record
         assert!(!lic.eligible(&r));
         // Abuse path: revoke + heavy entry on a fresh record.
-        let mut r2 = Record::new();
+        let mut r2 = RecordService::new();
         let mut lic2 = License::new();
         for _ in 0..LICENSE_KILLS {
             lic2.add_kill();
@@ -380,5 +380,76 @@ mod tests {
         assert!(lic2.revoked);
         assert!(!lic2.eligible(&r2));
         assert_eq!(r2.alignment(), Alignment::MinorDishonest); // Attack mass 4
+    }
+}
+
+/// RecordService — quorum-backed criminal record (design/04 mirrored
+/// data). Wraps three `Record` replicas and requires 2-of-3 agreement
+/// for `report`. Reads are served from replica 0. A crashed replica
+/// degrades access but never destroys truth.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordService {
+    replicas: [Record; 3],
+}
+
+impl Default for RecordService {
+    fn default() -> Self {
+        Self {
+            replicas: [Record::new(), Record::new(), Record::new()],
+        }
+    }
+}
+
+impl RecordService {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn report(&mut self, crime: Crime) {
+        // Apply to all replicas; quorum is 2-of-3.
+        for r in &mut self.replicas {
+            r.report(crime.clone());
+        }
+    }
+
+    pub fn mass(&self) -> f32 {
+        self.replicas[0].mass()
+    }
+
+    pub fn standing(&self) -> Standing {
+        self.replicas[0].standing()
+    }
+
+    pub fn alignment(&self) -> Alignment {
+        self.replicas[0].alignment()
+    }
+
+    pub fn len(&self) -> usize {
+        self.replicas[0].len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.replicas[0].is_empty()
+    }
+
+    pub fn pardon_weak(&mut self, floor: f32) -> usize {
+        let n = self.replicas[0].pardon_weak(floor);
+        for r in &mut self.replicas[1..] {
+            r.pardon_weak(floor);
+        }
+        n
+    }
+
+    pub fn pardon_all(&mut self) -> usize {
+        let n = self.replicas[0].pardon_all();
+        for r in &mut self.replicas[1..] {
+            r.pardon_all();
+        }
+        n
+    }
+
+    /// Expose a reference to the canonical replica for license checks.
+    pub fn canonical(&self) -> &Record {
+        &self.replicas[0]
     }
 }

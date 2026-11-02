@@ -12,6 +12,12 @@ use std::collections::BTreeMap;
 pub struct Mailer {
     pub owner: EntityId,
     pub plus: bool,
+    /// Host account id this mailer is bound to (design/04). 0 = unbound.
+    #[serde(default)]
+    pub account: u64,
+    /// Multi-turn crack progress against a target mailbox (per owner).
+    #[serde(default)]
+    pub crack: BTreeMap<u64, u32>,
 }
 
 impl Mailer {
@@ -82,11 +88,15 @@ mod tests {
         let plain = Mailer {
             owner: EntityId(1),
             plus: false,
+            account: 0,
+            crack: BTreeMap::new(),
         };
         assert!(plain.snoop(&mbox).is_err());
         let plus = Mailer {
             owner: EntityId(1),
             plus: true,
+            account: 0,
+            crack: BTreeMap::new(),
         };
         let seen = plus.snoop(&mbox).unwrap();
         assert_eq!(seen.len(), 1);

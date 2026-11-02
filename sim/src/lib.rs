@@ -32,8 +32,8 @@ pub use contracts::{
     Contract, ContractState, ContractTemplate, JobOffer, OfferKind, OfferSource, Risk, TemplateKind,
 };
 pub use crime::{
-    trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing, LICENSE_KILLS,
-    WARRANT_AT,
+    trace_evidence, Act, Alignment, Clans, Crime, License, Record, RecordService, Standing,
+    LICENSE_KILLS, WARRANT_AT,
 };
 pub use data::{
     parse_cards, parse_contracts, parse_dialogues, parse_districts, parse_items, parse_jobs,

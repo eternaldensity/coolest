@@ -232,3 +232,14 @@ add a `Verb`, also add it to the fuzz generator in `tools/src/lib.rs`
 - Tools: new verbs in `fuzz_verb` (range 206–209).
 - Deferred: banking quorum, mirrored records, mailer hardening, zone
   rendering, account cracking. See `docs/V0.7-PLAN.md`.
+
+## v0.7 services (landed, partial)
+
+- `sim/src/ledger_service.rs`: LedgerService with 3 replicas, 2-of-3 quorum
+  for mint/transfer/burn; World.ledger is now LedgerService.
+- `sim/src/crime.rs`: RecordService with 3 replicas, 2-of-3 for report;
+  World.record is now RecordService.
+- Mail: `attachment: Option<String>` on Mail; saved to host files on open.
+- Verbs: `CrackMail`, `DeckCrackAccount`.
+- Remaining: zone visibility gating, mailer hardening, mirrored record
+  quorum edits. See `docs/V0.7-PLAN.md`.

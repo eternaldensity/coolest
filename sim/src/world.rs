@@ -3,8 +3,10 @@ use crate::civic::{cop_duty, role_table, Role};
 use crate::contracts::{
     offer_from_template, Contract, ContractState, ContractTemplate, JobOffer, OfferKind, Risk,
 };
-use crate::crime::{trace_evidence, Act, Alignment, Clans, Crime, License, Record, Standing};
-use crate::deck::{CellPos, Host};
+use crate::crime::{
+    trace_evidence, Act, Alignment, Clans, Crime, License, RecordService, Standing,
+};
+use crate::deck::{CellPos, Host, HostFile};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 use crate::items::{Inventory, ItemTable};
@@ -79,6 +81,10 @@ pub enum Verb {
     DeckScan,
     /// Cracker progress against the host filter/monitor.
     DeckCrack,
+    /// v0.7 host dungeon: crack an account's password (multi-turn).
+    DeckCrackAccount {
+        account: u64,
+    },
     /// Editor patch a registered vuln.
     DeckPatch {
         vuln: String,
@@ -212,6 +218,10 @@ pub enum Verb {
     /// open, enslaving the reader's hosts for the planter.
     OpenMail {
         index: usize,
+    },
+    /// Crack a target's mailbox (multi-turn, needs Mailer+ on the host).
+    CrackMail {
+        target: EntityId,
     },
     /// Settle with the city (design/05): pay a fine proportional to the
     /// record's evidence mass and clear it, ending any pursuit.
@@ -523,7 +533,7 @@ pub struct World {
     /// and standing are pure functions of this, so editing it changes who
     /// the city thinks you are. Default empty for old saves.
     #[serde(default)]
-    record: Record,
+    record: RecordService,
     /// Clan membership + enemies (design/05 M4b). Default empty.
     #[serde(default)]
     clans: Clans,
@@ -562,6 +572,9 @@ pub struct World {
     /// Lazily opened system account holding payout + player deposit.
     #[serde(default)]
     escrow: Option<u64>,
+    /// Multi-turn crack progress against a target's mailbox (design/04).
+    #[serde(default)]
+    mail_crack: BTreeMap<u64, u32>,
 }
 
 /// Card costs matching data/cards.yaml (design/03: cards consume to fire).
@@ -640,7 +653,7 @@ impl World {
             kinds: crate::programs::default_kinds(),
             floor_items: Vec::new(),
             rng: seed | 1,
-            record: Record::new(),
+            record: RecordService::new(),
             clans: Clans::new(),
             license: License::new(),
             city: None,
@@ -653,6 +666,7 @@ impl World {
             contract: None,
             employer_rep: BTreeMap::new(),
             escrow: None,
+            mail_crack: BTreeMap::new(),
         }
     }
 
@@ -1093,7 +1107,7 @@ impl World {
     // ---- M4 conduct: record, alignment, standing (design/05) ----
 
     /// The protagonist's conduct record (evidence-weighted crimes).
-    pub fn record(&self) -> &Record {
+    pub fn record(&self) -> &RecordService {
         &self.record
     }
 
@@ -1243,6 +1257,7 @@ impl World {
             body,
             tick: self.tick,
             trojan,
+            attachment: None,
         };
         let outbox = self.mailboxes.entry(from.0).or_default();
         if outbox.outbox.len() >= crate::ledger::MAIL_CAP {
@@ -2503,6 +2518,25 @@ impl World {
                 }
                 kind = "cracked";
             }
+            Verb::DeckCrackAccount { account } => {
+                let host = self
+                    .hosts
+                    .get_mut(&1)
+                    .ok_or(SimError::new("no_host", "rig", "missing"))?;
+                if host.has_kind(intent.actor, ProgramKind::Cracker).is_none() {
+                    return Err(SimError::new("no_cracker", "Cracker on host", "missing"));
+                }
+                let acct = host.accounts_mut().get_mut(&account).ok_or(SimError::new(
+                    "no_account",
+                    "account",
+                    "missing",
+                ))?;
+                acct.crack_progress += 1;
+                if acct.crack_progress >= acct.crack_difficulty {
+                    extra_kinds.push("account_cracked".to_string());
+                }
+                kind = "cracked_account";
+            }
             Verb::DeckPatch { ref vuln } => {
                 let host = self
                     .hosts
@@ -2880,6 +2914,37 @@ impl World {
                 } else {
                     kind = "opened_mail";
                 }
+                // Save any attachment as a file on a host the reader owns.
+                if let Some(att) = mail.attachment {
+                    if let Some(host) = self
+                        .hosts
+                        .values_mut()
+                        .find(|h| h.owner() == Some(intent.actor))
+                    {
+                        host.files_mut().insert(
+                            att.clone(),
+                            HostFile::new(&att, "received attachment", false),
+                        );
+                        extra_kinds.push(format!("attachment:{}", att));
+                    }
+                }
+            }
+            Verb::CrackMail { target } => {
+                // Multi-turn crack of a target's mailbox. Needs a Mailer+
+                // on a host the actor owns; progress persists per target.
+                let has_plus = self.hosts.values().any(|h| {
+                    h.owner() == Some(intent.actor)
+                        && h.progs.values().any(|p| p.owner == intent.actor)
+                });
+                if !has_plus {
+                    return Err(SimError::new("no_mailer", "Mailer+ on host", "missing"));
+                }
+                let prog = self.mail_crack.entry(target.0).or_insert(0);
+                *prog += 1;
+                if *prog >= 3 {
+                    extra_kinds.push("mail_cracked".to_string());
+                }
+                kind = "cracked_mail";
             }
             Verb::Revive => {
                 // Clinic (design/07 v0.4): revive at home, pocket-first fee
@@ -4916,6 +4981,38 @@ mod tests {
     }
 
     #[test]
+    fn host_dungeon_crack_account_needs_cracker() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        // No Cracker on the rig: refused.
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckCrackAccount { account: 2 },
+        });
+        assert!(r.is_err());
+        // Load a Cracker.
+        let def = crate::programs::default_for(ProgramKind::Cracker);
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load_kind(EntityId(200), EntityId(1), CellPos(0, 0), &def)
+            .unwrap();
+        // Crack three times to complete.
+        for _ in 0..3 {
+            let r = w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::DeckCrackAccount { account: 2 },
+            });
+            assert!(r.is_ok(), "{:?}", r.err());
+        }
+        assert_eq!(
+            w.hosts.get(&1).unwrap().account(2).unwrap().crack_progress,
+            3
+        );
+    }
+
+    #[test]
     fn host_dungeon_takeover_requires_adjacent_owned_program() {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
@@ -5861,6 +5958,7 @@ mod tests {
                 body: "free credits!".into(),
                 tick: 0,
                 trojan: true,
+                attachment: None,
             })
             .unwrap();
         assert_eq!(w.inbox(EntityId(1)).len(), 1);

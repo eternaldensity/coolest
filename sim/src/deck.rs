@@ -96,6 +96,10 @@ pub struct Account {
     /// Account home directory name.
     #[serde(default)]
     pub home: String,
+    /// Multi-turn crack progress (design/04). Reaches `crack_difficulty`
+    /// to crack the account.
+    #[serde(default)]
+    pub crack_progress: u32,
 }
 
 impl Account {
@@ -110,6 +114,7 @@ impl Account {
             } else {
                 format!("guests/{}", handle)
             },
+            crack_progress: 0,
         }
     }
 }
