@@ -39,3 +39,21 @@
   food_cost: 13
   units: 6
   resource: algo
+- id: cache-warm
+  payout_cents: 700
+  mood_cost: 28
+  food_cost: 15
+  units: 6
+  resource: loop
+- id: index-rebuild
+  payout_cents: 900
+  mood_cost: 33
+  food_cost: 18
+  units: 6
+  resource: data
+- id: kernel-compile
+  payout_cents: 1200
+  mood_cost: 38
+  food_cost: 20
+  units: 6
+  resource: algo

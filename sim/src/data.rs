@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn repo_files_parse_and_match_code() {
         let jobs = parse_jobs(include_str!("../../data/jobs.yaml")).unwrap();
-        assert_eq!(jobs.len(), 5);
+        assert_eq!(jobs.len(), 8);
         assert_eq!(
             (jobs[0].payout_cents, jobs[0].mood_cost, jobs[0].food_cost),
             (60, 5, 2)
@@ -393,6 +393,9 @@ mod tests {
         assert_eq!(jobs[0].resource, "loop");
         assert_eq!(jobs[2].resource, "data");
         assert_eq!(jobs[4].resource, "algo");
+        assert_eq!(jobs[5].resource, "loop");
+        assert_eq!(jobs[6].resource, "data");
+        assert_eq!(jobs[7].resource, "algo");
 
         let vulns = parse_vulns(include_str!("../../data/vulns.yaml")).unwrap();
         assert_eq!(vulns.len(), 10);
