@@ -201,6 +201,10 @@ pub struct Mail {
     /// the victim opens it. Crafting one needs a `Mailer+`.
     #[serde(default)]
     pub trojan: bool,
+    /// Attachment file name (design/04). Attachments are whole files and
+    /// must be saved to disk before they can be run; nothing auto-executes.
+    #[serde(default)]
+    pub attachment: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -226,6 +230,7 @@ impl Mailbox {
             body: body.to_string(),
             tick: 0,
             trojan: false,
+            attachment: None,
         };
         self.record_sent(m.clone())?;
         self.deliver(m)

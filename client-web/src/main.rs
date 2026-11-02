@@ -5,8 +5,8 @@
 use client_web::{deck_bar, net_line, status_line, WebClient};
 use sim::{
     cop_duty, trace_evidence, Act, Alignment, CellPos, Crime, DeckView, Dir, EntityId, Host,
-    HostId, Intent, Ledger, License, Mailbox, NetGraph, NetKind, Pos, Record, RenderView, Renderer,
-    Standing, Timetable, Veil, Verb, World,
+    HostId, Intent, Ledger, License, Mailbox, NetGraph, NetKind, Pos, RecordService, RenderView,
+    Renderer, Standing, Timetable, Veil, Verb, World,
 };
 
 fn pos(x: u8, y: u8) -> Pos {
@@ -192,7 +192,7 @@ fn main() {
     println!("mail: inbox={}", m.inbox.len());
 
     // M4 crime + license + veil.
-    let mut rec = Record::new();
+    let mut rec = RecordService::new();
     rec.report(Crime {
         act: Act::Theft,
         at_host: Some(HostId(1)),
