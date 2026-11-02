@@ -2442,6 +2442,19 @@ impl World {
                 crimes.push((Act::Attack, None, None, true));
             }
             Verb::DeckLoad { x, y } => {
+                // Zone visibility gate (design/03): you can only load into
+                // a cell visible from a zone your program occupies.
+                {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    let from = host.access_zone(intent.actor);
+                    let to = host.zone_at(x, y);
+                    if !Host::zone_visible(from, to) {
+                        return Err(SimError::new("zone_hidden", "visible cell", "hidden"));
+                    }
+                }
                 // Field-disjoint with the live `beings` borrow below,
                 // like the Buy arm: no &mut self calls in this match.
                 let id = {
@@ -2471,6 +2484,18 @@ impl World {
                 );
             }
             Verb::DeckLoadKind { x, y, kind: pkind } => {
+                // Zone visibility gate (design/03).
+                {
+                    let host = self
+                        .hosts
+                        .entry(1)
+                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                    let from = host.access_zone(intent.actor);
+                    let to = host.zone_at(x, y);
+                    if !Host::zone_visible(from, to) {
+                        return Err(SimError::new("zone_hidden", "visible cell", "hidden"));
+                    }
+                }
                 let def = self
                     .kinds
                     .iter()
@@ -2572,6 +2597,11 @@ impl World {
                     .ok_or(SimError::new("no_host", "rig", "missing"))?;
                 if host.has_kind(intent.actor, ProgramKind::Cloner).is_none() {
                     return Err(SimError::new("no_cloner", "Cloner on host", "missing"));
+                }
+                let from = host.access_zone(intent.actor);
+                let to = host.zone_at(x, y);
+                if !Host::zone_visible(from, to) {
+                    return Err(SimError::new("zone_hidden", "visible cell", "hidden"));
                 }
                 let src = host.prog_at(x, y).ok_or(SimError::new(
                     "no_target",

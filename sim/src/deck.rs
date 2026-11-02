@@ -100,11 +100,17 @@ pub struct Account {
     /// to crack the account.
     #[serde(default)]
     pub crack_progress: u32,
+    /// Simulated salted hash of the account password.
+    #[serde(default)]
+    pub password_hash: u64,
+    /// Salt for the password hash.
+    #[serde(default)]
+    pub salt: u64,
 }
 
 impl Account {
     pub fn new(id: u64, handle: &str, admin: bool) -> Self {
-        Self {
+        let mut a = Self {
             id,
             handle: handle.to_string(),
             crack_difficulty: if admin { 6 } else { 2 },
@@ -115,7 +121,28 @@ impl Account {
                 format!("guests/{}", handle)
             },
             crack_progress: 0,
-        }
+            password_hash: 0,
+            salt: 0,
+        };
+        // Default password is the handle's length (a trivial demo secret).
+        a.set_password(handle.len() as u64);
+        a
+    }
+
+    /// Set the account password (simulated salted hash).
+    pub fn set_password(&mut self, password: u64) {
+        self.salt = self.id.wrapping_mul(0x2545_F491_4F6C_DD1D) | 1;
+        self.password_hash = password
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(self.salt);
+    }
+
+    /// Verify a password against the stored salted hash.
+    pub fn verify_password(&self, password: u64) -> bool {
+        self.password_hash
+            == password
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                .wrapping_add(self.salt)
     }
 }
 
@@ -2513,6 +2540,16 @@ mod tests {
         let mut h = h;
         h.set_zone(3, 3, MemZone::Private);
         assert_eq!(h.zone_at(3, 3), MemZone::Private);
+    }
+
+    #[test]
+    fn account_password_verifies() {
+        let mut a = Account::new(1, "guest", false);
+        assert!(a.verify_password(5)); // default password = handle length
+        assert!(!a.verify_password(99));
+        a.set_password(42);
+        assert!(a.verify_password(42));
+        assert!(!a.verify_password(5));
     }
 
     #[test]
