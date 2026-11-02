@@ -576,8 +576,9 @@ impl Host {
     pub fn access_zone(&self, owner: EntityId) -> MemZone {
         self.progs
             .values()
-            .find(|p| p.owner == owner)
+            .filter(|p| p.owner == owner)
             .map(|p| self.zone_at(p.head.0, p.head.1))
+            .max_by_key(|z| Self::zone_rank(*z))
             .unwrap_or(MemZone::Public)
     }
 
@@ -595,6 +596,40 @@ impl Host {
     }
 
     /// Cells visible from a given zone.
+    /// Seed a deterministic dungeon layout for a foreign host: a Public
+    /// arena on the left, a Private vault on the right, and the two access
+    /// gates between them.
+    pub fn seed_dungeon_zones(&mut self) {
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let zone = if x + 3 >= self.w {
+                    MemZone::Private
+                } else if x + 4 >= self.w {
+                    MemZone::AccessPublic
+                } else if y == 0 {
+                    MemZone::Shared
+                } else {
+                    MemZone::Public
+                };
+                self.set_zone(x, y, zone);
+            }
+        }
+        // The deepest gate sits inside the vault.
+        if self.w > 0 && self.h > 0 {
+            self.set_zone(self.w - 1, self.h / 2, MemZone::AccessPrivate);
+        }
+    }
+
+    /// Zone rank for access aggregation: higher ranks see more.
+    pub fn zone_rank(zone: MemZone) -> u8 {
+        match zone {
+            MemZone::Public | MemZone::Shared => 0,
+            MemZone::AccessPublic => 1,
+            MemZone::Private => 2,
+            MemZone::AccessPrivate => 3,
+        }
+    }
+
     pub fn visible_cells(&self, from: MemZone) -> Vec<(u8, u8)> {
         let mut out = Vec::new();
         for y in 0..self.h {

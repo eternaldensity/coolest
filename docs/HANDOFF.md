@@ -1,6 +1,6 @@
 # FIDOM — Agent Handoff (status + todo)
 
-> Refreshed 2026-11-01 for v0.5/v0.6. Branch `main`, 269 test executions
+> Refreshed 2026-11-01 for v0.5/v0.6. Branch `main`, 274 test executions
 > (211 unique `#[test]` fns), `./gate.sh` and `./nightly.sh` green. Read
 > `README.md` and `PLAYER_GUIDE.md` first for the game itself;
 > `docs/NEXT-STATE.md` is the v0.4 history, `docs/V0.5-V0.6-PLAN.md` is

@@ -39,8 +39,19 @@ impl Ledger {
     }
 
     pub fn open(&mut self, owner: EntityId, branch: HostId) -> u64 {
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = self.next_id();
+        self.open_with_id(id, owner, branch)
+    }
+
+    /// Next account id this replica would assign.
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Open an account with a caller-assigned id. Used by the quorum
+    /// service so every replica agrees on the id.
+    pub fn open_with_id(&mut self, id: u64, owner: EntityId, branch: HostId) -> u64 {
+        self.next_id = self.next_id.max(id + 1);
         self.accounts.insert(
             id,
             Account {

@@ -104,6 +104,10 @@ pub enum Verb {
     DeckConnect {
         host: HostId,
     },
+    /// Select a discovered host as the Deck target (host-as-dungeon).
+    DeckSelectHost {
+        host: HostId,
+    },
     /// Strike an arena cell of world host 1, then run warden
     /// retaliation in the same act (design/03).
     DeckStrike {
@@ -481,6 +485,9 @@ pub struct World {
     /// one power grid. Clients render these; the sim owns them (design/08).
     #[serde(default)]
     hosts: BTreeMap<u64, Host>,
+    /// Host the Deck verbs currently operate on (design/03 host-as-dungeon).
+    #[serde(default = "default_deck_host")]
+    deck_host: HostId,
     #[serde(default)]
     pub veil: Veil,
     #[serde(default)]
@@ -608,6 +615,10 @@ fn default_card_costs() -> BTreeMap<String, (u8, u32)> {
         .collect()
 }
 
+fn default_deck_host() -> HostId {
+    HostId(1)
+}
+
 fn default_jobs() -> Vec<(i64, u8, u8)> {
     DEFAULT_JOBS.to_vec()
 }
@@ -642,6 +653,7 @@ impl World {
             npcs: BTreeMap::new(),
             sections: Vec::new(),
             hosts: BTreeMap::new(),
+            deck_host: default_deck_host(),
             net: NetGraph::new(),
             power: PowerGrid::new(),
             veil: Veil::new(),
@@ -1067,13 +1079,40 @@ impl World {
 
     /// Fetch or create a Deck arena for a host (12x8, 100 CPU default).
     pub fn ensure_host(&mut self, id: HostId) -> &mut Host {
-        self.hosts
-            .entry(id.0)
-            .or_insert_with(|| Host::new(id, 12, 8, 100))
+        self.hosts.entry(id.0).or_insert_with(|| {
+            let mut h = Host::new(id, 12, 8, 100);
+            // Host 1 is the player's own rig; foreign hosts are dungeons.
+            if id.0 != 1 {
+                h.seed_dungeon_zones();
+            }
+            h
+        })
     }
 
     pub fn host(&self, id: HostId) -> Option<&Host> {
         self.hosts.get(&id.0)
+    }
+
+    /// The host the Deck verbs currently operate on.
+    pub fn deck_host(&self) -> HostId {
+        self.deck_host
+    }
+
+    /// Select a discovered host as the Deck target. Host 1 is always
+    /// available; other hosts must have been revealed to the actor.
+    pub fn set_deck_host(&mut self, actor: EntityId, host: HostId) -> Result<(), SimError> {
+        if host.0 == 1 {
+            self.deck_host = host;
+            return Ok(());
+        }
+        match self.hosts.get(&host.0) {
+            Some(h) if h.scanned(actor) => {
+                self.deck_host = host;
+                Ok(())
+            }
+            Some(_) => Err(SimError::new("unrevealed", "scanned host", "unknown")),
+            None => Err(SimError::new("no_host", "known host", "missing")),
+        }
     }
 
     pub fn spawn(&mut self, id: EntityId, pos: Pos, speed: u64) {
@@ -2252,8 +2291,8 @@ impl World {
         // because it reads host ownership.
         self.ensure_board();
         let expired_contract = self.expire_contract();
-        let deck_foreign = self.is_foreign(intent.actor, HostId(1));
-        let deck_range = self.is_range(HostId(1));
+        let deck_foreign = self.is_foreign(intent.actor, self.deck_host);
+        let deck_range = self.is_range(self.deck_host);
         // Combat reads the target before the live `beings` borrow below.
         let attack_target = match &intent.verb {
             Verb::Attack { target } if *target != intent.actor => self.attack_target(*target),
@@ -2458,7 +2497,7 @@ impl World {
                     let host = self
                         .hosts
                         .entry(1)
-                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        .or_insert_with(|| Host::new(self.deck_host, 12, 8, 100));
                     let from = host.access_zone(intent.actor);
                     let to = host.zone_at(x, y);
                     if !Host::zone_visible(from, to) {
@@ -2471,7 +2510,7 @@ impl World {
                     let host = self
                         .hosts
                         .entry(1)
-                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        .or_insert_with(|| Host::new(self.deck_host, 12, 8, 100));
                     EntityId(100 + host.progs.len() as u64)
                 };
                 self.hosts
@@ -2483,10 +2522,10 @@ impl World {
                 // A licensed hacker may enter honest machines to fight
                 // intruders, so that entry is not trespass (design/05).
                 if deck_foreign && !self.license.granted {
-                    crimes.push((Act::Trespass, Some(HostId(1)), None, true));
+                    crimes.push((Act::Trespass, Some(self.deck_host), None, true));
                 }
                 extra_kinds = Self::deck_beat(
-                    self.hosts.get_mut(&1).unwrap(),
+                    self.hosts.get_mut(&self.deck_host.0).unwrap(),
                     &mut self.funnel,
                     self.tick,
                     intent.actor,
@@ -2499,7 +2538,7 @@ impl World {
                     let host = self
                         .hosts
                         .entry(1)
-                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        .or_insert_with(|| Host::new(self.deck_host, 12, 8, 100));
                     let from = host.access_zone(intent.actor);
                     let to = host.zone_at(x, y);
                     if !Host::zone_visible(from, to) {
@@ -2516,7 +2555,7 @@ impl World {
                     let host = self
                         .hosts
                         .entry(1)
-                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        .or_insert_with(|| Host::new(self.deck_host, 12, 8, 100));
                     EntityId(100 + host.progs.len() as u64)
                 };
                 self.hosts
@@ -2525,10 +2564,10 @@ impl World {
                     .load_kind(id, intent.actor, CellPos(x, y), &def)?;
                 kind = "loaded";
                 if deck_foreign && !self.license.granted {
-                    crimes.push((Act::Trespass, Some(HostId(1)), None, true));
+                    crimes.push((Act::Trespass, Some(self.deck_host), None, true));
                 }
                 extra_kinds = Self::deck_beat(
-                    self.hosts.get_mut(&1).unwrap(),
+                    self.hosts.get_mut(&self.deck_host.0).unwrap(),
                     &mut self.funnel,
                     self.tick,
                     intent.actor,
@@ -2644,16 +2683,30 @@ impl World {
                 }
                 // Route through the Net graph; dark sections are refused by
                 // the powered route where available.
-                self.net.route(HostId(1), host)?;
+                self.net.route(self.deck_host, host)?;
                 let target = self.hosts.get_mut(&host.0).ok_or(SimError::new(
                     "no_host",
                     "target host",
                     "missing",
                 ))?;
                 target.mark_revealed(intent.actor);
-                target.log(intent.actor, self.tick, HostId(1));
+                target.log(intent.actor, self.tick, self.deck_host);
                 extra_kinds.push("remote_scan".to_string());
                 kind = "connected";
+            }
+            Verb::DeckSelectHost { host } => {
+                if host.0 == 1 {
+                    self.deck_host = host;
+                } else {
+                    match self.hosts.get(&host.0) {
+                        Some(h) if h.scanned(intent.actor) => self.deck_host = host,
+                        Some(_) => {
+                            return Err(SimError::new("unrevealed", "scanned host", "unknown"))
+                        }
+                        None => return Err(SimError::new("no_host", "known host", "missing")),
+                    }
+                }
+                kind = "selected_host";
             }
             Verb::DeckStrike { x, y } => {
                 // Zone visibility gate: you can only strike cells visible
@@ -2662,7 +2715,7 @@ impl World {
                     let host = self
                         .hosts
                         .entry(1)
-                        .or_insert_with(|| Host::new(HostId(1), 12, 8, 100));
+                        .or_insert_with(|| Host::new(self.deck_host, 12, 8, 100));
                     let from = host.access_zone(intent.actor);
                     let to = host.zone_at(x, y);
                     if !Host::zone_visible(from, to) {
@@ -2686,14 +2739,14 @@ impl World {
                             let tick = self.tick;
                             self.license.abuse(&mut self.record, tick);
                         } else {
-                            crimes.push((Act::Attack, Some(HostId(1)), None, true));
+                            crimes.push((Act::Attack, Some(self.deck_host), None, true));
                         }
                     }
                 }
                 // Hitting a clanmate makes you that clan's enemy for life
                 // (design/05 M4b): the rig's owner is the clan member.
                 if killed {
-                    if let Some(owner) = self.hosts.get(&1).and_then(|h| h.owner()) {
+                    if let Some(owner) = self.hosts.get(&self.deck_host.0).and_then(|h| h.owner()) {
                         if let Some(clan) = self.clans.shared_clan(intent.actor, owner) {
                             self.clans.mark_enemy(intent.actor, clan);
                         }
@@ -2701,7 +2754,7 @@ impl World {
                 }
                 kind = "struck";
                 extra_kinds.extend(Self::deck_beat(
-                    self.hosts.get_mut(&1).unwrap(),
+                    self.hosts.get_mut(&self.deck_host.0).unwrap(),
                     &mut self.funnel,
                     self.tick,
                     intent.actor,
@@ -2971,9 +3024,21 @@ impl World {
                     }
                     kind = "trojan_opened";
                 } else if mail.virus {
-                    // Virus auto-run: file a crime and log it. The reader's
-                    // hosts are flagged but not enslaved (design/04).
-                    crimes.push((Act::Trespass, None, None, true));
+                    // Virus auto-run: flag the reader's hosts and corrupt
+                    // one file on each. It is not a crime against the
+                    // reader; it is a hostile payload they opened.
+                    let reader = intent.actor;
+                    for h in self
+                        .hosts
+                        .values_mut()
+                        .filter(|h| h.owner() == Some(reader))
+                    {
+                        h.flagged = true;
+                        if let Some(name) = h.files().keys().next().cloned() {
+                            h.files_mut().remove(&name);
+                            extra_kinds.push(format!("virus_corrupt:{}", name));
+                        }
+                    }
                     kind = "virus_opened";
                 } else {
                     kind = "opened_mail";
@@ -2994,14 +3059,10 @@ impl World {
                 }
             }
             Verb::CrackMail { target } => {
-                // Multi-turn crack of a target's mailbox. Needs a Mailer+
-                // on a host the actor owns; progress persists per target.
-                let has_plus = self.hosts.values().any(|h| {
-                    h.owner() == Some(intent.actor)
-                        && h.progs.values().any(|p| p.owner == intent.actor)
-                });
-                if !has_plus {
-                    return Err(SimError::new("no_mailer", "Mailer+ on host", "missing"));
+                // Multi-turn crack of a target's mailbox. Needs a crafted
+                // Mailer+; progress persists per target.
+                if !self.mailer_plus {
+                    return Err(SimError::new("no_mailer_plus", "Mailer+", "stock mailer"));
                 }
                 let prog = self.mail_crack.entry(target.0).or_insert(0);
                 *prog += 1;
@@ -4993,6 +5054,59 @@ mod tests {
     }
 
     #[test]
+    fn deck_host_selection_and_dungeon_zones() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Host 1 is the player's own rig: all Public.
+        assert_eq!(
+            w.ensure_host(HostId(1)).zone_at(11, 7),
+            crate::deck::MemZone::Public
+        );
+        // Foreign hosts get a dungeon layout with a private vault.
+        let h2 = w.ensure_host(HostId(2));
+        assert!(h2.zones.iter().any(|z| *z != crate::deck::MemZone::Public));
+        assert_eq!(h2.zone_at(11, 4), crate::deck::MemZone::AccessPrivate);
+        // Selecting a known, revealed host works; unknown hosts are refused.
+        w.ensure_host(HostId(2)).mark_revealed(EntityId(1));
+        assert!(w.set_deck_host(EntityId(1), HostId(2)).is_ok());
+        assert_eq!(w.deck_host(), HostId(2));
+        assert!(w.set_deck_host(EntityId(1), HostId(99)).is_err());
+        assert_eq!(w.deck_host(), HostId(2));
+        // The verb path also works.
+        let r = w.apply(&Intent {
+            actor: EntityId(1),
+            verb: Verb::DeckSelectHost { host: HostId(1) },
+        });
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert_eq!(w.deck_host(), HostId(1));
+    }
+
+    #[test]
+    fn access_zone_uses_the_best_owned_program() {
+        let mut h = Host::new(HostId(2), 12, 8, 100);
+        h.seed_dungeon_zones();
+        h.load_kind(
+            EntityId(200),
+            EntityId(1),
+            CellPos(0, 1),
+            &crate::programs::default_for(ProgramKind::Killer),
+        )
+        .unwrap();
+        assert_eq!(h.access_zone(EntityId(1)), crate::deck::MemZone::Public);
+        h.load_kind(
+            EntityId(201),
+            EntityId(1),
+            CellPos(11, 4),
+            &crate::programs::default_for(ProgramKind::Killer),
+        )
+        .unwrap();
+        assert_eq!(
+            h.access_zone(EntityId(1)),
+            crate::deck::MemZone::AccessPrivate
+        );
+    }
+
+    #[test]
     fn host_dungeon_list_and_read_file_work() {
         let mut w = World::new(1);
         w.spawn(EntityId(1), pos(8, 8), 1);
@@ -5068,6 +5182,7 @@ mod tests {
             .load_kind(EntityId(200), EntityId(1), CellPos(0, 0), &def)
             .unwrap();
         w.hosts.get_mut(&1).unwrap().set_owner(Some(EntityId(1)));
+        w.mailer_plus = true;
         // Crack three times to complete.
         for _ in 0..3 {
             let r = w.apply(&Intent {

@@ -820,7 +820,7 @@ impl Shell {
             Tab::Deck => {
                 // Host-level surfaces are always available, even with no
                 // cell selected.
-                if let Some(host) = self.server.world.host(HostId(1)) {
+                if let Some(host) = self.server.world.host(self.server.world.deck_host()) {
                     let files = host.files();
                     if !files.is_empty() {
                         crate::theme::card(ui, "files", crate::theme::MUTED, |ui| {
@@ -882,7 +882,7 @@ impl Shell {
                 let prog = self
                     .server
                     .world
-                    .host(HostId(1))
+                    .host(self.server.world.deck_host())
                     .and_then(|h| h.prog_at(x, y));
                 crate::theme::card(ui, "selection", crate::theme::BETANET, |ui| {
                     ui.label(
@@ -895,14 +895,18 @@ impl Shell {
                     if let Some(zone) = self
                         .server
                         .world
-                        .host(HostId(1))
+                        .host(self.server.world.deck_host())
                         .map(|h| h.zone_at(x, y).name().to_string())
                     {
                         crate::theme::chip(ui, format!("zone {zone}"), crate::theme::MUTED)
                             .on_hover_text("RAM zone: public/shared/private/access.");
                     }
                     if let Some(prog) = prog {
-                        let host = self.server.world.host(HostId(1)).unwrap();
+                        let host = self
+                            .server
+                            .world
+                            .host(self.server.world.deck_host())
+                            .unwrap();
                         let kind = host.program_kind(prog);
                         if let Some(kind) = kind {
                             crate::theme::chip(ui, kind.name(), crate::theme::BETANET)
@@ -974,7 +978,7 @@ impl Shell {
                     let vulns = self
                         .server
                         .world
-                        .host(HostId(1))
+                        .host(self.server.world.deck_host())
                         .map(|h| h.vuln_ids())
                         .unwrap_or_default();
                     if !vulns.is_empty() {
@@ -2847,8 +2851,33 @@ impl Shell {
                 }
             }
             Tab::Deck => {
-                crate::theme::heading(ui, "Deck — world host 1");
+                let deck_host = self.server.world.deck_host();
+                crate::theme::heading(ui, format!("Deck — host {}", deck_host.0));
                 ui.label("H killer head · o tail · P producer · click a cell, then Load/Strike/Farm · warden defends this rig");
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Target:");
+                    for id in [1u64, 2, 3] {
+                        let known = self
+                            .server
+                            .world
+                            .host(HostId(id))
+                            .map(|h| id == 1 || h.scanned(self.actor))
+                            .unwrap_or(false);
+                        if known {
+                            let selected = deck_host.0 == id;
+                            if ui
+                                .selectable_label(selected, format!("Host {id}"))
+                                .on_hover_text(
+                                    "Select the host the Deck verbs operate on.",
+                                )
+                                .clicked()
+                                && !selected
+                            {
+                                self.do_verb(Verb::DeckSelectHost { host: HostId(id) });
+                            }
+                        }
+                    }
+                });
                 // Snapshot arena state up front: buttons below need &mut self.
                 // Producers get their own glyph + per-resource color so the
                 // economy loop is visible in the arena, not just in numbers.
@@ -2856,13 +2885,13 @@ impl Shell {
                 if self
                     .server
                     .world
-                    .host(HostId(1))
+                    .host(deck_host)
                     .map(|h| h.progs.is_empty())
                     .unwrap_or(true)
                 {
                     crate::theme::label(ui, "Arena empty — select a free cell and load a program.");
                 }
-                if let Some(h) = self.server.world.host(HostId(1)) {
+                if let Some(h) = self.server.world.host(deck_host) {
                     ui.horizontal_wrapped(|ui| {
                         crate::theme::chip(
                             ui,
@@ -2935,7 +2964,7 @@ impl Shell {
                     }
                 }
                 });
-                let (heads, tails, head_kinds, prod, cpu, total) = match self.server.world.host(HostId(1)) {
+                let (heads, tails, head_kinds, prod, cpu, total) = match self.server.world.host(deck_host) {
                     Some(h) => {
                         let mut heads = std::collections::BTreeMap::new();
                         let mut tails = std::collections::BTreeSet::new();
@@ -3052,7 +3081,7 @@ impl Shell {
                             let zone_tint = self
                                 .server
                                 .world
-                                .host(HostId(1))
+                                .host(deck_host)
                                 .and_then(|h| {
                                     let c = crate::theme::zone_color(h.zone_at(x, y));
                                     if c.a() > 0 {
@@ -3097,7 +3126,7 @@ impl Shell {
                     .on_hover_text(
                         "CPU used / total. Over budget blocks new loads and growth; producers and programs both consume it.",
                     );
-                if let Some(h) = self.server.world.host(HostId(1)) {
+                if let Some(h) = self.server.world.host(deck_host) {
                     ui.label(format!(
                         "arch {} · vulns {} · breached {} · scanned {}",
                         h.arch().name(),
@@ -3116,9 +3145,9 @@ impl Shell {
                     if let Some(kind) = self
                         .server
                         .world
-                        .host(HostId(1))
+                        .host(deck_host)
                         .and_then(|h| h.prog_at(x, y))
-                        .and_then(|p| self.server.world.host(HostId(1)).and_then(|h| h.program_kind(p)))
+                        .and_then(|p| self.server.world.host(deck_host).and_then(|h| h.program_kind(p)))
                     {
                         ui.label(format!("selected: {} @({x},{y})", kind.name()));
                     }
@@ -3131,13 +3160,13 @@ impl Shell {
                 let vulns = self
                     .server
                     .world
-                    .host(HostId(1))
+                    .host(deck_host)
                     .map(|h| h.vuln_ids())
                     .unwrap_or_default();
                 let breached = self
                     .server
                     .world
-                    .host(HostId(1))
+                    .host(deck_host)
                     .map(|h| h.breached)
                     .unwrap_or(false);
                 ui.horizontal_wrapped(|ui| {
@@ -3167,7 +3196,7 @@ impl Shell {
                         let to = self
                             .server
                             .world
-                            .host(HostId(1))
+                            .host(deck_host)
                             .and_then(|h| h.owner())
                             .unwrap_or(self.actor);
                         match self.server.apply_one(Intent {
@@ -3536,7 +3565,7 @@ impl Shell {
                     let logs = self
                         .server
                         .world
-                        .host(HostId(1))
+                        .host(deck_host)
                         .map(|h| h.logs_visible(self.actor).len())
                         .unwrap_or(0);
                     ui.label(format!("your trail on this rig: {logs}"))
@@ -3624,12 +3653,12 @@ impl Shell {
                     let mods = self
                         .server
                         .world
-                        .host(HostId(1))
+                        .host(deck_host)
                         .and_then(|h| h.prog_at(x, y))
                         .map(|p| {
                             self.server
                                 .world
-                                .host(HostId(1))
+                                .host(deck_host)
                                 .map(|h| h.mods_of(p).to_vec())
                                 .unwrap_or_default()
                         })

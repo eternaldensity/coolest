@@ -1,30 +1,35 @@
 //! LedgerService — quorum-backed banking (design/04).
 //!
-//! Wraps three `Ledger` replicas and requires 2-of-3 agreement for every
-//! mutation. Reads are served from replica 0. IOUs and spam caps are
-//! tracked in the canonical replica. Replicas are views; the service is
-//! truth. A crashed replica degrades access but never destroys truth.
+//! Three `Ledger` replicas with a 2-of-3 healthy-replica requirement.
+//! Mutations are applied to one leader replica, then committed to every
+//! healthy replica; a failed mutation never leaves a partial write. Reads
+//! are served from the first healthy replica. IOUs and spam caps live in
+//! the replicas themselves, so a commit carries them too.
 
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 use crate::ledger::Ledger;
 use serde::{Deserialize, Serialize};
 
-/// Number of replicas in the quorum set.
 const REPLICA_COUNT: usize = 3;
-/// Minimum replicas that must agree for a mutation to commit.
 const QUORUM: usize = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedgerService {
-    /// Three replicas of the ledger. Replica 0 is canonical for reads.
     replicas: [Ledger; REPLICA_COUNT],
+    #[serde(default = "all_alive")]
+    alive: [bool; REPLICA_COUNT],
+}
+
+fn all_alive() -> [bool; REPLICA_COUNT] {
+    [true; REPLICA_COUNT]
 }
 
 impl Default for LedgerService {
     fn default() -> Self {
         Self {
             replicas: [Ledger::new(), Ledger::new(), Ledger::new()],
+            alive: all_alive(),
         }
     }
 }
@@ -34,65 +39,76 @@ impl LedgerService {
         Self::default()
     }
 
-    /// Open an account. Requires quorum; the account is created on all
-    /// replicas that agree.
+    fn live(&self) -> usize {
+        self.alive.iter().filter(|a| **a).count()
+    }
+
+    fn leader(&self) -> Result<usize, SimError> {
+        if self.live() < QUORUM {
+            return Err(SimError::new("quorum", "2-of-3 replicas", "short"));
+        }
+        self.alive
+            .iter()
+            .position(|a| *a)
+            .ok_or(SimError::new("quorum", "live replica", "missing"))
+    }
+
+    fn read(&self) -> Result<&Ledger, SimError> {
+        self.alive
+            .iter()
+            .position(|a| *a)
+            .map(|i| &self.replicas[i])
+            .ok_or(SimError::new("quorum", "live replica", "missing"))
+    }
+
+    fn commit(&mut self, next: Ledger) {
+        for i in 0..REPLICA_COUNT {
+            if self.alive[i] {
+                self.replicas[i] = next.clone();
+            }
+        }
+    }
+
+    /// Open an account. Creates the same id on every healthy replica.
     pub fn open(&mut self, owner: EntityId, branch: HostId) -> u64 {
-        // Create on replica 0 first to get the id.
-        let id = self.replicas[0].open(owner, branch);
-        // Propagate to other replicas.
-        for i in 1..REPLICA_COUNT {
-            let _ = self.replicas[i].open(owner, branch);
+        let Ok(leader) = self.leader() else {
+            return 0;
+        };
+        let id = self.replicas[leader].next_id();
+        for i in 0..REPLICA_COUNT {
+            if self.alive[i] {
+                self.replicas[i].open_with_id(id, owner, branch);
+            }
         }
         id
     }
 
     pub fn balance(&self, acct: u64) -> Result<i64, SimError> {
-        self.replicas[0].balance(acct)
+        self.read()?.balance(acct)
     }
 
-    /// Mint requires quorum: at least 2 replicas must succeed.
     pub fn mint(&mut self, to: u64, amt: i64) -> Result<(), SimError> {
-        let mut ok = 0;
-        for i in 0..REPLICA_COUNT {
-            if self.replicas[i].mint(to, amt).is_ok() {
-                ok += 1;
-            }
-        }
-        if ok >= QUORUM {
-            Ok(())
-        } else {
-            Err(SimError::new("quorum", "2-of-3 mint", "short"))
-        }
+        let leader = self.leader()?;
+        let mut next = self.replicas[leader].clone();
+        next.mint(to, amt)?;
+        self.commit(next);
+        Ok(())
     }
 
-    /// Transfer requires quorum.
     pub fn transfer(&mut self, from: u64, to: u64, amt: i64) -> Result<(), SimError> {
-        let mut ok = 0;
-        for i in 0..REPLICA_COUNT {
-            if self.replicas[i].transfer(from, to, amt).is_ok() {
-                ok += 1;
-            }
-        }
-        if ok >= QUORUM {
-            Ok(())
-        } else {
-            Err(SimError::new("quorum", "2-of-3 transfer", "short"))
-        }
+        let leader = self.leader()?;
+        let mut next = self.replicas[leader].clone();
+        next.transfer(from, to, amt)?;
+        self.commit(next);
+        Ok(())
     }
 
-    /// Burn requires quorum.
     pub fn burn(&mut self, from: u64, amt: i64) -> Result<(), SimError> {
-        let mut ok = 0;
-        for i in 0..REPLICA_COUNT {
-            if self.replicas[i].burn(from, amt).is_ok() {
-                ok += 1;
-            }
-        }
-        if ok >= QUORUM {
-            Ok(())
-        } else {
-            Err(SimError::new("quorum", "2-of-3 burn", "short"))
-        }
+        let leader = self.leader()?;
+        let mut next = self.replicas[leader].clone();
+        next.burn(from, amt)?;
+        self.commit(next);
+        Ok(())
     }
 
     pub fn withdraw_atm(
@@ -102,24 +118,20 @@ impl LedgerService {
         branch_up: bool,
         cache_cap: i64,
     ) -> Result<(), SimError> {
-        if self.replicas[0]
-            .withdraw_atm(acct, amt, branch_up, cache_cap)
-            .is_ok()
-        {
-            for i in 1..REPLICA_COUNT {
-                let _ = self.replicas[i].withdraw_atm(acct, amt, branch_up, cache_cap);
-            }
-            Ok(())
-        } else {
-            Err(SimError::new("withdraw", "atm", "failed"))
-        }
+        let leader = self.leader()?;
+        let mut next = self.replicas[leader].clone();
+        next.withdraw_atm(acct, amt, branch_up, cache_cap)?;
+        self.commit(next);
+        Ok(())
     }
 
     pub fn reconcile(&mut self) -> i64 {
-        let settled = self.replicas[0].reconcile();
-        for i in 1..REPLICA_COUNT {
-            self.replicas[i].reconcile();
-        }
+        let Ok(leader) = self.leader() else {
+            return 0;
+        };
+        let mut next = self.replicas[leader].clone();
+        let settled = next.reconcile();
+        self.commit(next);
         settled
     }
 
@@ -130,52 +142,100 @@ impl LedgerService {
         day: u64,
         amt: i64,
     ) -> Result<i64, SimError> {
-        let paid = self.replicas[0].credit_spam(to, host, day, amt)?;
-        for i in 1..REPLICA_COUNT {
-            let _ = self.replicas[i].credit_spam(to, host, day, amt);
-        }
+        let leader = self.leader()?;
+        let mut next = self.replicas[leader].clone();
+        let paid = next.credit_spam(to, host, day, amt)?;
+        self.commit(next);
         Ok(paid)
     }
 
     pub fn ious(&self) -> &[(u64, i64)] {
-        self.replicas[0].ious()
+        self.read().map(|l| l.ious()).unwrap_or(&[])
     }
 
     pub fn audit_sum(&self) -> i64 {
-        self.replicas[0].audit_sum()
+        self.read().map(|l| l.audit_sum()).unwrap_or(0)
     }
 
     pub fn live_sum(&self) -> i64 {
-        self.replicas[0].live_sum()
+        self.read().map(|l| l.live_sum()).unwrap_or(0)
     }
 
-    /// Crash a replica (simulates replica failure). Returns true if the
-    /// service can still serve (quorum intact).
+    /// Mark a replica dead. Returns true if quorum survives.
     pub fn crash_replica(&mut self, idx: usize) -> bool {
         if idx < REPLICA_COUNT {
-            // Zero out the replica's accounts to simulate data loss.
-            // The service still serves from the remaining replicas.
-            true
-        } else {
-            false
+            self.alive[idx] = false;
+        }
+        self.live() >= QUORUM
+    }
+
+    /// Bring a replica back (e.g. after repair).
+    pub fn restore_replica(&mut self, idx: usize) {
+        if idx < REPLICA_COUNT {
+            self.alive[idx] = true;
+            // Resync from a healthy leader so the replica is consistent.
+            if let Some(leader) = self.alive.iter().position(|a| *a) {
+                self.replicas[idx] = self.replicas[leader].clone();
+            }
         }
     }
 
-    /// Number of healthy replicas.
     pub fn healthy_replicas(&self) -> usize {
-        REPLICA_COUNT
+        self.live()
     }
 }
 
-impl LedgerService {
-    /// Convenience: open a new account on the canonical replica and
-    /// propagate.
-    pub fn open_account(&mut self, owner: EntityId, branch: HostId) -> u64 {
-        self.open(owner, branch)
+pub use crate::ledger::{Mail, Mailbox, MAIL_CAP};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quorum_survives_one_crash_and_refuses_two() {
+        let mut s = LedgerService::new();
+        let a = s.open(EntityId(1), HostId(1));
+        s.mint(a, 1000).unwrap();
+        assert_eq!(s.healthy_replicas(), 3);
+        assert!(s.crash_replica(0));
+        assert_eq!(s.healthy_replicas(), 2);
+        // Two replicas still agree: the read works and a transfer commits.
+        s.transfer(a, a, 1).unwrap();
+        assert_eq!(s.balance(a).unwrap(), 1000);
+        // A second crash leaves one replica: mutations are refused and
+        // nothing is partially written.
+        assert!(!s.crash_replica(1));
+        assert!(s.mint(a, 500).is_err());
+        assert_eq!(s.balance(a).unwrap(), 1000);
+        // Restore: the replica resyncs from a healthy leader.
+        s.restore_replica(0);
+        s.restore_replica(1);
+        assert_eq!(s.healthy_replicas(), 3);
+        assert_eq!(s.balance(a).unwrap(), 1000);
+    }
+
+    #[test]
+    fn failed_transfer_leaves_the_ledger_untouched() {
+        let mut s = LedgerService::new();
+        let a = s.open(EntityId(1), HostId(1));
+        let b = s.open(EntityId(2), HostId(1));
+        s.mint(a, 100).unwrap();
+        // Overdraw is refused before the commit.
+        assert!(s.transfer(a, b, 200).is_err());
+        assert_eq!(s.balance(a).unwrap(), 100);
+        assert_eq!(s.balance(b).unwrap(), 0);
+        assert_eq!(s.live_sum(), s.audit_sum());
+    }
+
+    #[test]
+    fn open_ids_match_across_replicas() {
+        let mut s = LedgerService::new();
+        let a = s.open(EntityId(1), HostId(1));
+        let b = s.open(EntityId(2), HostId(2));
+        assert_ne!(a, b);
+        for r in &s.replicas {
+            assert!(r.balance(a).is_ok());
+            assert!(r.balance(b).is_ok());
+        }
     }
 }
-
-// Re-export for convenience.
-pub use crate::ledger::Mail;
-pub use crate::ledger::Mailbox;
-pub use crate::ledger::MAIL_CAP;
