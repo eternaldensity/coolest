@@ -2203,6 +2203,13 @@ impl Shell {
                         }
                     });
                     crate::theme::card(ui, "briefing", crate::theme::MUTED, |ui| {
+                        if let Some(hint) = self.server.world.tutorial_hint(self.actor) {
+                            crate::theme::section(ui, "next");
+                            crate::theme::chip(ui, hint, crate::theme::BETANET)
+                                .on_hover_text(
+                                    "Suggested next step in the survival → work → Deck → crime → Veil arc.",
+                                );
+                        }
                         crate::theme::section(ui, "objective");
                         for part in self.server.world.advise(self.actor).split(", ") {
                             ui.label(
@@ -2412,7 +2419,7 @@ impl Shell {
                     })
                     .collect();
                 if jobs.is_empty() {
-                    jobs = (0..5)
+                    jobs = (0..8)
                         .map(|i| (format!("job-{i}"), 60 + 60 * i as i64, None))
                         .collect();
                 }
@@ -4851,14 +4858,14 @@ mod tests {
             let mut h = Harness::new();
             // Start: every job is short; the board says so per row.
             assert!(h.has_text("0 READY"), "text: {:?}", h.labels());
-            assert!(h.has_text("5 SHORT"), "text: {:?}", h.labels());
+            assert!(h.has_text("8 SHORT"), "text: {:?}", h.labels());
             assert!(h.has_text("NEED 4 LOOP"), "text: {:?}", h.labels());
             for _ in 0..4 {
                 h.click_prefix("Code loop (");
             }
             // Job 0 now meets its requirement and the deficit chip clears.
             assert!(h.has_text("1 READY"), "text: {:?}", h.labels());
-            assert!(h.has_text("4 SHORT"), "text: {:?}", h.labels());
+            assert!(h.has_text("7 SHORT"), "text: {:?}", h.labels());
             assert!(!h.has_text("NEED 4 LOOP"), "text: {:?}", h.labels());
             assert!(
                 h.has(Role::Button, "Work 0: debug-script 60c [loop 4/4]"),

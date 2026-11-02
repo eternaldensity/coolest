@@ -380,12 +380,15 @@ struct Being {
 /// M1 jobs: (payout_cents, mood_cost, food_cost), tiered ladder in
 /// data/jobs.yaml. Defaults match that file; `set_jobs` overrides from
 /// the file at runtime (design/11 rule 4).
-const DEFAULT_JOBS: [(i64, u8, u8); 5] = [
+const DEFAULT_JOBS: [(i64, u8, u8); 8] = [
     (60, 5, 2),
     (120, 9, 4),
     (200, 13, 6),
     (320, 18, 9),
     (500, 24, 13),
+    (700, 28, 15),
+    (900, 33, 18),
+    (1200, 38, 20),
 ];
 const WATCH_COST: i64 = 30;
 /// Chebyshev range at which an NPC witnesses an illicit act (design/05).
@@ -578,7 +581,16 @@ fn default_jobs() -> Vec<(i64, u8, u8)> {
 /// Default unit requirements, parallel to DEFAULT_JOBS: 4/6 loop,
 /// 5/6 data, 6 algo.
 fn default_job_reqs() -> Vec<(u8, u32)> {
-    vec![(0, 4), (0, 6), (1, 5), (1, 6), (2, 6)]
+    vec![
+        (0, 4),
+        (0, 6),
+        (1, 5),
+        (1, 6),
+        (2, 6),
+        (0, 6),
+        (1, 6),
+        (2, 6),
+    ]
 }
 
 impl World {
@@ -2022,6 +2034,96 @@ impl World {
     }
 
     /// Next scheduled act tick (server scheduler jumps the clock here).
+    /// A short, action-oriented next step for the player, used by the
+    /// briefing card. Unlike `advise`, this always names the next milestone
+    /// in the survival → work → Deck → crime → Veil arc, even when the
+    /// player is otherwise settled. Returns `None` once the arc is complete.
+    pub fn tutorial_hint(&self, id: EntityId) -> Option<String> {
+        let b = self.beings.get(&id.0)?;
+        if b.food == 0 || b.mood == 0 {
+            return Some("Recover: Eat a ration or Watch a show".to_string());
+        }
+        if b.food < 30 {
+            return Some(if b.rations > 0 {
+                "Eat a ration".to_string()
+            } else {
+                "Buy a ration at a counter".to_string()
+            });
+        }
+        if b.mood < 30 {
+            return Some("Watch a show".to_string());
+        }
+        if let Some(c) = &self.contract {
+            let left = c.deadline_tick.saturating_sub(self.tick);
+            return Some(format!("Deliver contract: {} ({left} ticks)", c.title));
+        }
+        if self.standing() == Standing::Wanted {
+            let cost = self.fine_cost();
+            return Some(format!(
+                "Pay the fine (${:.2}) to end the chase",
+                cost as f64 / 100.0
+            ));
+        }
+        let pay0 = self.jobs.first().map(|j| j.0).unwrap_or(0);
+        if b.money < pay0.max(100) {
+            if let Some((res, units)) = self.job_requirement(0) {
+                let have = self.units(id, res);
+                if have < units {
+                    return Some(format!("Code {} ({have}/{units})", res.name()));
+                }
+            }
+            return Some("Work a job (Work 0/1)".to_string());
+        }
+        if !self.hosts.get(&1).is_some_and(|h| h.firewall()) {
+            if let Some(price) = self
+                .shops
+                .iter()
+                .flat_map(|s| s.shop.stock.get("firewall"))
+                .map(|l| l.price_cents)
+                .min()
+            {
+                let bank = self
+                    .accts
+                    .get(&id.0)
+                    .and_then(|a| self.ledger.balance(*a).ok())
+                    .unwrap_or(0);
+                let funds = b.money + bank;
+                let tag = format!("${:.2}", price as f64 / 100.0);
+                if funds >= price {
+                    return Some(format!("Buy the firewall ({tag})"));
+                }
+                if funds * 2 >= price {
+                    return Some(format!("Save up for the firewall ({tag})"));
+                }
+            }
+        }
+        let host = self.hosts.get(&1);
+        let has_prog = host
+            .map(|h| h.progs.values().any(|p| p.owner == id))
+            .unwrap_or(false);
+        if !has_prog {
+            return Some("Farm a producer on the Deck".to_string());
+        }
+        let scanned = host.map(|h| h.scanned(id)).unwrap_or(false);
+        if !scanned {
+            return Some("Scan host 1 on the Deck".to_string());
+        }
+        let breached = host.map(|h| h.breached).unwrap_or(false);
+        if !breached {
+            return Some("Exploit a vuln on host 1".to_string());
+        }
+        if self.record_mass() > 0.0 {
+            return Some("Pay the fine to clear your record".to_string());
+        }
+        if !self.license().granted {
+            return Some("Apply for a license (3 threat kills)".to_string());
+        }
+        if b.mind.mindpower >= 5 {
+            return Some("Jack into the Veil".to_string());
+        }
+        None
+    }
+
     pub fn next_at(&self, id: EntityId) -> u64 {
         self.beings
             .get(&id.0)
@@ -4732,6 +4834,42 @@ mod tests {
         // Installed: goal retires back to settled.
         w.ensure_host(crate::ids::HostId(1)).set_firewall(true);
         assert!(w.advise(EntityId(1)).starts_with("Settled"));
+    }
+
+    #[test]
+    fn tutorial_hint_walks_the_survival_and_work_arc() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        // Hungry and broke: food first.
+        w.set_needs(EntityId(1), 10, 70, 10, 0);
+        assert!(
+            w.tutorial_hint(EntityId(1))
+                .unwrap()
+                .contains("Buy a ration"),
+            "{:?}",
+            w.tutorial_hint(EntityId(1))
+        );
+        // Component gate: with no stock, the hint names the blocker.
+        w.set_needs(EntityId(1), 80, 70, 10, 3);
+        assert!(
+            w.tutorial_hint(EntityId(1)).unwrap().contains("Code loop"),
+            "{:?}",
+            w.tutorial_hint(EntityId(1))
+        );
+        // Stocked and funded: the firewall branch is skipped (no shop) and
+        // the arc moves straight to the Deck.
+        w.ensure_host(HostId(1))
+            .add_stock(EntityId(1), crate::deck::Res::Loop, 4);
+        w.set_needs(EntityId(1), 80, 70, 2000, 3);
+        assert!(
+            w.tutorial_hint(EntityId(1))
+                .unwrap()
+                .contains("Farm a producer"),
+            "{:?}",
+            w.tutorial_hint(EntityId(1))
+        );
+        // Unknown actor: no hint.
+        assert_eq!(w.tutorial_hint(EntityId(99)), None);
     }
 
     #[test]
