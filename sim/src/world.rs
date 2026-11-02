@@ -21,7 +21,7 @@ use crate::shop::Shop;
 use crate::street::{gen_section, gen_section_weighted, Ports, Section};
 use crate::veil::Veil;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Dir {
@@ -575,6 +575,9 @@ pub struct World {
     /// Multi-turn crack progress against a target's mailbox (design/04).
     #[serde(default)]
     mail_crack: BTreeMap<u64, u32>,
+    /// Mailboxes that have been cracked (progress reached difficulty).
+    #[serde(default)]
+    cracked_mail: BTreeSet<u64>,
 }
 
 /// Card costs matching data/cards.yaml (design/03: cards consume to fire).
@@ -667,6 +670,7 @@ impl World {
             employer_rep: BTreeMap::new(),
             escrow: None,
             mail_crack: BTreeMap::new(),
+            cracked_mail: BTreeSet::new(),
         }
     }
 
@@ -710,6 +714,12 @@ impl World {
 
     pub fn active_contract(&self) -> Option<&Contract> {
         self.contract.as_ref()
+    }
+
+    /// Whether a target's mailbox has been cracked (progress reached
+    /// difficulty).
+    pub fn is_mail_cracked(&self, target: EntityId) -> bool {
+        self.cracked_mail.contains(&target.0)
     }
 
     pub fn employer_reputation(&self, employer: EntityId) -> i32 {
@@ -2991,7 +3001,15 @@ impl World {
                 }
                 let prog = self.mail_crack.entry(target.0).or_insert(0);
                 *prog += 1;
-                if *prog >= 3 {
+                let difficulty = self
+                    .hosts
+                    .values()
+                    .find(|h| h.owner() == Some(target))
+                    .and_then(|h| h.account(1))
+                    .map(|a| a.crack_difficulty)
+                    .unwrap_or(3);
+                if *prog >= difficulty {
+                    self.cracked_mail.insert(target.0);
                     extra_kinds.push("mail_cracked".to_string());
                 }
                 kind = "cracked_mail";
@@ -5028,6 +5046,32 @@ mod tests {
             },
         });
         assert!(r.is_ok(), "{:?}", r.err());
+    }
+
+    #[test]
+    fn crack_mail_tracks_progress_and_cracks() {
+        let mut w = World::new(1);
+        w.spawn(EntityId(1), pos(8, 8), 1);
+        w.ensure_host(HostId(1));
+        // Load a Mailer+ (any program on an owned host).
+        let def = crate::programs::default_for(ProgramKind::Killer);
+        w.hosts
+            .get_mut(&1)
+            .unwrap()
+            .load_kind(EntityId(200), EntityId(1), CellPos(0, 0), &def)
+            .unwrap();
+        w.hosts.get_mut(&1).unwrap().set_owner(Some(EntityId(1)));
+        // Crack three times to complete.
+        for _ in 0..3 {
+            let r = w.apply(&Intent {
+                actor: EntityId(1),
+                verb: Verb::CrackMail {
+                    target: EntityId(2),
+                },
+            });
+            assert!(r.is_ok(), "{:?}", r.err());
+        }
+        assert!(w.is_mail_cracked(EntityId(2)));
     }
 
     #[test]
