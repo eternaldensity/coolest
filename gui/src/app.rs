@@ -818,6 +818,107 @@ impl Shell {
                 }
             }
             Tab::Deck => {
+                // Host-level surfaces are always available, even with no
+                // cell selected.
+                if let Some(host) = self.server.world.host(HostId(1)) {
+                    let files = host.files();
+                    if !files.is_empty() {
+                        crate::theme::card(ui, "files", crate::theme::MUTED, |ui| {
+                            for (name, file) in files {
+                                ui.horizontal(|ui| {
+                                    crate::theme::chip(
+                                        ui,
+                                        if file.executable { "EXE" } else { "TXT" },
+                                        if file.executable {
+                                            crate::theme::OLDNET
+                                        } else {
+                                            crate::theme::MUTED
+                                        },
+                                    );
+                                    ui.label(name);
+                                    crate::theme::label(
+                                        ui,
+                                        format!("{} sectors", file.size_sectors),
+                                    );
+                                });
+                            }
+                        });
+                    }
+                    let accounts = host.accounts();
+                    if !accounts.is_empty() {
+                        crate::theme::card(ui, "accounts", crate::theme::MUTED, |ui| {
+                            for (id, acct) in accounts {
+                                crate::theme::stat_row(
+                                    ui,
+                                    &acct.handle,
+                                    if acct.admin { "admin" } else { "guest" },
+                                    if acct.admin {
+                                        crate::theme::OLDNET
+                                    } else {
+                                        crate::theme::MUTED
+                                    },
+                                )
+                                .on_hover_text(format!(
+                                    "Account {} · crack difficulty {} · home {}",
+                                    id, acct.crack_difficulty, acct.home
+                                ));
+                            }
+                        });
+                    }
+                }
+                if let Some(host) = self.server.world.host(HostId(1)) {
+                    let files = host.files();
+                    if !files.is_empty() {
+                        crate::theme::card(ui, "files", crate::theme::MUTED, |ui| {
+                            for (name, file) in files {
+                                ui.horizontal(|ui| {
+                                    crate::theme::chip(
+                                        ui,
+                                        if file.executable { "EXE" } else { "TXT" },
+                                        if file.executable {
+                                            crate::theme::OLDNET
+                                        } else {
+                                            crate::theme::MUTED
+                                        },
+                                    )
+                                    .on_hover_text(
+                                        if file.executable {
+                                            "Executable file."
+                                        } else {
+                                            "Data file."
+                                        },
+                                    );
+                                    ui.label(name);
+                                    crate::theme::label(
+                                        ui,
+                                        format!("{} sectors", file.size_sectors),
+                                    );
+                                });
+                            }
+                        });
+                    }
+                    let accounts = host.accounts();
+                    if !accounts.is_empty() {
+                        crate::theme::card(ui, "accounts", crate::theme::MUTED, |ui| {
+                            for (id, acct) in accounts {
+                                crate::theme::stat_row(
+                                    ui,
+                                    &acct.handle,
+                                    if acct.admin { "admin" } else { "guest" },
+                                    if acct.admin {
+                                        crate::theme::OLDNET
+                                    } else {
+                                        crate::theme::MUTED
+                                    },
+                                )
+                                .on_hover_text(format!(
+                                    "Account {} · crack difficulty {} · home {}",
+                                    id, acct.crack_difficulty, acct.home
+                                ));
+                            }
+                        });
+                    }
+                }
                 let Some((x, y)) = self.sel else {
                     crate::theme::card(ui, "selection", crate::theme::BETANET, |ui| {
                         crate::theme::label(ui, "Select a cell in the arena.");
@@ -4740,6 +4841,16 @@ mod tests {
                 assert!(h.has_text(header), "missing wide header {header:?}");
             }
             assert!(h.has_text("Tile (8,8)"), "inspector missing at 1920");
+        }
+
+        #[test]
+        fn deck_inspector_shows_host_files_and_accounts() {
+            let mut h = Harness::new();
+            h.click("Deck");
+            assert!(h.has_text("FILES"), "text: {:?}", h.labels());
+            assert!(h.has_text("ACCOUNTS"), "text: {:?}", h.labels());
+            assert!(h.has_text("readme.txt"), "text: {:?}", h.labels());
+            assert!(h.has_text("guest"), "text: {:?}", h.labels());
         }
 
         #[test]
