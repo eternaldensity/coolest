@@ -2568,8 +2568,12 @@ impl World {
                     "missing",
                 ))?;
                 acct.crack_progress += 1;
-                if acct.crack_progress >= acct.crack_difficulty {
+                let verified = acct.verify_password(acct.handle.len() as u64);
+                if acct.crack_progress >= acct.crack_difficulty && verified {
                     extra_kinds.push("account_cracked".to_string());
+                } else if acct.crack_progress >= acct.crack_difficulty {
+                    // Password hash didn't verify: require more turns.
+                    acct.crack_progress = acct.crack_difficulty.saturating_sub(1);
                 }
                 kind = "cracked_account";
             }
