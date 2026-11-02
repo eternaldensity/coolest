@@ -220,3 +220,15 @@ cargo run -q -p client-web       # scripted survival/items/fight/arrest/veil tou
 Then `git status` should be clean apart from your intended change. If you
 add a `Verb`, also add it to the fuzz generator in `tools/src/lib.rs`
 (`fuzz_verb`) so it stays replay-checked, and bump the roll range there.
+
+## v0.7 Host Dungeon core (landed)
+
+- Host data model: `MemZone`, `Account`, `HostFile` in `sim/src/deck.rs`,
+  with `#[serde(default)]` fields on `Host` (zones, accounts, files) and
+  `Host::new` seeds.
+- Verbs: `DeckListFiles`, `DeckReadFile`, `DeckDecompile`, `DeckTakeover`.
+- GUI: host header chips (`files N`, `accounts N`), zone chip in the Deck
+  inspector.
+- Tools: new verbs in `fuzz_verb` (range 206–209).
+- Deferred: banking quorum, mirrored records, mailer hardening, zone
+  rendering, account cracking. See `docs/V0.7-PLAN.md`.
