@@ -1139,6 +1139,7 @@ impl Shell {
                     "Save",
                     "Load",
                     "Help",
+                    "Objective",
                 ];
                 let mut picked = None;
                 for cmd in commands {
@@ -1189,6 +1190,10 @@ impl Shell {
             "Help" => self.say(
                 "Ctrl-K palette · Tab views · arrows/hjkl move · ? for command help".to_string(),
             ),
+            "Objective" => match self.server.world.tutorial_hint(self.actor) {
+                Some(hint) => self.say(format!("NEXT: {hint}")),
+                None => self.say("NEXT: none — you're settled.".to_string()),
+            },
             _ => {}
         }
     }
@@ -4710,6 +4715,13 @@ mod tests {
                 "nearby counter missing; text: {:?}",
                 h.labels()
             );
+        }
+
+        #[test]
+        fn briefing_shows_next_tutorial_step() {
+            let h = Harness::new();
+            assert!(h.has_text("NEXT"), "text: {:?}", h.labels());
+            assert!(h.has_text("Farm a producer"), "text: {:?}", h.labels());
         }
 
         #[test]
