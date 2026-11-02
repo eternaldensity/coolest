@@ -8,7 +8,8 @@ use crate::deck::{CellPos, Host};
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
 use crate::items::{Inventory, ItemTable};
-use crate::ledger::{Ledger, Mail, Mailbox};
+use crate::ledger::{Mail, Mailbox};
+use crate::ledger_service::LedgerService;
 use crate::net::NetGraph;
 use crate::pos::Pos;
 use crate::power::PowerGrid;
@@ -459,7 +460,7 @@ pub struct World {
     #[serde(default = "default_job_reqs")]
     job_reqs: Vec<(u8, u32)>,
     #[serde(default)]
-    pub ledger: Ledger,
+    pub ledger: LedgerService,
     #[serde(default)]
     accts: BTreeMap<u64, u64>,
     #[serde(default)]
@@ -619,7 +620,7 @@ impl World {
             beings: BTreeMap::new(),
             jobs: DEFAULT_JOBS.to_vec(),
             job_reqs: default_job_reqs(),
-            ledger: Ledger::new(),
+            ledger: LedgerService::new(),
             accts: BTreeMap::new(),
             shops: Vec::new(),
             npcs: BTreeMap::new(),

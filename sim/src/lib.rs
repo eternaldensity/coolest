@@ -10,6 +10,7 @@ pub mod error;
 pub mod ids;
 pub mod items;
 pub mod ledger;
+pub mod ledger_service;
 pub mod mailer;
 pub mod net;
 pub mod portal;
@@ -38,11 +39,12 @@ pub use data::{
     parse_cards, parse_contracts, parse_dialogues, parse_districts, parse_items, parse_jobs,
     parse_kinds, parse_vulns, CardDef, CardTable, DistrictDef, JobDef, VulnDef,
 };
-pub use deck::{AttackOutcome, CellPos, Fx, Host, HostArch, Mod, Res};
+pub use deck::{Account, AttackOutcome, CellPos, Fx, Host, HostArch, HostFile, MemZone, Mod, Res};
 pub use error::SimError;
 pub use ids::{EntityId, HostId, TileId};
 pub use items::{Inventory, ItemDef, ItemEffect, ItemTable, Slot};
 pub use ledger::{Ledger, Mailbox, MAIL_CAP, SPAM_CAP_PER_HOST_DAY};
+pub use ledger_service::LedgerService;
 pub use mailer::{Mailer, ZombieNet};
 pub use net::{LinkKind, NetGraph, NetKind, Route};
 pub use portal::{Portal, PortalNet};

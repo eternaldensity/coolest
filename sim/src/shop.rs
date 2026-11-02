@@ -1,5 +1,5 @@
 use crate::error::SimError;
-use crate::ledger::Ledger;
+use crate::ledger_service::LedgerService;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -64,7 +64,12 @@ impl Shop {
     }
 
     /// Customer purchase: transfer price buyer→till, decrement stock.
-    pub fn buy(&mut self, ledger: &mut Ledger, buyer: u64, item: &str) -> Result<(), SimError> {
+    pub fn buy(
+        &mut self,
+        ledger: &mut LedgerService,
+        buyer: u64,
+        item: &str,
+    ) -> Result<(), SimError> {
         self.buy_with_cash(ledger, buyer, 0, item)
     }
 
@@ -74,7 +79,7 @@ impl Shop {
     /// Fails before moving anything when the bank part overdraws.
     pub fn buy_with_cash(
         &mut self,
-        ledger: &mut Ledger,
+        ledger: &mut LedgerService,
         buyer: u64,
         cash: i64,
         item: &str,
@@ -108,7 +113,7 @@ impl Shop {
     /// Restock one line: till pays the supplier, qty tops up.
     pub fn restock(
         &mut self,
-        ledger: &mut Ledger,
+        ledger: &mut LedgerService,
         supplier: u64,
         item: &str,
     ) -> Result<(), SimError> {
@@ -143,7 +148,7 @@ impl Shop {
 
     /// Catalogue auto-order: restock every line below threshold that the
     /// till can cover. Returns restocked item ids.
-    pub fn auto_order(&mut self, ledger: &mut Ledger, supplier: u64) -> Vec<String> {
+    pub fn auto_order(&mut self, ledger: &mut LedgerService, supplier: u64) -> Vec<String> {
         let mut done = Vec::new();
         let ids: Vec<String> = self.stock.keys().cloned().collect();
         for id in ids {
@@ -167,8 +172,8 @@ mod tests {
     use super::*;
     use crate::ids::{EntityId, HostId};
 
-    fn setup() -> (Ledger, u64, u64, u64, Shop) {
-        let mut l = Ledger::new();
+    fn setup() -> (LedgerService, u64, u64, u64, Shop) {
+        let mut l = LedgerService::new();
         let buyer = l.open(EntityId(1), HostId(1));
         let supplier = l.open(EntityId(9), HostId(9));
         let till = l.open(EntityId(2), HostId(2));

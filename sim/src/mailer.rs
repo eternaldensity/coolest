@@ -1,6 +1,7 @@
 use crate::error::SimError;
 use crate::ids::{EntityId, HostId};
-use crate::ledger::{Ledger, Mail, Mailbox};
+use crate::ledger::{Mail, Mailbox};
+use crate::ledger_service::LedgerService;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -52,7 +53,12 @@ impl ZombieNet {
 
     /// One day's spam run. `accts` maps owner -> ledger account.
     /// Returns total paid (capped per host/day inside the ledger).
-    pub fn payout_day(&self, ledger: &mut Ledger, day: u64, accts: &BTreeMap<u64, u64>) -> i64 {
+    pub fn payout_day(
+        &self,
+        ledger: &mut LedgerService,
+        day: u64,
+        accts: &BTreeMap<u64, u64>,
+    ) -> i64 {
         let mut total = 0;
         for (host, owner) in &self.hosts {
             if let Some(acct) = accts.get(owner) {
@@ -93,7 +99,7 @@ mod tests {
 
     #[test]
     fn zombies_pay_capped_until_cleaned() {
-        let mut l = Ledger::new();
+        let mut l = LedgerService::new();
         let acct = l.open(EntityId(1), HostId(1));
         let mut accts = BTreeMap::new();
         accts.insert(1u64, acct);
