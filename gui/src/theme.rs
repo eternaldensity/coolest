@@ -54,6 +54,18 @@ pub fn resource_color(res: sim::Res) -> Color32 {
     }
 }
 
+/// Tint for a host RAM zone. Public is transparent so the program glyphs
+/// stay readable; the others paint a small corner marker.
+pub fn zone_color(zone: sim::MemZone) -> Color32 {
+    match zone {
+        sim::MemZone::Public => alpha(LINE, 0),
+        sim::MemZone::Shared => alpha(SUCCESS, 70),
+        sim::MemZone::Private => alpha(DANGER, 70),
+        sim::MemZone::AccessPublic => alpha(BETANET, 70),
+        sim::MemZone::AccessPrivate => alpha(VEIL, 80),
+    }
+}
+
 pub fn apply(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(

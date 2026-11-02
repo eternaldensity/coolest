@@ -2994,21 +2994,37 @@ impl Shell {
                                         "Empty cell. Click to select.".to_string(),
                                     )
                                 };
-                            if ui
-                                .add_sized(
-                                    [30.0, 30.0],
-                                    egui::Button::new(
-                                        egui::RichText::new(glyph)
-                                            .monospace()
-                                            .size(11.0)
-                                            .color(color),
-                                    )
-                                    .fill(fill)
-                                    .stroke(egui::Stroke::new(1.0, stroke_color)),
+                            let zone_tint = self
+                                .server
+                                .world
+                                .host(HostId(1))
+                                .and_then(|h| {
+                                    let c = crate::theme::zone_color(h.zone_at(x, y));
+                                    if c.a() > 0 {
+                                        Some(c)
+                                    } else {
+                                        None
+                                    }
+                                });
+                            let resp = ui.add_sized(
+                                [30.0, 30.0],
+                                egui::Button::new(
+                                    egui::RichText::new(glyph)
+                                        .monospace()
+                                        .size(11.0)
+                                        .color(color),
                                 )
-                                .on_hover_text(tip)
-                                .clicked()
-                            {
+                                .fill(fill)
+                                .stroke(egui::Stroke::new(1.0, stroke_color)),
+                            );
+                            if let Some(c) = zone_tint {
+                                let r = egui::Rect::from_min_size(
+                                    resp.rect.left_top() + egui::vec2(2.0, 2.0),
+                                    egui::vec2(5.0, 5.0),
+                                );
+                                ui.painter().rect_filled(r, 0.0, c);
+                            }
+                            if resp.on_hover_text(tip).clicked() {
                                 self.sel = Some((x, y));
                             }
                         }
